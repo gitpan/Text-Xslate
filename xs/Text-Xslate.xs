@@ -23,31 +23,11 @@
 
 #define TXCODE_W_SV  (TXARGf_SV)
 #define TXCODE_W_INT (TXARGf_SV | TXARGf_INT)
+#define TXCODE_W_VAR (TXARGf_SV | TXARGf_INT | TXARGf_VAR)
 #define TXCODE_W_KEY (TXARGf_SV | TXARGf_KEY)
-#define TXCODE_W_VAR (TXARGf_SV | TXARGf_VAR | TXARGf_VAR)
 
 #define TX_st (txst)
 #define TX_op (&(TX_st->code[TX_st->pc]))
-
-#ifdef DEBUGGING
-#define TX_st_sa  *tx_sv_safe(aTHX_ &(TX_st->sa),  "TX_st->sa",  __FILE__, __LINE__)
-#define TX_st_sb  *tx_sv_safe(aTHX_ &(TX_st->sb),  "TX_st->sb",  __FILE__, __LINE__)
-#define TX_op_arg *tx_sv_safe(aTHX_ &(TX_op->arg), "TX_st->arg", __FILE__, __LINE__)
-static SV**
-tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, int const l) {
-    if(UNLIKELY(*svp == NULL)) {
-        croak("panic: %s is NULL at %s line %d.\n", name, f, l);
-    }
-    else if(UNLIKELY(SvIS_FREED(*svp))) {
-        croak("panic: %s is a freed sv at %s line %d.\n", name, f, l);
-    }
-    return svp;
-}
-#else
-#define TX_st_sa  (TX_st->sa)
-#define TX_st_sb  (TX_st->sb)
-#define TX_op_arg (TX_op->arg)
-#endif
 
 #define TX_pop()   (*(PL_stack_sp--))
 
@@ -76,8 +56,8 @@ struct tx_state_s {
     /* variables */
 
     HV* vars;    /* template variables */
-    AV* iter_c;  /* iterating containers */
-    AV* iter_i;  /* iterators */
+    AV* locals;  /* local variables */
+    SV** pad;    /* AvARRAY(locals) */
 
     HV* function;
     SV* error_handler;
@@ -93,6 +73,42 @@ struct tx_code_s {
     SV* arg;
 };
 
+#ifdef DEBUGGING
+#define TX_st_sa  *tx_sv_safe(aTHX_ &(TX_st->sa),  "TX_st->sa",  __FILE__, __LINE__)
+#define TX_st_sb  *tx_sv_safe(aTHX_ &(TX_st->sb),  "TX_st->sb",  __FILE__, __LINE__)
+#define TX_op_arg *tx_sv_safe(aTHX_ &(TX_op->arg), "TX_st->arg", __FILE__, __LINE__)
+static SV**
+tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, int const l) {
+    if(UNLIKELY(*svp == NULL)) {
+        croak("panic: %s is NULL at %s line %d.\n", name, f, l);
+    }
+    else if(UNLIKELY(SvIS_FREED(*svp))) {
+        croak("panic: %s is a freed sv at %s line %d.\n", name, f, l);
+    }
+    return svp;
+}
+
+#define TX_lvarx(st, ix) *tx_fetch_lvar(aTHX_ (st), ix)
+
+static SV**
+tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_id) {
+    if(AvFILLp(st->locals) < lvar_id) {
+        croak("panic: local variable storage is smaller (%d < %d)",
+            (int)AvFILLp(st->locals), (int)lvar_id);
+    }
+    if(!st->pad) {
+        croak("panic: no local variable storage");
+    }
+    return &( (st->pad)[lvar_id] );
+}
+#else
+#define TX_st_sa        (TX_st->sa)
+#define TX_st_sb        (TX_st->sb)
+#define TX_op_arg       (TX_op->arg)
+#define TX_lvarx(st, ix) ((st)->pad[ix])
+#endif
+
+#define TX_lvar(ix) TX_lvarx(TX_st, ix)
 
 #define TXCODE_literal_i TXCODE_literal
 
@@ -204,11 +220,13 @@ XSLATE(move_sa_to_sb) {
     TX_st->pc++;
 }
 
-XSLATE(swap) { /* swap sa and sb */
-    SV* const tmp = TX_st_sa;
-    TX_st_sa      = TX_st_sb;
-    TX_st_sb      = tmp;
+XSLATE_w_var(store_to_lvar) {
+    sv_setsv(TX_lvar(SvIVX(TX_op_arg)), TX_st_sa);
+    TX_st->pc++;
+}
 
+XSLATE_w_var(load_lvar_to_sb) {
+    TX_st_sb = TX_lvar(SvIVX(TX_op_arg));
     TX_st->pc++;
 }
 
@@ -222,11 +240,6 @@ XSLATE(push) {
 
 XSLATE(pop) {
     TX_st_sa = TX_pop();
-
-    TX_st->pc++;
-}
-XSLATE(pop_to_sb) {
-    TX_st_sb = TX_pop();
 
     TX_st->pc++;
 }
@@ -253,7 +266,7 @@ XSLATE_w_sv(literal) {
 /* the same as literal, but make sure its argument is an integer */
 XSLATE_w_int(literal_i);
 
-XSLATE_w_key(fetch) { /* fetch a field from the top */
+XSLATE_w_key(fetch_s) { /* fetch a field from the top */
     HV* const vars = TX_st->vars;
     HE* const he   = hv_fetch_ent(vars, TX_op_arg, FALSE, 0U);
 
@@ -361,26 +374,23 @@ XSLATE_w_sv(print_raw_s) {
 XSLATE_w_var(for_start) {
     SV* const avref = TX_st_sa;
     IV  const id    = SvIVX(TX_op_arg);
-    AV* av;
 
     if(!(SvROK(avref) && SvTYPE(SvRV(avref)) == SVt_PVAV)) {
         croak("Iterator variables must be an ARRAY reference, not %s",
             tx_neat(aTHX_ avref));
     }
 
-    av = (AV*)SvRV(avref);
-    SvREFCNT_inc_simple_void_NN(av);
-    (void)av_store(TX_st->iter_c, id, (SV*)av);
-    sv_setiv(*av_fetch(TX_st->iter_i, id, TRUE), 0); /* (re)set iterator */
+    sv_setsv(TX_lvar(id), avref);
+    sv_setiv(TX_lvar(id+1), 0); /* (re)set iterator */
 
     TX_st->pc++;
 }
 
-XSLATE_w_int(for_next) {
+XSLATE_w_var(for_next) {
     SV* const idsv = TX_st_sa;
     IV  const id   = SvIVX(idsv); /* by literal_i */
-    AV* const av   = (AV*)AvARRAY(TX_st->iter_c)[ id ];
-    SV* const i    =      AvARRAY(TX_st->iter_i)[ id ];
+    AV* const av   = (AV*)SvRV(TX_lvar(id  ));
+    SV* const i    =           TX_lvar(id+1);
 
     assert(SvTYPE(av) == SVt_PVAV);
     assert(SvIOK(i));
@@ -395,21 +405,16 @@ XSLATE_w_int(for_next) {
         /* don't need to clear iterator variables,
            they will be cleaned at the end of render() */
 
-        /* IV const id = SvIV(TX_op_arg); */
-        /* av_delete(TX_st->iter_c, id, G_DISCARD); */
-        /* av_delete(TX_st->iter_i, id, G_DISCARD); */
-
         TX_st->pc++;
     }
 
-    FREETMPS;
 }
 
 XSLATE_w_int(fetch_iter) {
     SV* const idsv = TX_op_arg;
     IV  const id   = SvIVX(idsv);
-    AV* const av   = (AV*)AvARRAY(TX_st->iter_c)[ id ];
-    SV* const i    =      AvARRAY(TX_st->iter_i)[ id ];
+    AV* const av   = (AV*)SvRV(TX_lvar(id  ));
+    SV* const i    =           TX_lvar(id+1);
     SV** svp;
 
     assert(SvTYPE(av) == SVt_PVAV);
@@ -456,8 +461,9 @@ XSLATE(mod) {
 }
 
 /* NOTE: XSLATE_w_sv will make it faster, but it may be unimportant */
-XSLATE(concat) {
-    SV* const sv = sv_mortalcopy(TX_st_sb);
+XSLATE_w_sv(concat) {
+    SV* const sv = TX_op_arg;
+    sv_setsv_nomg(sv, TX_st_sb);
     sv_catsv_nomg(sv, TX_st_sa);
 
     TX_st_sa = sv;
@@ -592,10 +598,6 @@ XSLATE_w_int(pc_inc) {
     TX_st->pc += SvIVX(TX_op_arg);
 }
 
-XSLATE_w_int(goto) {
-    TX_st->pc = SvIVX(TX_op_arg);
-}
-
 XS(XS_Text__Xslate__error); /* -Wmissing-prototypes */
 XS(XS_Text__Xslate__error) {
     dVAR; dXSARGS;
@@ -623,9 +625,6 @@ xslate_exec(pTHX_ const tx_state_t* const base, SV* const output, HV* const hv) 
     st.output = output;
     st.vars   = hv;
 
-    ENTER;
-    SAVETMPS;
-
     /* local $SIG{__WARN__} = \&error_handler */
     SAVESPTR(PL_warnhook);
     PL_warnhook = st.error_handler;
@@ -647,9 +646,6 @@ xslate_exec(pTHX_ const tx_state_t* const base, SV* const output, HV* const hv) 
             croak("panic: pogram counter has not been changed on [%d]", (int)st.pc);
         }
     }
-
-    FREETMPS;
-    LEAVE;
 
     return st.output;
 }
@@ -689,8 +685,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     SvREFCNT_dec(st->error_handler);
     SvREFCNT_dec(st->function);
 
-    SvREFCNT_dec(st->iter_c);
-    SvREFCNT_dec(st->iter_i);
+    SvREFCNT_dec(st->locals);
 
     SvREFCNT_dec(st->targ);
 
@@ -730,6 +725,7 @@ CODE:
     I32 const len = av_len(proto) + 1;
     I32 i;
     U16 l = 0;
+    I32 lvar_id_max = -1;
     tx_state_t st;
     SV** svp;
 
@@ -768,8 +764,7 @@ CODE:
     st.sb       = &PL_sv_undef;
     st.targ     = newSV(0);
 
-    st.iter_c   = newAV();
-    st.iter_i   = newAV();
+    st.locals   = newAV();
 
     Newxz(st.lines, len, U16);
 
@@ -809,10 +804,16 @@ CODE:
                 else if(tx_oparg[opnum] & TXARGf_INT) {
                     st.code[i].arg = newSViv(SvIV(*arg));
                     SvREADONLY_on(st.code[i].arg);
+
+                    if(tx_oparg[opnum] & TXARGf_VAR) { /* local variable id */
+                        I32 const id = SvIVX(st.code[i].arg) + 1; /* for-loop requires +1 */
+                        if(lvar_id_max < id) {
+                            lvar_id_max = id;
+                        }
+                    }
                 }
-                else {
+                else { /* normal sv */
                     st.code[i].arg = newSVsv(*arg);
-                    SvREADONLY_on(st.code[i].arg);
                 }
             }
             else {
@@ -831,6 +832,14 @@ CODE:
         else {
             croak("Oops: Broken code found on [%d]", (int)i);
         }
+    } /* end for */
+    if(lvar_id_max >= 0) {
+        av_fill(st.locals, lvar_id_max);
+        lvar_id_max++;
+        for(i = 0; i < lvar_id_max; i++) {
+            av_store(st.locals, i, newSV(0));
+        }
+        ((tx_state_t*)mg->mg_ptr)->pad = AvARRAY(st.locals);
     }
 }
 

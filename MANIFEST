@@ -2,10 +2,18 @@ benchmark/expr.pl
 benchmark/for.pl
 benchmark/function.pl
 benchmark/interpolate.pl
+benchmark/mobasif.pl
 benchmark/others.pl
+benchmark/template/simple.mst
+benchmark/template/simple.tx
 Changes
-example/for.tx
-example/hello.tx
+example/hello.pl
+example/inherit.pl
+example/list.pl
+example/template/base.tx
+example/template/child.tx
+example/template/hello.tx
+example/template/list.tx
 inc/Module/Install.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
@@ -26,7 +34,6 @@ README
 t/000_load.t
 t/010_internals/001_parse.t
 t/010_internals/002_compile.t
-t/010_internals/100_vmcode.t
 t/010_internals/200_leaktrace.t
 t/020_basic/001_interpolate.t
 t/020_basic/002_field.t
@@ -35,6 +42,7 @@ t/020_basic/004_if.t
 t/020_basic/005_rel_ops.t
 t/020_basic/006_arith_ops.t
 t/020_basic/007_call.t
+t/020_basic/008_goto_address.t
 t/020_basic/100_examples.t
 t/030_interface/001_files.t
 t/030_interface/002_strings.t
@@ -51,3 +59,4 @@ xt/01_podspell.t
 xt/02_pod.t
 xt/03_pod-coverage.t
 xt/04_synopsis.t
+xt/05_vars.t

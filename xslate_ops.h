@@ -4,15 +4,15 @@
 /* forward decl */
 XSLATE(noop);
 XSLATE(move_sa_to_sb);
-XSLATE(swap); /* swap sa and sb */
+XSLATE_w_var(store_to_lvar);
+XSLATE_w_var(load_lvar_to_sb);
 XSLATE(push);
 XSLATE(pop);
-XSLATE(pop_to_sb);
 XSLATE(pushmark);
 XSLATE(nil);
 XSLATE_w_sv(literal);
 XSLATE_w_int(literal_i);
-XSLATE_w_key(fetch); /* fetch a field from the top */
+XSLATE_w_key(fetch_s); /* fetch a field from the top */
 XSLATE(fetch_field); /* fetch a field from a variable (bin operator) */
 XSLATE_w_key(fetch_field_s); /* fetch a field from a variable (for literal) */
 XSLATE(print);
@@ -20,14 +20,14 @@ XSLATE_w_sv(print_s);
 XSLATE(print_raw);
 XSLATE_w_sv(print_raw_s);
 XSLATE_w_var(for_start);
-XSLATE_w_int(for_next);
+XSLATE_w_var(for_next);
 XSLATE_w_int(fetch_iter);
 XSLATE(add);
 XSLATE(sub);
 XSLATE(mul);
 XSLATE(div);
 XSLATE(mod);
-XSLATE(concat);
+XSLATE_w_sv(concat);
 XSLATE(filt);
 XSLATE_w_int(and);
 XSLATE_w_int(or);
@@ -42,20 +42,19 @@ XSLATE(ge);
 XSLATE_w_key(function);
 XSLATE(call);
 XSLATE_w_int(pc_inc);
-XSLATE_w_int(goto);
 
 enum tx_opcode_t {
     TXOP_noop, /* 0 */
     TXOP_move_sa_to_sb, /* 1 */
-    TXOP_swap, /* 2 */
-    TXOP_push, /* 3 */
-    TXOP_pop, /* 4 */
-    TXOP_pop_to_sb, /* 5 */
+    TXOP_store_to_lvar, /* 2 */
+    TXOP_load_lvar_to_sb, /* 3 */
+    TXOP_push, /* 4 */
+    TXOP_pop, /* 5 */
     TXOP_pushmark, /* 6 */
     TXOP_nil, /* 7 */
     TXOP_literal, /* 8 */
     TXOP_literal_i, /* 9 */
-    TXOP_fetch, /* 10 */
+    TXOP_fetch_s, /* 10 */
     TXOP_fetch_field, /* 11 */
     TXOP_fetch_field_s, /* 12 */
     TXOP_print, /* 13 */
@@ -85,22 +84,21 @@ enum tx_opcode_t {
     TXOP_function, /* 37 */
     TXOP_call, /* 38 */
     TXOP_pc_inc, /* 39 */
-    TXOP_goto, /* 40 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
 static const tx_exec_t tx_opcode[] = {
     TXCODE_noop,
     TXCODE_move_sa_to_sb,
-    TXCODE_swap,
+    TXCODE_store_to_lvar,
+    TXCODE_load_lvar_to_sb,
     TXCODE_push,
     TXCODE_pop,
-    TXCODE_pop_to_sb,
     TXCODE_pushmark,
     TXCODE_nil,
     TXCODE_literal,
     TXCODE_literal_i,
-    TXCODE_fetch,
+    TXCODE_fetch_s,
     TXCODE_fetch_field,
     TXCODE_fetch_field_s,
     TXCODE_print,
@@ -130,22 +128,21 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_function,
     TXCODE_call,
     TXCODE_pc_inc,
-    TXCODE_goto,
     NULL
 }; /* tx_opcode[] */
 
 static const U8 tx_oparg[] = {
     0U, /* noop */
     0U, /* move_sa_to_sb */
-    0U, /* swap */
+    TXCODE_W_VAR, /* store_to_lvar */
+    TXCODE_W_VAR, /* load_lvar_to_sb */
     0U, /* push */
     0U, /* pop */
-    0U, /* pop_to_sb */
     0U, /* pushmark */
     0U, /* nil */
     TXCODE_W_SV, /* literal */
     TXCODE_W_INT, /* literal_i */
-    TXCODE_W_KEY, /* fetch */
+    TXCODE_W_KEY, /* fetch_s */
     0U, /* fetch_field */
     TXCODE_W_KEY, /* fetch_field_s */
     0U, /* print */
@@ -153,14 +150,14 @@ static const U8 tx_oparg[] = {
     0U, /* print_raw */
     TXCODE_W_SV, /* print_raw_s */
     TXCODE_W_VAR, /* for_start */
-    TXCODE_W_INT, /* for_next */
+    TXCODE_W_VAR, /* for_next */
     TXCODE_W_INT, /* fetch_iter */
     0U, /* add */
     0U, /* sub */
     0U, /* mul */
     0U, /* div */
     0U, /* mod */
-    0U, /* concat */
+    TXCODE_W_SV, /* concat */
     0U, /* filt */
     TXCODE_W_INT, /* and */
     TXCODE_W_INT, /* or */
@@ -175,22 +172,21 @@ static const U8 tx_oparg[] = {
     TXCODE_W_KEY, /* function */
     0U, /* call */
     TXCODE_W_INT, /* pc_inc */
-    TXCODE_W_INT, /* goto */
 }; /* tx_oparg[] */
 
 static void
 tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(noop), newSViv(TXOP_noop));
     (void)hv_stores(ops, STRINGIFY(move_sa_to_sb), newSViv(TXOP_move_sa_to_sb));
-    (void)hv_stores(ops, STRINGIFY(swap), newSViv(TXOP_swap));
+    (void)hv_stores(ops, STRINGIFY(store_to_lvar), newSViv(TXOP_store_to_lvar));
+    (void)hv_stores(ops, STRINGIFY(load_lvar_to_sb), newSViv(TXOP_load_lvar_to_sb));
     (void)hv_stores(ops, STRINGIFY(push), newSViv(TXOP_push));
     (void)hv_stores(ops, STRINGIFY(pop), newSViv(TXOP_pop));
-    (void)hv_stores(ops, STRINGIFY(pop_to_sb), newSViv(TXOP_pop_to_sb));
     (void)hv_stores(ops, STRINGIFY(pushmark), newSViv(TXOP_pushmark));
     (void)hv_stores(ops, STRINGIFY(nil), newSViv(TXOP_nil));
     (void)hv_stores(ops, STRINGIFY(literal), newSViv(TXOP_literal));
     (void)hv_stores(ops, STRINGIFY(literal_i), newSViv(TXOP_literal_i));
-    (void)hv_stores(ops, STRINGIFY(fetch), newSViv(TXOP_fetch));
+    (void)hv_stores(ops, STRINGIFY(fetch_s), newSViv(TXOP_fetch_s));
     (void)hv_stores(ops, STRINGIFY(fetch_field), newSViv(TXOP_fetch_field));
     (void)hv_stores(ops, STRINGIFY(fetch_field_s), newSViv(TXOP_fetch_field_s));
     (void)hv_stores(ops, STRINGIFY(print), newSViv(TXOP_print));
@@ -220,5 +216,4 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(function), newSViv(TXOP_function));
     (void)hv_stores(ops, STRINGIFY(call), newSViv(TXOP_call));
     (void)hv_stores(ops, STRINGIFY(pc_inc), newSViv(TXOP_pc_inc));
-    (void)hv_stores(ops, STRINGIFY(goto), newSViv(TXOP_goto));
 } /* tx_register_ops() */

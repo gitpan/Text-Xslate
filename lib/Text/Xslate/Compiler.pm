@@ -5,7 +5,8 @@ use Mouse;
 use Text::Xslate;
 use Scalar::Util ();
 
-use constant _DUMP_CODE => !!$ENV{XSLATE_DUMP_CODE};
+use constant _DUMP_ASM => ($Text::Xslate::DEBUG =~ /\b dump=asm \b/xms);
+use constant _OPTIMIZE => ($Text::Xslate::DEBUG =~ /\b optimize=(\d+) \b/xms);
 
 extends qw(Text::Xslate::Parser);
 
@@ -43,8 +44,8 @@ has lvar_id => ( # local varialbe id
 
     traits  => [qw(Counter)],
     handles => {
-        lvar_id_inc => 'inc',
-        lvar_id_dec => 'dec',
+        _lvar_id_inc => 'inc',
+        _lvar_id_dec => 'dec',
     },
 
     default => 0,
@@ -70,15 +71,15 @@ sub compile_str {
 }
 
 sub compile {
-    my($self, $str) = @_;
+    my($self, $str, $optimize) = @_;
 
     my $ast = $self->parse($str);
 
     my @code = $self->_compile_ast($ast);
 
-    $self->_optimize(\@code);
+    $self->_optimize(\@code) if $optimize // _OPTIMIZE // 1;
 
-    print STDERR $self->as_assembly(\@code) if _DUMP_CODE;
+    print $self->as_assembly(\@code) if _DUMP_ASM;
     return \@code;
 }
 
@@ -137,9 +138,10 @@ sub _generate_for {
     my $for_start = scalar @code;
     push @code, [ for_start => $lvar_id, undef, $lvar_name ];
 
-    $self->lvar_id_inc;
+    # a for statement uses two local variables (container and iterator)
+    $self->_lvar_id_inc(2);
     push @code, $self->_compile_ast($block);
-    $self->lvar_id_dec;
+    $self->_lvar_id_dec(2);
 
     push @code,
         [ literal_i => $lvar_id, undef, $lvar_name ],
@@ -183,7 +185,7 @@ sub _generate_variable {
         return [ fetch_iter => $lvar_id, $node->line, $node->id ];
     }
     else {
-        return [ fetch => $self->_variable_to_value($node), $node->line ];
+        return [ fetch_s => $self->_variable_to_value($node), $node->line ];
     }
 }
 
@@ -227,12 +229,20 @@ sub _generate_binary {
                 [ fetch_field_s => $node->second->id ];
         }
         when(%bin) {
-            return
+            my $lvar = $self->lvar_id;
+            my @code = (
                 $self->_generate_expr($node->first),
-                [ push      => () ],
-                $self->_generate_expr($node->second),
-                [ pop_to_sb => () ],
-                [ $bin{$_}  => () ];
+                [ store_to_lvar => $lvar ],
+            );
+
+            $self->_lvar_id_inc(1);
+            push @code, $self->_generate_expr($node->second);
+            $self->_lvar_id_dec(1);
+
+            push @code,
+                [ load_lvar_to_sb => $lvar ],
+                [ $bin{$_}   => undef ];
+            return @code;
         }
         when(%bin_r) {
             my @right = $self->_generate_expr($node->second);
@@ -284,7 +294,6 @@ sub _generate_function {
     return [ function => $node->value ];
 }
 
-
 sub _variable_to_value {
     my($self, $arg) = @_;
 
@@ -310,20 +319,69 @@ sub _literal_to_value {
     return $value;
 }
 
-sub _optimize {
-    my($self, $code_ref) = @_;
+#my %goto;
+#@goto{qw(
+#    for_next
+#    and
+#    or
+#    dor
+#    pc_inc
+#)} = ();
 
-    for(my $i = 0; $i < @{$code_ref}; $i++) {
-        if($code_ref->[$i][0] eq 'print_raw_s') {
-            # merge a list of print_raw_s into single command
-            for(my $j = $i + 1;
-                $j < @{$code_ref} && $code_ref->[$j][0] eq 'print_raw_s';
-                $j++) {
-                my($op) = splice @{$code_ref}, $j, 1;
-                $code_ref->[$i][1] .= $op->[1];
+sub _optimize {
+    my($self, $cr) = @_;
+
+    for(my $i = 0; $i < @{$cr}; $i++) {
+        given($cr->[$i][0]) {
+            when('print_raw_s') {
+                # merge a set of print_raw_s into single command
+                for(my $j = $i + 1;
+                    $j < @{$cr} && $cr->[$j][0] eq 'print_raw_s';
+                    $j++) {
+
+                    my $op = $cr->[$j];
+                    $cr->[$i][1] .= $op->[1];
+                    @{$op} = (noop => undef, undef, 'optimized away');
+                }
+            }
+            when('store_to_lvar') {
+                # use registers, instead of local variables
+                #
+                # given:
+                #   store_to_lvar $n
+                #   blah blah blah
+                #   load_lvar_to_sb $n
+                # convert into:
+                #   move_sa_to_sb
+                #   blah blah blah
+                my $it = $cr->[$i];
+                my $nn = $cr->[$i+2]; # next next
+                if(defined($nn)
+                    && $nn->[0] eq 'load_lvar_to_sb'
+                    && $nn->[1] == $it->[1]) {
+                    @{$it} = ('move_sa_to_sb', undef, undef, 'optimized from store_to_lvar');
+
+                    # replace to noop, need to adjust goto address
+                    @{$cr->[$i+2]} = (noop => undef, undef, 'optimized away');
+                }
             }
         }
     }
+
+    # TODO: recalculate goto address
+#    my @goto_addr;
+#    for(my $i = 0; $i < @{$cr}; $i++) {
+#        if(exists $goto{ $cr->[$i][0] }) { # goto family
+#            my $addr = $cr->[$i][1]; # relational addr
+#
+#            my @range = $addr > 0
+#                ? ($i .. ($i+$addr))
+#                : (($i+$addr) .. $i);
+#            foreach my $j(@range) {
+#                push @{$goto_addr[$j] //= []}, $cr->[$i];
+#            }
+#        }
+#    }
     return;
 }
 

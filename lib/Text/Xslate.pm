@@ -4,15 +4,20 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_01';
+our $VERSION = '0.001_02';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
+
+our $DEBUG;
+$DEBUG = $ENV{XSLATE} // $DEBUG // '';
 
 my $dquoted = qr/" (?: \\. | [^"\\] )* "/xms; # " for poor editors
 my $squoted = qr/' (?: \\. | [^'\\] )* '/xms; # ' for poor editors
 my $STRING  = qr/(?: $dquoted | $squoted )/xms;
 my $NUMBER  = qr/(?: [+-]? [0-9]+ (?: \. [0-9]+)? )/xms;
+
+my $IDENT   = qr/(?: [.]? [a-zA-Z_][a-zA-Z0-9_]* )/xms;
 
 my $XSLATE_MAGIC = ".xslate $VERSION\n";
 
@@ -144,7 +149,7 @@ sub _load_file {
 }
 
 sub _compiler {
-    my($self, $string) = @_;
+    my($self) = @_;
     my $compiler = $self->{compiler};
 
     if(!ref $compiler){
@@ -195,7 +200,14 @@ sub _load_assembly {
 
     # name ?arg comment
     my @protocode;
-    while($assembly =~ /^\s* (\.?\w+) (?: \s+ ($STRING|$NUMBER) )? (?:\#(\d+))? [^\n]* \n/xmsg) {
+    while($assembly =~ m{
+            ^[ \t]*
+                ($IDENT)                        # an opname
+                (?: [ \t]+ ($STRING|$NUMBER) )? # an operand
+                (?:\#($NUMBER))?                # line number
+                [^\n]*                          # any comments
+            \n}xmsog) {
+
         my $name  = $1;
         my $value = $2;
         my $line  = $3;
@@ -235,7 +247,7 @@ Text::Xslate - High performance template engine (ALPHA)
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_01.
+This document describes Text::Xslate version 0.001_02.
 
 =head1 SYNOPSIS
 
@@ -329,11 +341,15 @@ TODO
     <?= $var.field ?>
     <?= $var["field"] ?>
 
+Variables may be HASH references, ARRAY references, or objects.
+
 =head2 Loop (C<for>)
 
     ? for $data ->($item) {
         [<?= $item.field =>]
     ? }
+
+Iterating data may be ARRAY references.
 
 =head2 Conditional statement (C<if>)
 
@@ -380,18 +396,43 @@ Operator precedence:
 
 Base templates F<mytmpl/base.tx>:
 
-    ? block title -> {
-        My Template!
+    ? block title -> { # with default
+        [My Template!]
     ? }
+
     ? block body is abstract # without default
 
-Derived templates F<mytmpl/derived.tx>:
+Derived templates F<mytmpl/foo.tx>:
 
-    ? extends mytmpl.base
+    ? extends base
     ? # use default title
-    ? override block body {
+    ? override body {
         My Template Body!
     ? }
+
+Derived templates F<mytmpl/bar.tx>:
+
+    ? extends foo
+    ? # use default title
+    ? before body {
+        Before body!
+    ? }
+    ? after body {
+        After body!
+    ? }
+
+Then, Perl code:
+
+    my $tx = Text::Xslate->new( file => 'mytmpl/bar.tx' );
+    $tx->render({});
+
+Output:
+
+        [My Template!]
+
+        Before body!
+        My Template Body!
+        Before Body!
 
 =head1 TODO
 

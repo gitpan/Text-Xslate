@@ -2,9 +2,10 @@ package Text::Xslate::Parser;
 use 5.010;
 use Mouse;
 
+use Text::Xslate;
 use Text::Xslate::Symbol;
 
-use constant _DUMP_PROTO => !!$ENV{XSLATE_DUMP_PROTO};
+use constant _DUMP_PROTO => ($Text::Xslate::DEBUG =~ /\b dump=proto \b/xmsi);
 
 our @CARP_NOT = qw(Text::Xslate::Compiler);
 
@@ -121,8 +122,6 @@ sub split {
     my $line_start    = $self->line_start;
     my $tag_start     = $self->tag_start;
     my $tag_end       = $self->tag_end;
-
-    my @state = 'text';
 
     while($_) {
         if(s/\A ^ [ \t]* $line_start ([^\n]* \n?) //xms) {
@@ -302,6 +301,17 @@ sub BUILD {
 
     $parser->symbol('print')    ->set_std(\&_std_command);
     $parser->symbol('print_raw')->set_std(\&_std_command);
+
+    $parser->symbol('include')  ->set_std(\&_std_command);
+
+    # not yet
+    $parser->symbol('extend');
+    $parser->symbol('body');
+    $parser->symbol('override');
+    $parser->symbol('before');
+    $parser->symbol('after');
+    $parser->symbol('is');
+    $parser->symbol('abstract');
 
     return;
 }
