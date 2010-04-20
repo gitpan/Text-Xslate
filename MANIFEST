@@ -51,6 +51,7 @@ t/030_interface/004_utf8.t
 t/030_interface/005_funcs.t
 t/template/for.tx
 t/template/hello.tx
+t/template/hello2.tx
 t/template/hello_utf8.tx
 tool/opcode.pl
 xs/Text-Xslate.xs
