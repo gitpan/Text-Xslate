@@ -4,7 +4,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_02';
+our $VERSION = '0.001_03';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -31,32 +31,34 @@ sub new {
     $args{compiler}     //= 'Text::Xslate::Compiler';
    #$args{functions}    //= {}; # see _compiler()
 
+    $args{template}       = {};
+
     my $self = bless \%args, $class;
 
-    my $source = 0;
-    if($args{file}) {
-        $source++;
-        $self->_load_file($args{file});
+    if(my $file = $args{file}) {
+        $self->_load_file($_)
+            for ref($file) ? @{$file} : $file;
     }
+
+    my $source = 0;
 
     if($args{string}) {
         $source++;
-        $self->_load_string($args{string});
+        $self->_load_string('<input>' => $args{string});
     }
 
     if($args{assembly}) {
         $source++;
-        $self->_load_assembly($args{assembly});
+        $self->_load_assembly('<input>' => $args{assembly});
     }
 
     if($args{protocode}) {
         $source++;
-        $self->_initialize($args{protocode});
+        $self->_initialize('<input>' => $args{protocode});
     }
 
-    if($source != 1) {
-        my $num = ($source == 0 ? "no" : "multiple");
-        $self->throw_error("$num template sources are specified");
+    if($source > 1) {
+        $self->throw_error("Multiple template sources are specified");
     }
 
     return $self;
@@ -68,6 +70,8 @@ sub default_path {
     no warnings 'once';
     return( File::Basename::dirname($FindBin::Bin) . "/template" );
 }
+
+sub name { $_[0]->{name} }
 
 sub render;
 
@@ -103,7 +107,8 @@ sub _load_file {
         $self->throw_error("Cannot find $file (path: @{$self->{path}})");
     }
 
-    $self->{loaded} = $fullpath;
+    $self->{name}     = $file;
+    $self->{fullpath} = $fullpath;
 
     my $string;
     {
@@ -121,7 +126,7 @@ sub _load_file {
     }
 
     if($is_assembly) {
-        $self->_load_assembly($string);
+        $self->_load_assembly($file, $string);
     }
     else {
         my $protocode = $self->_compiler->compile($string);
@@ -143,7 +148,7 @@ sub _load_file {
             }
         }
 
-        $self->_initialize($protocode);
+        $self->_initialize($file, $protocode);
     }
     return;
 }
@@ -188,15 +193,15 @@ sub _compiler {
 }
 
 sub _load_string {
-    my($self, $string) = @_;
+    my($self, $name, $string) = @_;
 
     my $protocode = $self->_compiler->compile($string);
-    $self->_initialize($protocode);
+    $self->_initialize($name, $protocode);
     return;
 }
 
 sub _load_assembly {
-    my($self, $assembly) = @_;
+    my($self, $name, $assembly) = @_;
 
     # name ?arg comment
     my @protocode;
@@ -227,7 +232,7 @@ sub _load_assembly {
 
     #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper(\@protocode);
 
-    $self->_initialize(\@protocode);
+    $self->_initialize($name, \@protocode);
     return;
 }
 
@@ -247,7 +252,7 @@ Text::Xslate - High performance template engine (ALPHA)
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_02.
+This document describes Text::Xslate version 0.001_03.
 
 =head1 SYNOPSIS
 
@@ -264,25 +269,17 @@ This document describes Text::Xslate version 0.001_02.
         ],
     );
 
-    # for files
-    my $tx = Text::Xslate->new(
-        # required arguments:
-        file => 'foo.tx', # finds foo.txc, or foo.tx
-
-        # optional arguments:
-        path         => ["$Bin/../template"],
-        auto_compile => 1,
-    );
-
-    print $tx->render(\%vars);
+    # for multiple files
+    my $tx = Text::Xslate->new(file => [qw(hello.tx)]);
+    print $tx->render_file('hello.tx', \%vars);
 
     # for strings
     my $template = q{
-        <h1><?= $title ?></h1>
+        <h1><:= $title :></h1>
         <ul>
-        ? for $books ->($book) {
-            <li><?= $book.title ?></li>
-        ? } # for
+        : for $books ->($book) {
+            <li><:= $book.title :></li>
+        : } # for
         </ul>
     };
 
@@ -315,7 +312,7 @@ Options:
 
 =item C<< string => $template_string >>
 
-=item C<< file => $template_file >>
+=item C<< file => $template_file | \@template_files >>
 
 =item C<< path => \@path // ["$FindBin::Bin/../template"] >>
 
@@ -325,7 +322,7 @@ Options:
 
 =back
 
-=head3 B<< $tx->render(\%vars) -> Str >>
+=head3 B<< $tx->render($name, \%vars) -> Str >>
 
 Renders a template with variables, and returns the result.
 
@@ -337,54 +334,54 @@ TODO
 
 =head2 Variable access
 
-    <?= $var ?>
-    <?= $var.field ?>
-    <?= $var["field"] ?>
+    <:= $var :>
+    <:= $var.field :>
+    <:= $var["field"] :>
 
 Variables may be HASH references, ARRAY references, or objects.
 
 =head2 Loop (C<for>)
 
-    ? for $data ->($item) {
-        [<?= $item.field =>]
-    ? }
+    : for $data ->($item) {
+        [<:= $item.field =>]
+    : }
 
 Iterating data may be ARRAY references.
 
 =head2 Conditional statement (C<if>)
 
-    ? if $var == nil {
+    : if $var == nil {
         $var is nil.
-    ? }
-    ? else if $var != "foo" {
+    : }
+    : else if $var != "foo" {
         $var is not nil nor "foo".
-    ? }
-    ? else {
+    : }
+    : else {
         $var is "foo".
-    ? }
+    : }
 
-    ? if( $var >= 1 && $var <= 10 ) {
+    : if( $var >= 1 && $var <= 10 ) {
         $var is 1 .. 10
-    ? }
+    : }
 
-    ?= $var.value == nil ? "nil" : $var.value
+    := $var.value == nil ? "nil" : $var.value
 
 =head2 Expressions
 
 Relational operators (C<< == != < <= > >= >>):
 
-    ?= $var == 10 ? "10"     : "not 10"
-    ?= $var != 10 ? "not 10" : "10"
+    := $var == 10 ? "10"     : "not 10"
+    := $var != 10 ? "not 10" : "10"
 
 Arithmetic operators (C<< + - * / % >>):
 
-    ?= $var + 10
-    ?= ($var % 10) == 0
+    := $var + 10
+    := ($var % 10) == 0
 
 Logical operators (C<< || && // >>)
 
-    ?= $var >= 0 && $var <= 10 ? "ok" : "too smaller or too larger"
-    ?= $var // "foo" # as a default value
+    := $var >= 0 && $var <= 10 ? "ok" : "too smaller or too larger"
+    := $var // "foo" # as a default value
 
 Operator precedence:
 
@@ -396,30 +393,30 @@ Operator precedence:
 
 Base templates F<mytmpl/base.tx>:
 
-    ? block title -> { # with default
+    : block title -> { # with default
         [My Template!]
-    ? }
+    : }
 
-    ? block body is abstract # without default
+    : block body is abstract # without default
 
 Derived templates F<mytmpl/foo.tx>:
 
-    ? extends base
-    ? # use default title
-    ? override body {
+    : extends base
+    : # use default title
+    : override body {
         My Template Body!
-    ? }
+    : }
 
 Derived templates F<mytmpl/bar.tx>:
 
-    ? extends foo
-    ? # use default title
-    ? before body {
+    : extends foo
+    : # use default title
+    : before body {
         Before body!
-    ? }
-    ? after body {
+    : }
+    : after body {
         After body!
-    ? }
+    : }
 
 Then, Perl code:
 

@@ -9,7 +9,7 @@ use FindBin qw($Bin);
 
 my $tx = Text::Xslate->new(
     string => <<'TX',
-ようこそ <?= $value ?> の世界へ！
+ようこそ <:= $value :> の世界へ！
 TX
 );
 
@@ -24,7 +24,7 @@ for(1 .. 2) {
         file => "hello_utf8.tx",
     );
 
-    is $tx->render({ name => "エクスレート" }),
+    is $tx->render("hello_utf8.tx", { name => "エクスレート" }),
         "こんにちは！ エクスレート！\n", "in files";
 }
 
