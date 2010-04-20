@@ -34,6 +34,7 @@ README
 t/000_load.t
 t/010_internals/001_parse.t
 t/010_internals/002_compile.t
+t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/020_basic/001_interpolate.t
 t/020_basic/002_field.t
@@ -43,6 +44,7 @@ t/020_basic/005_rel_ops.t
 t/020_basic/006_arith_ops.t
 t/020_basic/007_call.t
 t/020_basic/008_goto_address.t
+t/020_basic/009_include.t
 t/020_basic/100_examples.t
 t/030_interface/001_files.t
 t/030_interface/002_strings.t
@@ -53,6 +55,8 @@ t/template/for.tx
 t/template/hello.tx
 t/template/hello2.tx
 t/template/hello_utf8.tx
+t/template/include.tx
+t/template/include2.tx
 tool/opcode.pl
 xs/Text-Xslate.xs
 xslate_ops.h
