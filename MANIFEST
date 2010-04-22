@@ -1,3 +1,4 @@
+benchmark/compare.pl
 benchmark/expr.pl
 benchmark/for.pl
 benchmark/function.pl
@@ -6,6 +7,7 @@ benchmark/mobasif.pl
 benchmark/others.pl
 benchmark/template/simple.mst
 benchmark/template/simple.tx
+benchmark/xslate-vs-mt-vs-ht.png
 Changes
 example/hello.pl
 example/inherit.pl

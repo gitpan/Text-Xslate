@@ -4,7 +4,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_06';
+our $VERSION = '0.001_07';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -248,7 +248,7 @@ Text::Xslate - High performance template engine (ALPHA)
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_06.
+This document describes Text::Xslate version 0.001_07.
 
 =head1 SYNOPSIS
 
@@ -476,13 +476,13 @@ L<HTML::Template::Pro>
 
 =head1 AUTHOR
 
-Goro Fuji (gfx) E<lt>gfuji(at)cpan.orgE<gt>
+Fuji, Goro (gfx) E<lt>gfuji(at)cpan.orgE<gt>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (c) 2010, Goro Fuji (gfx). All rights reserved.
+Copyright (c) 2010, Fuji, Goro (gfx). All rights reserved.
 
 This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself. See L<perlartistic> for details.
+it under the same terms as Perl itself.
 
 =cut

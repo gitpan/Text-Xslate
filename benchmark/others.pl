@@ -14,13 +14,13 @@ foreach my $mod(qw(Text::Xslate Text::MicroTemplate Text::ClearSilver Template))
     say $mod, '/', $mod->VERSION;
 }
 
-my $n = shift(@ARGV) || 10;
+my $n = shift(@ARGV) || 100;
 
 my $x = Text::Xslate->new(string => <<'T' x $n);
 Hello, <:= $lang :> world!
 T
 
-my $tcs = Text::ClearSilver->new();
+my $tcs = Text::ClearSilver->new(VarEscapeMode => 'html');
 my $mt  = Text::MicroTemplate::build_mt(
     "Hello, <?= \$_[0]->{lang} ?> world!\n" x $n
 );

@@ -120,7 +120,7 @@ sub _generate_command {
     return @code;
 }
 
-sub _generate_for {
+sub _generate_proc {
     my($self, $node) = @_;
     my $expr     = $node->first;
     my $iter_var = $node->second;
@@ -128,25 +128,34 @@ sub _generate_for {
 
     my @code;
 
-    push @code, $self->_generate_expr($expr);
+    given($node->id) {
+        when("for") {
 
-    my $lvar_id   = $self->lvar_id;
-    my $lvar_name = $iter_var->id;
+        push @code, $self->_generate_expr($expr);
 
-    local $self->lvar->{$lvar_name} = $lvar_id;
+        my $lvar_id   = $self->lvar_id;
+        my $lvar_name = $iter_var->id;
 
-    my $for_start = scalar @code;
-    push @code, [ for_start => $lvar_id, undef, $lvar_name ];
+        local $self->lvar->{$lvar_name} = $lvar_id;
 
-    # a for statement uses two local variables (container and iterator)
-    $self->_lvar_id_inc(2);
-    push @code, $self->_compile_ast($block);
-    $self->_lvar_id_dec(2);
+        my $for_start = scalar @code;
+        push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
 
-    push @code,
-        [ literal_i => $lvar_id, undef, $lvar_name ],
-        [ for_next  => -(scalar(@code) - $for_start) ];
+        # a for statement uses three local variables (container, iterator, and item)
+        $self->_lvar_id_inc(3);
+        my @block_code = $self->_compile_ast($block);
+        $self->_lvar_id_dec(3);
 
+        push @code,
+            [ literal_i => $lvar_id, $expr->line, $lvar_name ],
+            [ for_iter  => scalar(@block_code) + 2 ],
+            @block_code,
+            [ goto      => -(scalar(@block_code) + 2), undef, "end for" ];
+        }
+        default {
+            confess("Not yet implemented: '$node'");
+        }
+    }
     return @code;
 }
 
@@ -164,9 +173,9 @@ sub _generate_if {
 
     return(
         @expr,
-        [ and    => scalar(@then) + 2, undef, 'if' ],
+        [ and  => scalar(@then) + 2, undef, 'if' ],
         @then,
-        [ pc_inc => scalar(@else) + 1 ],
+        [ goto => scalar(@else) + 1 ],
         @else,
     );
 }
@@ -182,7 +191,7 @@ sub _generate_variable {
     my($self, $node) = @_;
 
     if(defined(my $lvar_id = $self->lvar->{$node->id})) {
-        return [ fetch_iter => $lvar_id, $node->line, $node->id ];
+        return [ fetch_lvar => $lvar_id, $node->line, $node->id ];
     }
     else {
         return [ fetch_s => $self->_variable_to_value($node), $node->line ];
@@ -268,9 +277,9 @@ sub _generate_ternary { # the conditional operator
 
     return(
         @expr,
-        [ and    => scalar(@then) + 2, $node->line, 'ternary' ],
+        [ and  => scalar(@then) + 2, $node->line, 'ternary' ],
         @then,
-        [ pc_inc => scalar(@else) + 1 ],
+        [ goto => scalar(@else) + 1 ],
         @else,
     );
 }
@@ -325,7 +334,7 @@ sub _literal_to_value {
 #    and
 #    or
 #    dor
-#    pc_inc
+#    goto
 #)} = ();
 
 sub _optimize {

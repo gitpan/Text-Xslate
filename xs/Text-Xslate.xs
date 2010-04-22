@@ -22,16 +22,19 @@ START_MY_CXT
 #define XSLATE_w_int(n) XSLATE(n) /* has TX_op_arg as an integer (i.e. can SvIVX(arg)) */
 #define XSLATE_w_key(n) XSLATE(n) /* has TX_op_arg as a keyword */
 #define XSLATE_w_var(n) XSLATE(n) /* has TX_op_arg as a local variable */
+#define XSLATE_goto(n)  XSLATE(n) /* does goto */
 
-#define TXARGf_SV  ((U8)(0x01))
-#define TXARGf_INT ((U8)(0x02))
-#define TXARGf_KEY ((U8)(0x04))
-#define TXARGf_VAR ((U8)(0x08))
+#define TXARGf_SV   ((U8)(0x01))
+#define TXARGf_INT  ((U8)(0x02))
+#define TXARGf_KEY  ((U8)(0x04))
+#define TXARGf_VAR  ((U8)(0x08))
+#define TXARGf_GOTO ((U8)(0x10))
 
 #define TXCODE_W_SV  (TXARGf_SV)
 #define TXCODE_W_INT (TXARGf_SV | TXARGf_INT)
 #define TXCODE_W_VAR (TXARGf_SV | TXARGf_INT | TXARGf_VAR)
 #define TXCODE_W_KEY (TXARGf_SV | TXARGf_KEY)
+#define TXCODE_GOTO  (TXARGf_SV | TXARGf_INT | TXARGf_GOTO)
 
 #define TX_st (txst)
 #define TX_op (&(TX_st->code[TX_st->pc]))
@@ -118,7 +121,7 @@ tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_id) {
     }
     return &( (st->pad)[lvar_id] );
 }
-#else
+#else /* DEBUGGING */
 #define TX_st_sa        (TX_st->sa)
 #define TX_st_sb        (TX_st->sb)
 #define TX_op_arg       (TX_op->arg)
@@ -178,7 +181,7 @@ tx_call(pTHX_ tx_state_t* const st, SV* proc, I32 const flags, const char* const
 
     call_sv(proc, G_SCALAR | G_EVAL | flags);
 
-    if(sv_true(ERRSV)){
+    if(UNLIKELY(sv_true(ERRSV))){
         croak("%"SVf "\n"
             "\t... exception cought on %s", ERRSV, name);
     }
@@ -292,6 +295,14 @@ XSLATE_w_key(fetch_s) { /* fetch a field from the top */
     TX_st->pc++;
 }
 
+XSLATE_w_var(fetch_lvar) {
+    SV* const idsv = TX_op_arg;
+
+    TX_st_sa = TX_lvar(SvIVX(idsv));
+
+    TX_st->pc++;
+}
+
 XSLATE(fetch_field) { /* fetch a field from a variable (bin operator) */
     SV* const var = TX_st_sb;
     SV* const key = TX_st_sa;
@@ -354,7 +365,7 @@ XSLATE(print) {
             len = SvCUR(output) + parts_len + 1;
             (void)SvGROW(output, len);
 
-            if(parts_len == 1) {
+            if(LIKELY(parts_len == 1)) {
                 *SvEND(output) = *parts;
             }
             else {
@@ -417,52 +428,41 @@ XSLATE_w_var(for_start) {
             tx_neat(aTHX_ avref));
     }
 
-    sv_setsv(TX_lvar(id), avref);
-    sv_setiv(TX_lvar(id+1), 0); /* (re)set iterator */
+    /* id+0 for each item */
+    sv_setsv(TX_lvar(id+1), avref);
+    sv_setiv(TX_lvar(id+2), -1); /* (re)set iterator */
 
     TX_st->pc++;
 }
 
-XSLATE_w_var(for_next) {
+XSLATE_goto(for_iter) {
     SV* const idsv = TX_st_sa;
     IV  const id   = SvIVX(idsv); /* by literal_i */
-    AV* const av   = (AV*)SvRV(TX_lvar(id  ));
-    SV* const i    =           TX_lvar(id+1);
+    SV* const item =           TX_lvar(id+0);
+    AV* const av   = (AV*)SvRV(TX_lvar(id+1));
+    SV* const i    =           TX_lvar(id+2);
 
     assert(SvTYPE(av) == SVt_PVAV);
     assert(SvIOK(i));
 
     //warn("for_next[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
-    if(++SvIVX(i) <= AvFILLp(av)) {
-        TX_st->pc += SvIVX(TX_op_arg); /* back to */
+    if(LIKELY(++SvIVX(i) <= AvFILLp(av))) {
+        SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
+        sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
+        TX_st->pc++;
     }
     else {
         /* finish the for loop */
+        sv_setsv(item, &PL_sv_undef);
 
         /* don't need to clear iterator variables,
            they will be cleaned at the end of render() */
 
-        TX_st->pc++;
+        TX_st->pc = SvUVX(TX_op_arg);
     }
 
 }
 
-XSLATE_w_int(fetch_iter) {
-    SV* const idsv = TX_op_arg;
-    IV  const id   = SvIVX(idsv);
-    AV* const av   = (AV*)SvRV(TX_lvar(id  ));
-    SV* const i    =           TX_lvar(id+1);
-    SV** svp;
-
-    assert(SvTYPE(av) == SVt_PVAV);
-    assert(SvIOK(i));
-
-    //warn("fetch_iter[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
-    svp = av_fetch(av, SvIVX(i), FALSE);
-    TX_st_sa = svp ? *svp : &PL_sv_undef;
-
-    TX_st->pc++;
-}
 
 /* For arithmatic operators, SvIV_please() can make stringification faster,
    although I don't know why it is :)
@@ -522,32 +522,32 @@ XSLATE(filt) {
     TX_st->pc++;
 }
 
-XSLATE_w_int(and) {
+XSLATE_goto(and) {
     if(sv_true(TX_st_sa)) {
         TX_st->pc++;
     }
     else {
-        TX_st->pc += SvIVX(TX_op_arg);
+        TX_st->pc = SvUVX(TX_op_arg);
     }
 }
 
-XSLATE_w_int(or) {
+XSLATE_goto(or) {
     if(!sv_true(TX_st_sa)) {
         TX_st->pc++;
     }
     else {
-        TX_st->pc += SvIVX(TX_op_arg);
+        TX_st->pc = SvUVX(TX_op_arg);
     }
 }
 
-XSLATE_w_int(dor) {
+XSLATE_goto(dor) {
     SV* const sv = TX_st_sa;
     SvGETMAGIC(sv);
     if(!SvOK(sv)) {
         TX_st->pc++;
     }
     else {
-        TX_st->pc += SvIVX(TX_op_arg);
+        TX_st->pc = SvUVX(TX_op_arg);
     }
 }
 
@@ -561,7 +561,7 @@ XSLATE(not) {
 static I32
 tx_sv_eq(pTHX_ SV* const a, SV* const b) {
     U32 const af = (SvFLAGS(a) & (SVf_POK|SVf_IOK|SVf_NOK));
-    U32 const bf = (SvFLAGS(a) & (SVf_POK|SVf_IOK|SVf_NOK));
+    U32 const bf = (SvFLAGS(b) & (SVf_POK|SVf_IOK|SVf_NOK));
 
     if(af && bf) {
         if(af == SVf_IOK && bf == SVf_IOK) {
@@ -631,8 +631,8 @@ XSLATE(call) {
     TX_st->pc++;
 }
 
-XSLATE_w_int(pc_inc) {
-    TX_st->pc += SvIVX(TX_op_arg);
+XSLATE_goto(goto) {
+    TX_st->pc = SvUVX(TX_op_arg);
 }
 
 XS(XS_Text__Xslate__error); /* -Wmissing-prototypes */
@@ -1037,14 +1037,27 @@ CODE:
                 }
                 else if(tx_oparg[opnum] & TXARGf_INT) {
                     st.code[i].arg = newSViv(SvIV(*arg));
-                    SvREADONLY_on(st.code[i].arg);
 
                     if(tx_oparg[opnum] & TXARGf_VAR) { /* local variable id */
-                        I32 const id = SvIVX(st.code[i].arg) + 1; /* for-loop requires +1 */
+                        I32 id = SvIVX(st.code[i].arg);
+                        if(opnum == TXOP_for_start) {
+                                id += 2;
+                        }
                         if(lvar_id_max < id) {
                             lvar_id_max = id;
                         }
                     }
+
+                    if(tx_oparg[opnum] & TXARGf_GOTO) {
+                        /* calculate relational addresses to absolute addresses */
+                        UV const abs_addr = (UV)(i + SvIVX(st.code[i].arg));
+                        if(abs_addr > (UV)len) {
+                            croak("Oops: goto address %"IVdf" is out of range (must be 0 <= addr <= %"IVdf")",
+                                SvIVX(st.code[i].arg), (IV)len);
+                        }
+                        sv_setuv(st.code[i].arg, abs_addr);
+                    }
+                    SvREADONLY_on(st.code[i].arg);
                 }
                 else { /* normal sv */
                     st.code[i].arg = newSVsv(*arg);

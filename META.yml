@@ -1,7 +1,7 @@
 ---
 abstract: 'High performance template engine (ALPHA)'
 author:
-  - 'Goro Fuji (gfx) <gfuji(at)cpan.org>'
+  - 'Fuji, Goro (gfx) <gfuji(at)cpan.org>'
 build_requires:
   Devel::PPPort: 3.19
   ExtUtils::MakeMaker: 6.42
@@ -34,4 +34,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.001_06
+version: 0.001_07
