@@ -51,10 +51,20 @@ has lvar_id => ( # local varialbe id
     default => 0,
 );
 
-has lvar => ( # local varialbe table
+has lvar => ( # local varialbe id table
     is  => 'rw',
     isa => 'HashRef[Int]',
 
+    default => sub{ {} },
+);
+
+has block_table => (
+    is  => 'rw',
+    isa => 'HashRef',
+
+    clearer => 'clear_block_table',
+
+    lazy    => 1,
     default => sub{ {} },
 );
 
@@ -76,6 +86,25 @@ sub compile {
     my $ast = $self->parse($str);
 
     my @code = $self->_compile_ast($ast);
+    push @code, ['exit'];
+
+    # sub blocks
+    foreach my $block(values %{ $self->block_table }) {
+        push @code, [ 'begin_block', $block->{name} ];
+
+        if($block->{name} eq 'after') {
+            push @code, ['super'];
+        }
+
+        push @code, @{ $block->{body} };
+
+        if($block->{name} eq 'before') {
+            push @code, ['super'];
+        }
+
+        push @code, [ 'end_block' ];
+    }
+    $self->clear_block_table();
 
     $self->_optimize(\@code) if $optimize // _OPTIMIZE // 1;
 
@@ -119,46 +148,73 @@ sub _generate_command {
     }
     return @code;
 }
-
-sub _generate_proc {
+sub _generate_bare_command {
     my($self, $node) = @_;
-    my $expr     = $node->first;
-    my $iter_var = $node->second;
-    my $block    = $node->third;
 
     my @code;
 
-    given($node->id) {
-        when("for") {
+    Carp::croak("Not yet implemented: " . $node->dump);
 
-        push @code, $self->_generate_expr($expr);
-
-        my $lvar_id   = $self->lvar_id;
-        my $lvar_name = $iter_var->id;
-
-        local $self->lvar->{$lvar_name} = $lvar_id;
-
-        my $for_start = scalar @code;
-        push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
-
-        # a for statement uses three local variables (container, iterator, and item)
-        $self->_lvar_id_inc(3);
-        my @block_code = $self->_compile_ast($block);
-        $self->_lvar_id_dec(3);
-
-        push @code,
-            [ literal_i => $lvar_id, $expr->line, $lvar_name ],
-            [ for_iter  => scalar(@block_code) + 2 ],
-            @block_code,
-            [ goto      => -(scalar(@block_code) + 2), undef, "end for" ];
-        }
-        default {
-            confess("Not yet implemented: '$node'");
-        }
-    }
     return @code;
 }
 
+sub _generate_for {
+    my($self, $node) = @_;
+    my $expr  = $node->first;
+    my $vars  = $node->second;
+    my $block = $node->third;
+    if(@{$vars} != 1) {
+        Carp::croak("For-loop requires single variable for each items");
+    }
+    my($iter_var) = @{$vars};
+
+    my @code = $self->_generate_expr($expr);
+
+    my $lvar_id   = $self->lvar_id;
+    my $lvar_name = $iter_var->id;
+
+    local $self->lvar->{$lvar_name} = $lvar_id;
+
+    push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
+
+    # a for statement uses three local variables (container, iterator, and item)
+    $self->_lvar_id_inc(3);
+    my @block_code = $self->_compile_ast($block);
+    $self->_lvar_id_dec(3);
+
+    push @code,
+        [ literal_i => $lvar_id, $expr->line, $lvar_name ],
+        [ for_iter  => scalar(@block_code) + 2 ],
+        @block_code,
+        [ goto      => -(scalar(@block_code) + 2), undef, "end for" ];
+
+    return @code;
+}
+
+sub _generate_proc {
+    my($self, $node) = @_;
+    my $name   = $node->first;
+    my $params = $node->second;
+    my $block  = $node->third;
+
+    if(exists $self->block_table->{$name}) {
+        Carp::croak("Redefinition of block $name is found");
+    }
+
+    $self->block_table->{$name} = {
+        type   => $node->id,
+        name   => $name,
+        params => [ map{ $_->id } @{$params} ],
+        body   => [ $self->_compile_ast($block) ],
+    };
+
+    if($node->id eq 'block') {
+        return [ insert_block => $name ];
+    }
+    else {
+        return;
+    }
+}
 
 sub _generate_if {
     my($self, $node) = @_;

@@ -9,8 +9,11 @@
 #define MY_CXT_KEY "Text::Xslate::_guts" XS_VERSION
 typedef struct {
     U32 depth;
+    HV* escaped_string_stash;
 } my_cxt_t;
 START_MY_CXT
+
+#define TX_ESC_CLASS "Text::Xslate::EscapedString"
 
 /* buffer size coefficient (bits), used for memory allocation */
 /* (1 << 6) * U16_MAX = about 4 MiB */
@@ -79,6 +82,7 @@ struct tx_state_s {
     SV** pad;    /* AvARRAY(locals) */
 
     HV* function;
+    HV* block;
 
     U32 hint_size;
 
@@ -230,6 +234,26 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     return sv;
 }
 
+static SV*
+tx_escaped_string(pTHX_ SV* const str) {
+    dMY_CXT;
+    SV* const sv = sv_newmortal();
+    sv_copypv(sv, str);
+    return sv_2mortal(sv_bless(newRV_inc(sv), MY_CXT.escaped_string_stash));
+}
+
+static bool
+tx_str_is_escaped(pTHX_ const SV* const sv) {
+    if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
+        dMY_CXT;
+        if(!SvOK(SvRV(sv))) {
+            croak("Cannot use escaped string: not a reference to a string");
+        }
+        return SvSTASH(SvRV(sv)) == MY_CXT.escaped_string_stash;
+    }
+    return FALSE;
+}
+
 XSLATE(noop) {
     TX_st->pc++;
 }
@@ -325,6 +349,9 @@ XSLATE(print) {
 
     if(SvNIOK(sv) && !SvPOK(sv)){
         sv_catsv_nomg(output, sv);
+    }
+    else if(tx_str_is_escaped(aTHX_ sv)) {
+        sv_catsv_nomg(output, SvRV(sv));
     }
     else {
         STRLEN len;
@@ -612,13 +639,45 @@ XSLATE(ge) {
     TX_st->pc++;
 }
 
+
+XSLATE_w_sv(insert_block) {
+    SV* const name = TX_op_arg;
+    HE* he;
+
+    if(TX_st->block && (he = hv_fetch_ent(TX_st->block, name, FALSE, 0U))) {
+        dSP;
+
+        ENTER;
+        SAVETMPS;
+        mXPUSHu(TX_st->pc + 1); /* return address */
+        PUTBACK;
+        /* XXX: should do something else? */
+        TX_st->pc = SvUV(hv_iterval(TX_st->block, he));
+    }
+    else {
+        croak("Block %s is not defined", tx_neat(aTHX_ name));
+    }
+}
+
+XSLATE_w_sv(begin_block) {
+    TX_st->pc++;
+}
+
+XSLATE(end_block) {
+    SV* const retaddr = TX_pop();
+    TX_st->pc = SvUVX(retaddr);
+    FREETMPS;
+    LEAVE;
+}
+
 XSLATE_w_key(function) {
     HE* he;
+
     if(TX_st->function && (he = hv_fetch_ent(TX_st->function, TX_op_arg, FALSE, 0U))) {
         TX_st_sa = hv_iterval(TX_st->function, he);
     }
     else {
-        croak("Function %s is not registered", tx_neat(aTHX_ TX_st_sa));
+        croak("Function %s is not registered", tx_neat(aTHX_ TX_op_arg));
     }
 
     TX_st->pc++;
@@ -633,6 +692,10 @@ XSLATE(call) {
 
 XSLATE_goto(goto) {
     TX_st->pc = SvUVX(TX_op_arg);
+}
+
+XSLATE(exit) {
+    TX_st->pc = TX_st->code_len;
 }
 
 XS(XS_Text__Xslate__error); /* -Wmissing-prototypes */
@@ -736,6 +799,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     Safefree(st->lines);
 
     SvREFCNT_dec(st->function);
+    SvREFCNT_dec(st->block);
     SvREFCNT_dec(st->locals);
     SvREFCNT_dec(st->targ);
     SvREFCNT_dec(st->self);
@@ -746,7 +810,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
 }
 
 #ifdef USE_ITHREADS
-SV*
+static SV*
 tx_sv_dup_inc(pTHX_ const SV* const sv, CLONE_PARAMS* const param) {
     SV* const newsv = sv_dup(sv, param);
     SvREFCNT_inc_simple_void(newsv);
@@ -774,6 +838,7 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
     Copy(proto_lines, st->lines, len, U16);
 
     st->function = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->function, param);
+    st->block    = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->block,    param);
     st->locals   = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->locals, param);
     st->targ     =      tx_sv_dup_inc(aTHX_ st->targ, param);
     st->self     =      tx_sv_dup_inc(aTHX_ st->self, param);
@@ -914,6 +979,7 @@ BOOT:
     HV* const ops = get_hv("Text::Xslate::_ops", GV_ADDMULTI);
     MY_CXT_INIT;
     MY_CXT.depth = 0;
+    MY_CXT.escaped_string_stash = gv_stashpvs(TX_ESC_CLASS, GV_ADDMULTI);
     tx_init_ops(aTHX_ ops);
 }
 
@@ -925,6 +991,7 @@ CODE:
 {
     MY_CXT_CLONE;
     MY_CXT.depth = 0;
+    MY_CXT.escaped_string_stash = gv_stashpvs(TX_ESC_CLASS, GV_ADDMULTI);
     PERL_UNUSED_VAR(items);
 }
 
@@ -947,6 +1014,8 @@ CODE:
     SV* tobj;
     SV** svp;
 
+    Zero(&st, 1, tx_state_t);
+
     svp = hv_fetchs(self, "template", FALSE);
     if(!(svp && SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV)) {
         croak("The xslate object has no template table");
@@ -957,6 +1026,18 @@ CODE:
     tobj = hv_iterval((HV*)SvRV(*svp),
          hv_fetch_ent((HV*)SvRV(*svp), name, TRUE, 0U)
     );
+
+    svp = hv_fetchs(self, "function", FALSE);
+    if(svp && SvOK(*svp)) {
+        if(SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV) {
+            st.function = (HV*)SvRV(*svp);
+            SvREFCNT_inc_simple_void_NN(st.function);
+        }
+        else {
+            croak("Function table must be a HASH reference");
+        }
+    }
+
     tmpl = newAV();
     sv_setsv(tobj, sv_2mortal(newRV_noinc((SV*)tmpl)));
 
@@ -975,22 +1056,9 @@ CODE:
     sv_setsv(*av_fetch(tmpl, TXo_FULLPATH, TRUE), fullpath);
     sv_setsv(*av_fetch(tmpl, TXo_NAME,     TRUE), name);
 
-    Zero(&st, 1, tx_state_t);
-
     st.tmpl = tmpl;
     st.self = newRV_inc((SV*)self);
     sv_rvweaken(st.self);
-
-    svp = hv_fetchs(self, "function", FALSE);
-    if(svp && SvOK(*svp)) {
-        if(SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV) {
-            st.function = (HV*)SvRV(*svp);
-            SvREFCNT_inc(st.function);
-        }
-        else {
-            croak("Function table must be a HASH reference");
-        }
-    }
 
     st.hint_size = 64;
 
@@ -1075,6 +1143,16 @@ CODE:
                 l = (U16)SvIV(*line);
             }
             st.lines[i] = l;
+
+
+            /* special cases */
+            if(opnum == TXOP_begin_block) {
+                if(!st.block) {
+                    st.block = newHV();
+                    ((tx_state_t*)mg->mg_ptr)->block = st.block;
+                }
+                (void)hv_store_ent(st.block, st.code[i].arg, newSViv(i), 0U);
+            }
         }
         else {
             croak("Oops: Broken code found on [%d]", (int)i);
@@ -1129,3 +1207,40 @@ CODE:
     XSRETURN(1);
 }
 
+void
+escaped_string(SV* str)
+CODE:
+{
+    ST(0) = tx_escaped_string(aTHX_ str);
+    XSRETURN(1);
+}
+
+MODULE = Text::Xslate    PACKAGE = Text::Xslate::EscapedString
+
+FALLBACK: TRUE
+
+void
+new(SV* klass, SV* str)
+CODE:
+{
+    if(SvROK(klass)) {
+        croak("Cannot call %s->new as an instance method", TX_ESC_CLASS);
+    }
+    if(strNE(SvPV_nolen_const(klass), TX_ESC_CLASS)) {
+        croak("You cannot use a subclass from %s as a escaped string", TX_ESC_CLASS);
+    }
+    ST(0) = tx_escaped_string(aTHX_ str);
+    XSRETURN(1);
+}
+
+void
+as_string(SV* self, ...)
+OVERLOAD: \"\"
+CODE:
+{
+    if(!( SvROK(self) && SvOK(SvRV(self))) ) {
+        croak("Cannot call %s->as_string as a class method", TX_ESC_CLASS);
+    }
+    ST(0) = SvRV(self);
+    XSRETURN(1);
+}

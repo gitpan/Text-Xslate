@@ -4,10 +4,13 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_07';
+our $VERSION = '0.001_08';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
+
+use parent qw(Exporter);
+our @EXPORT_OK = qw(escaped_string);
 
 our $DEBUG;
 $DEBUG = $ENV{XSLATE} // $DEBUG // '';
@@ -165,7 +168,7 @@ sub _compiler {
                 $@;
             };
             if($e) {
-                $self->throw_error("Xslate: Cannot load the compiler: $@");
+                $self->throw_error("Xslate: Cannot load the compiler: $e");
             }
         }
 
@@ -183,6 +186,8 @@ sub _compiler {
                 $symbol->value($name);
             }
         }
+
+        $self->{compiler} = $compiler;
     }
 
     return $compiler;
@@ -248,7 +253,7 @@ Text::Xslate - High performance template engine (ALPHA)
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_07.
+This document describes Text::Xslate version 0.001_08.
 
 =head1 SYNOPSIS
 
@@ -284,6 +289,15 @@ This document describes Text::Xslate version 0.001_07.
     );
 
     print $tx->render(\%vars);
+
+    # you can tell the engine that some strings are already escaped.
+    use Text::Xslate qw(escaped_string);
+
+    $vars{email} = escaped_string('gfx &lt;gfuji at cpan.org&gt;');
+    # or
+    $vars{email} = Text::Xslate::EscapedString->new(
+        'gfx &lt;gfuji at cpan.org&gt;',
+    ); # if you don't want to pollute your namespace.
 
 =head1 DESCRIPTION
 
@@ -321,6 +335,24 @@ Options:
 =head3 B<< $tx->render($name, \%vars) -> Str >>
 
 Renders a template with variables, and returns the result.
+
+=head3 Exportable functions
+
+=head3 C<< escaped_string($str :Str) -> EscapedString >>
+
+Mark I<$str> as escaped. Escaped strings won't escaped by the engine,
+so you must make sure that these strings are escaped.
+
+For example:
+
+    my $tx = Text::Xslate->new(
+        string => "Mailaddress: <:= $email :>",
+    );
+    my %vars = (
+        email => "Foo &lt;foo@example.com&gt;",
+    );
+    print $tx->render(\%email);
+    # => Mailaddress: Foo &lt;foo@example.com&gt;
 
 =head1 TEMPLATE SYNTAX
 
@@ -390,7 +422,9 @@ Operator precedence:
 Xslate templates may be recursively included, but including depth is
 limited to 100.
 
-=head2 Template inheritance
+=head2 Cascading templates
+
+Also called as B<template inheritance>.
 
 (NOT YET IMPLEMENTED)
 
@@ -404,7 +438,7 @@ Base templates F<mytmpl/base.tx>:
 
 Derived templates F<mytmpl/foo.tx>:
 
-    : extends base
+    : cascade base
     : # use default title
     : override body {
         My Template Body!
@@ -412,7 +446,7 @@ Derived templates F<mytmpl/foo.tx>:
 
 Derived templates F<mytmpl/bar.tx>:
 
-    : extends foo
+    : cascade foo
     : # use default title
     : before body {
         Before body!
@@ -433,24 +467,6 @@ Output:
         Before body!
         My Template Body!
         Before Body!
-
-=head1 TODO
-
-=over
-
-=item *
-
-Documentation
-
-=item *
-
-Template inheritance (like Text::MicroTemplate::Extended)
-
-=item *
-
-Opcode-to-XS compiler
-
-=back
 
 =head1 DEPENDENCIES
 

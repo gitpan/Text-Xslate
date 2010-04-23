@@ -25,6 +25,7 @@ my $OPERATOR = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     << >>
     && || //
     -> =>
+    ::
 
     < >
     + - * / %
@@ -248,6 +249,8 @@ sub BUILD {
     $parser->symbol('}');
     $parser->symbol('->');
     $parser->symbol('else');
+    $parser->symbol('with');
+    $parser->symbol('::');
 
     # meta symbols
     $parser->symbol('(end)');
@@ -298,7 +301,7 @@ sub BUILD {
     # statements
     $parser->symbol('{')        ->set_std(\&_std_block);
     #$parser->symbol('var')      ->set_std(\&_std_var);
-    $parser->symbol('for')      ->set_std(\&_std_proc);
+    $parser->symbol('for')      ->set_std(\&_std_for);
     $parser->symbol('if')       ->set_std(\&_std_if);
 
     $parser->symbol('print')    ->set_std(\&_std_command);
@@ -308,7 +311,7 @@ sub BUILD {
 
     # template inheritance
 
-    $parser->symbol('extend')   ->set_std(\&_std_command);
+    $parser->symbol('cascade')  ->set_std(\&_std_bare_command);
     $parser->symbol('block')    ->set_std(\&_std_proc);
     $parser->symbol('override') ->set_std(\&_std_proc);
     $parser->symbol('before')   ->set_std(\&_std_proc);
@@ -349,8 +352,7 @@ sub advance {
     my $t = $parser->next_token();
 
     if(not defined $t) {
-        $parser->token( $symtab->{"(end)"} );
-        return;
+        return $parser->token( $symtab->{"(end)"} );
     }
 
     my($arity, $value) = @{$t};
@@ -708,38 +710,71 @@ sub _std_block {
 #    return @a;
 #}
 
-sub _std_proc {
+sub _std_for {
     my($parser, $symbol) = @_;
 
-    my $proc = $symbol->clone(arity => "proc");
+    my $proc = $symbol->clone(arity => "for");
 
     $proc->first( $parser->expression(0) );
+
+    $parser->new_scope();
 
     $parser->advance("->");
     $parser->advance("(");
 
-    my $t = $parser->token;
-    if($t->arity ne "variable") {
-        $parser->_parse_error("Expected a variable name, not $t");
+    my @vars;
+
+    while((my $t = $parser->token)->arity eq "variable") {
+        push @vars, $t;
+        $parser->define($t);
+        $parser->advance;
     }
 
-    my $iter_var = $t;
-    $proc->second( $iter_var );
-
-    $parser->advance();
+    $proc->second( \@vars );
 
     $parser->advance(")");
-
     $parser->advance("{");
-
-    $parser->new_scope();
-    $parser->define($iter_var);
-
     $proc->third($parser->statements());
+    $parser->advance("}");
 
     $parser->pop_scope();
 
+    return $proc;
+}
+
+sub _std_proc {
+    my($parser, $symbol) = @_;
+
+    my $proc = $symbol->clone(arity => "proc");
+    my $name = $parser->token;
+    if($name->arity ne "name") {
+        $parser->_parse_error("Expected name, but " . $parser->token . " is not");
+    }
+
+    $parser->define($name);
+    $proc->first( $name->id );
+    $parser->advance();
+
+    $parser->new_scope();
+    $parser->advance("->");
+    if($parser->token->id eq "(") {
+        $parser->advance("(");
+
+        my @vars;
+        while((my $t = $parser->token)->arity eq "variable") {
+            push @vars, $t;
+            $parser->define($t);
+            $parser->advance;
+        }
+
+        $proc->second( \@vars );
+        $parser->advance(")");
+    }
+
+    $parser->advance("{");
+    $proc->third($parser->statements());
     $parser->advance("}");
+    $parser->pop_scope();
 
     return $proc;
 }
@@ -775,6 +810,61 @@ sub _std_command {
     }
     $parser->advance(";");
     return $symbol->clone(first => \@args, arity => 'command');
+}
+
+sub _get_namespaced_name {
+    my($parser) = @_;
+    my @parts;
+
+    my $t = $parser->token;
+    if($t->arity ne "name") {
+        $parser->_parse_error("Expected name, but $t is not");
+    }
+
+    push @parts, $t->id;
+    $parser->advance();
+
+    while(1) {
+        my $t = $parser->token;
+
+        if($t->id eq "::") {
+            $t = $parser->advance("::");
+
+            if($t->arity ne "name") {
+                $parser->_parse_error("Expected name, but $t is not");
+            }
+
+            push @parts, $t->id;
+            $parser->advance();
+        }
+        else {
+            last;
+        }
+    }
+    return join "::", @parts;
+}
+
+sub _std_bare_command {
+    my($parser, $symbol) = @_;
+
+    my $name = $parser->_get_namespaced_name();
+    my @components;
+
+    if($parser->token->id eq 'with') {
+        $parser->advance('with');
+
+        push @components, $parser->_get_namespaced_name();
+        while($parser->token->id eq ',') {
+            $parser->advance(',');
+
+            push @components, $parser->_get_namespaced_name();
+        }
+    }
+    $parser->advance(";");
+    return $symbol->clone(
+        first  => $name,
+        second => \@components,
+        arity  => 'bare_command');
 }
 
 sub _parse_error {

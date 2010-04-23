@@ -30,8 +30,9 @@ requires:
   Mouse: 0.55
   MouseX::NativeTraits: 0.002
   XSLoader: 0.1
+  parent: 0.221
   perl: 5.10.0
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.001_07
+version: 0.001_08

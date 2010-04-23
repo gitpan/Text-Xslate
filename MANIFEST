@@ -26,6 +26,7 @@ inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Compiler.pm
+lib/Text/Xslate/EscapedString.pm
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/Symbol.pm
 Makefile.PL
@@ -47,6 +48,8 @@ t/020_basic/006_arith_ops.t
 t/020_basic/007_call.t
 t/020_basic/008_goto_address.t
 t/020_basic/009_include.t
+t/020_basic/010_cascade.t
+t/020_basic/011_escaped_str.t
 t/020_basic/100_examples.t
 t/030_interface/001_files.t
 t/030_interface/002_strings.t
@@ -59,6 +62,7 @@ t/template/hello2.tx
 t/template/hello_utf8.tx
 t/template/include.tx
 t/template/include2.tx
+t/template/myapp/base.tx
 tool/opcode.pl
 xs/Text-Xslate.xs
 xslate_ops.h
