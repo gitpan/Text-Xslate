@@ -6,7 +6,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_09';
+our $VERSION = '0.1000';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -32,7 +32,7 @@ sub new {
     my %args  = (@_ == 1 ? %{$_[0]} : @_);
 
     $args{suffix}       //= '.tx';
-    $args{path}         //= [ $class->default_path ];
+    $args{path}         //= [ '.' ];
     $args{input_layer}  //= ':utf8';
     $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
@@ -50,13 +50,6 @@ sub new {
     $self->_load_input();
 
     return $self;
-}
-
-sub default_path {
-    require FindBin;
-    require File::Basename;
-    no warnings 'once';
-    return( File::Basename::dirname($FindBin::Bin) . "/template" );
 }
 
 sub render;
@@ -254,7 +247,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_09.
+This document describes Text::Xslate version 0.1000.
 
 =head1 SYNOPSIS
 
@@ -330,15 +323,21 @@ Specifies the template string, which is called C<< <input> >> internally.
 
 Specifies file(s) to be preloaded.
 
-=item C<< path => \@path // ["$FindBin::Bin/../template"] >>
+=item C<< path => \@path // ["."] >>
 
-Specifies the include paths. Default to C<<["$FindBin::Bin/../template"]>>.
+Specifies the include paths. Default to C<<["."]>>.
 
 =item C<< function => \%functions >>
 
-
+Specifies functions.
 
 =item C<< cache => $level // 1 >>
+
+Sets the cache level. If I<$level> E<gt>= 2, modified times will not be checked.
+
+=item C<< input_layer => $perliolayers // ":utf8" >>
+
+Specifies PerlIO layers for reading.
 
 =back
 
@@ -350,8 +349,8 @@ Renders a template with variables, and returns the result.
 
 =head3 C<< escaped_string($str :Str) -> EscapedString >>
 
-Mark I<$str> as escaped. Escaped strings won't escaped by the engine,
-so you must make sure that these strings are escaped.
+Mark I<$str> as escaped. Escaped strings will not be escaped by the engine,
+so you have to escape these strings.
 
 For example:
 
@@ -375,6 +374,7 @@ TODO
     <:= $var :>
     <:= $var.field :>
     <:= $var["field"] :>
+    <:= $var[0] :>
 
 Variables may be HASH references, ARRAY references, or objects.
 
@@ -494,6 +494,20 @@ This is also called as B<template inheritance>.
     : }
     : signeture()
 
+=head1 TODO
+
+=over
+
+=item *
+
+Template-Toolkit-like syntax
+
+=item *
+
+HTML::Template-like syntax
+
+=back
+
 =head1 DEPENDENCIES
 
 Perl 5.10.0 or later, and a C compiler.
@@ -502,7 +516,7 @@ Perl 5.10.0 or later, and a C compiler.
 
 All complex software has bugs lurking in it, and this module is no
 exception. If you find a bug please either email me, or add the bug
-to cpan-RT.
+to cpan-RT.  Patches are welcome :)
 
 =head1 SEE ALSO
 

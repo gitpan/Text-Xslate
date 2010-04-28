@@ -7,6 +7,11 @@ benchmark/mobasif.pl
 benchmark/osdc-tw-demo-mt.pl
 benchmark/osdc-tw-demo-tt.pl
 benchmark/others.pl
+benchmark/template/list.mt
+benchmark/template/list.tt
+benchmark/template/list.tx
+benchmark/template/simple.mst
+benchmark/template/simple.tx
 Changes
 example/cascade.pl
 example/hello.pl
@@ -60,8 +65,10 @@ t/020_features/017_strings.t
 t/020_features/018_line_number.t
 t/020_features/019_utf8.t
 t/020_features/020_funcs.t
+t/020_features/021_more_macro.t
 t/020_features/100_examples.t
 t/020_features/101_eg_cascade.t
+t/lib/Util.pm
 t/template/eg/base.tx
 t/template/eg/child.tx
 t/template/for.tx
@@ -73,11 +80,6 @@ t/template/include2.tx
 t/template/myapp/base.tx
 t/template/myapp/base.tx.mod
 t/template/myapp/derived.tx
-template/list.mt
-template/list.tt
-template/list.tx
-template/simple.mst
-template/simple.tx
 tool/opcode.pl
 xs/Text-Xslate.xs
 xslate_ops.h
