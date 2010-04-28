@@ -1,7 +1,6 @@
 package Text::Xslate::Symbol;
 use 5.010;
 use Mouse;
-use Mouse::Util::TypeConstraints;
 
 use overload
     '""' => sub{ $_[0]->id },
@@ -156,6 +155,14 @@ sub clone {
     return $self->meta->clone_object($self, @_);
 }
 
-no Mouse::Util::TypeConstraints;
 no Mouse;
 __PACKAGE__->meta->make_immutable;
+
+__END__
+
+=head1 NAME
+
+Text::Xslate::Symbol - The symbol representation used by parsers
+
+=cut
+

@@ -2,10 +2,11 @@ package Text::Xslate::Parser;
 use 5.010;
 use Mouse;
 
-use Text::Xslate;
+use Text::Xslate::Util;
 use Text::Xslate::Symbol;
 
 use constant _DUMP_PROTO => ($Text::Xslate::DEBUG =~ /\b dump=proto \b/xmsi);
+use constant _DUMP_TOKEN => ($Text::Xslate::DEBUG =~ /\b dump=token \b/xmsi);
 
 our @CARP_NOT = qw(Text::Xslate::Compiler);
 
@@ -13,7 +14,7 @@ my $dquoted = qr/" (?: \\. | [^"\\] )* "/xms; # " for poor editors
 my $squoted = qr/' (?: \\. | [^'\\] )* '/xms; # ' for poor editors
 my $QUOTED  = qr/(?: $dquoted | $squoted )/xms;
 
-my $NUMBER  = qr/(?: [+-]? [0-9]+ (?: \. [0-9]+)? )/xms;
+my $NUMBER  = qr/(?: [0-9]+ (?: \. [0-9]+)? )/xms;
 
 my $ID      = qr/(?: [A-Za-z_][A-Za-z0-9_]* )/xms;
 
@@ -77,6 +78,14 @@ has input => (
     init_arg => undef,
 );
 
+has file => (
+    is  => 'rw',
+    isa => 'Str',
+
+    default  => '<input>',
+    required => 0,
+);
+
 has line => (
     is  => 'rw',
     isa => 'Int',
@@ -91,7 +100,7 @@ has line => (
 
 has line_start => (
     is      => 'ro',
-    isa     => 'RegexpRef',
+    isa     => 'Maybe[RegexpRef]',
     default => sub{ qr/\Q:/xms },
 );
 
@@ -126,19 +135,23 @@ sub split {
     my $tag_start     = $self->tag_start;
     my $tag_end       = $self->tag_end;
 
+    my $lex_line = defined($line_start) && qr/\A ^ [ \t]* $line_start ([^\n]* \n?) /xms;
+    my $lex_tag  = qr/\A ([^\n]*?) $tag_start ($CODE) $tag_end /xms;
+    my $lex_text = qr/\A ([^\n]* \n) /xms;
+
     while($_) {
-        if(s/\A ^ [ \t]* $line_start ([^\n]* \n?) //xms) {
+        if($lex_line && s/$lex_line//xms) {
             push @tokens,
                 [ code => _trim($1) ];
         }
-        elsif(s/\A ([^\n]*?) $tag_start ($CODE) $tag_end //xms) {
+        elsif(s/$lex_tag//xms) {
             if($1){
                 push @tokens, [ text => $1 ];
             }
             push @tokens,
                 [ code => _trim($2) ];
         }
-        elsif(s/\A ([^\n]* \n) //xms) {
+        elsif(s/$lex_text//xms) {
             push @tokens, [ text => $1 ];
         }
         else {
@@ -189,7 +202,7 @@ sub preprocess {
             }
         }
     }
-    print STDERR $code, "\n" if _DUMP_PROTO;
+    print STDOUT $code, "\n" if _DUMP_PROTO;
     return $code;
 }
 
@@ -206,14 +219,14 @@ sub next_token {
     elsif(s/\A ($QUOTED)//xmso){
         return [ string => $1 ];
     }
+    elsif(s/\A ($OPERATOR)//xmso){
+        return [ operator => $1 ];
+    }
     elsif(s/\A ($NUMBER)//xmso){
         return [ number => $1 ];
     }
     elsif(s/\A (\$ $ID)//xmso) {
         return [ variable => $1 ];
-    }
-    elsif(s/\A ($OPERATOR)//xmso){
-        return [ operator => $1 ];
     }
     elsif(s/\A $COMMENT //xmso) {
         goto &next_token; # tail call
@@ -229,15 +242,20 @@ sub next_token {
 sub parse {
     my($parser, $input) = @_;
 
-    $parser->line(0);
     $parser->input( $parser->preprocess($input) );
 
     return $parser->statements();
 }
 
+sub BUILD {
+    my($parser) = @_;
+    $parser->define_grammer();
+    return;
+}
+
 # The grammer
 
-sub BUILD {
+sub define_grammer {
     my($parser) = @_;
 
     # separators
@@ -292,11 +310,13 @@ sub BUILD {
     $parser->infixr('//', 30);
 
     $parser->prefix('!');
+    $parser->prefix('+');
+    $parser->prefix('-');
 
     $parser->prefix('(', \&_nud_paren);
 
     # constants
-    $parser->constant('nil', undef);
+    $parser->define_constant('nil', undef);
 
     # statements
     $parser->symbol('{')        ->set_std(\&_std_block);
@@ -312,10 +332,12 @@ sub BUILD {
     # template inheritance
 
     $parser->symbol('cascade')  ->set_std(\&_std_bare_command);
+    $parser->symbol('macro')    ->set_std(\&_std_proc);
     $parser->symbol('block')    ->set_std(\&_std_proc);
-    $parser->symbol('override') ->set_std(\&_std_proc);
+    $parser->symbol('around')   ->set_std(\&_std_proc);
     $parser->symbol('before')   ->set_std(\&_std_proc);
     $parser->symbol('after')    ->set_std(\&_std_proc);
+    $parser->symbol('super')    ->set_nud(\&_nud_literal);
 
     return;
 }
@@ -354,6 +376,8 @@ sub advance {
     if(not defined $t) {
         return $parser->token( $symtab->{"(end)"} );
     }
+
+    print STDOUT "[@{$t}]\n" if _DUMP_TOKEN;
 
     my($arity, $value) = @{$t};
     my $proto;
@@ -487,8 +511,8 @@ sub _led_call {
 
     my $call = $symbol->clone(arity => 'call');
 
-    if(!( $left->arity ~~ [qw(function name variable literal)] )) {
-        $parser->_parse_error("Expected a function, not $left");
+    if(!( $left->arity ~~ [qw(function name variable macro literal)] )) {
+        $parser->_parse_error("Expected a function, not " . $left->arity . " ($left)");
     }
 
     $call->first($left);
@@ -534,7 +558,7 @@ sub _nud_constant {
     return $c;
 }
 
-sub constant {
+sub define_constant {
     my($parser, $id, $value) = @_;
 
     my $symbol = $parser->symbol($id);
@@ -603,6 +627,44 @@ sub define { # define a name to the scope
     #$symbol->scope($top);
     return $symbol;
 }
+
+
+sub _nud_function{
+    my($p, $s) = @_;
+    my $f = $s->clone(arity => 'function');
+    $p->reserve($f);
+    return $f;
+}
+
+sub define_function {
+    my($compiler, @names) = @_;
+
+    foreach my $name(@names) {
+        my $symbol = $compiler->symbol($name);
+        $symbol->set_nud(\&_nud_function);
+        $symbol->value($name);
+    }
+    return;
+}
+
+sub _nud_macro{
+    my($p, $s) = @_;
+    my $f = $s->clone(arity => 'macro');
+    $p->reserve($f);
+    return $f;
+}
+
+sub define_macro {
+    my($compiler, @names) = @_;
+
+    foreach my $name(@names) {
+        my $symbol = $compiler->symbol($name);
+        $symbol->set_nud(\&_nud_macro);
+        $symbol->value($name);
+    }
+    return;
+}
+
 
 sub pop_scope {
     my($parser) = @_;
@@ -751,25 +813,29 @@ sub _std_proc {
         $parser->_parse_error("Expected name, but " . $parser->token . " is not");
     }
 
-    $parser->define($name);
+    $parser->define_macro($name->id);
     $proc->first( $name->id );
     $parser->advance();
 
     $parser->new_scope();
     $parser->advance("->");
+    my @vars;
     if($parser->token->id eq "(") {
         $parser->advance("(");
 
-        my @vars;
         while((my $t = $parser->token)->arity eq "variable") {
             push @vars, $t;
             $parser->define($t);
             $parser->advance;
+
+            if($parser->token->id eq ",") {
+                $parser->advance(",");
+            }
         }
 
-        $proc->second( \@vars );
         $parser->advance(")");
     }
+    $proc->second( \@vars );
 
     $parser->advance("{");
     $proc->third($parser->statements());
@@ -800,13 +866,15 @@ sub _std_if {
 sub _std_command {
     my($parser, $symbol) = @_;
     my @args;
-    while(1) {
-        push @args, $parser->expression(0);
+    if($parser->token->id ne ";") {
+        while(1) {
+            push @args, $parser->expression(0);
 
-        if($parser->token->id ne ",") {
-            last;
+            if($parser->token->id ne ",") {
+                last;
+            }
+            $parser->advance(",");
         }
-        $parser->advance(",");
     }
     $parser->advance(";");
     return $symbol->clone(first => \@args, arity => 'command');
@@ -870,8 +938,15 @@ sub _std_bare_command {
 sub _parse_error {
     my($self, $message) = @_;
 
-    Carp::croak("Xslate::Parser: $message at template line " . ($self->line + 1));
+    Carp::croak(sprintf 'Xslate::Parser(%s:%d): %s', $self->file, $self->line+1, $message);
 }
 
 no Mouse;
 __PACKAGE__->meta->make_immutable;
+__END__
+
+=head1 NAME
+
+Text::Xslate::Parser - An Xslate template parser used by default
+
+=cut

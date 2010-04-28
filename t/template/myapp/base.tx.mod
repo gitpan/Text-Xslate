@@ -1,5 +1,5 @@
 HEAD
 : block hello -> {
-    Hello, world!
+    Modified version of base.tx
 : }
 FOOT

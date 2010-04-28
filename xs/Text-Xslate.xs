@@ -82,7 +82,8 @@ struct tx_state_s {
     SV** pad;    /* AvARRAY(locals) */
 
     HV* function;
-    HV* block;
+
+    HV* macro;
 
     U32 hint_size;
 
@@ -106,9 +107,6 @@ tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, in
     if(UNLIKELY(*svp == NULL)) {
         croak("panic: %s is NULL at %s line %d.\n", name, f, l);
     }
-    else if(UNLIKELY(SvIS_FREED(*svp))) {
-        croak("panic: %s is a freed sv at %s line %d.\n", name, f, l);
-    }
     return svp;
 }
 
@@ -116,6 +114,7 @@ tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, in
 
 static SV**
 tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_id) {
+    assert(st);
     if(AvFILLp(st->locals) < lvar_id) {
         croak("panic: local variable storage is smaller (%d < %d)",
             (int)AvFILLp(st->locals), (int)lvar_id);
@@ -135,11 +134,12 @@ tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_id) {
 #define TX_lvar(ix) TX_lvarx(TX_st, ix)
 
 #define TXCODE_literal_i TXCODE_literal
+#define TXCODE_depend    TXCODE_noop
 
 #include "xslate_ops.h"
 
-static SV*
-tx_exec(pTHX_ tx_state_t* const base, SV* const output, HV* const hv);
+static void
+tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv);
 
 static tx_state_t*
 tx_load_template(pTHX_ SV* const self, SV* const name);
@@ -327,6 +327,21 @@ XSLATE_w_var(fetch_lvar) {
     TX_st->pc++;
 }
 
+XSLATE_w_int(fetch_arg) {
+    dSP;
+    SV** const topmark = PL_stack_base + TOPMARK;
+    IV const items     = SP - topmark;
+    IV const ix        = SvIVX(TX_op_arg);
+
+    if(items <= ix) {
+        croak("Too few arguments for macro");
+    }
+
+    TX_st_sa = *(topmark + ix);
+
+    TX_st->pc++;
+}
+
 XSLATE(fetch_field) { /* fetch a field from a variable (bin operator) */
     SV* const var = TX_st_sb;
     SV* const key = TX_st_sa;
@@ -408,12 +423,6 @@ XSLATE(print) {
     TX_st->pc++;
 }
 
-XSLATE_w_sv(print_s) {
-    TX_st_sa = TX_op_arg;
-
-    TXCODE_print(aTHX_ TX_st);
-}
-
 XSLATE(print_raw) {
     sv_catsv_nomg(TX_st->output, TX_st_sa);
 
@@ -430,21 +439,12 @@ XSLATE(include) {
     tx_state_t* const st = tx_load_template(aTHX_ TX_st->self, TX_st_sa);
 
     ENTER; /* for error handlers */
-    tx_exec(aTHX_ st, TX_st->output, TX_st->vars);
+    tx_execute(aTHX_ st, TX_st->output, TX_st->vars);
     LEAVE;
 
     TX_st->pc++;
 }
 
-XSLATE_w_sv(include_s) {
-    tx_state_t* const st = tx_load_template(aTHX_ TX_st->self, TX_op_arg);
-
-    ENTER; /* for error handlers */
-    tx_exec(aTHX_ st, TX_st->output, TX_st->vars);
-    LEAVE;
-
-    TX_st->pc++;
-}
 
 XSLATE_w_var(for_start) {
     SV* const avref = TX_st_sa;
@@ -473,7 +473,7 @@ XSLATE_goto(for_iter) {
     assert(SvIOK(i));
 
     //warn("for_next[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
-    if(LIKELY(++SvIVX(i) <= AvFILLp(av))) {
+    if(LIKELY(++SvIVX(i) <= av_len(av))) {
         SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
         sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
         TX_st->pc++;
@@ -579,11 +579,22 @@ XSLATE_goto(dor) {
 }
 
 XSLATE(not) {
-    assert(TX_st_sa != NULL);
     TX_st_sa = boolSV( !sv_true(TX_st_sa) );
 
     TX_st->pc++;
 }
+
+XSLATE(plus) { /* unary plus */
+    sv_setnv(TX_st->targ, +SvNVx(TX_st_sa));
+    TX_st_sa = TX_st->targ;
+    TX_st->pc++;
+}
+XSLATE(minus) { /* unary minus */
+    sv_setnv(TX_st->targ, -SvNVx(TX_st_sa));
+    TX_st_sa = TX_st->targ;
+    TX_st->pc++;
+}
+
 
 static I32
 tx_sv_eq(pTHX_ SV* const a, SV* const b) {
@@ -639,51 +650,63 @@ XSLATE(ge) {
     TX_st->pc++;
 }
 
+XSLATE(macrocall) {
+    U32 const addr = (U32)SvUVX(TX_st_sa);
+    dSP;
 
-XSLATE_w_sv(insert_block) {
-    SV* const name = TX_op_arg;
-    HE* he;
+    ENTER;
+    SAVETMPS;
 
-    if(TX_st->block && (he = hv_fetch_ent(TX_st->block, name, FALSE, 0U))) {
-        dSP;
+    mXPUSHu(TX_st->pc + 1); /* return address */
+    PUTBACK;
 
-        ENTER;
-        SAVETMPS;
-        mXPUSHu(TX_st->pc + 1); /* return address */
-        PUTBACK;
-        /* XXX: should do something else? */
-        TX_st->pc = SvUV(hv_iterval(TX_st->block, he));
-    }
-    else {
-        croak("Block %s is not defined", tx_neat(aTHX_ name));
-    }
+    TX_st->pc = addr;
 }
 
-XSLATE_w_sv(begin_block) {
+XSLATE_w_key(macro_begin) {
     TX_st->pc++;
 }
 
-XSLATE(end_block) {
+XSLATE(macro_end) {
     SV* const retaddr = TX_pop();
     TX_st->pc = SvUVX(retaddr);
+
+    (void)POPMARK;
+
     FREETMPS;
     LEAVE;
 }
 
-XSLATE_w_key(function) {
+XSLATE_w_key(macro) {
+    SV* const name = TX_op_arg;
     HE* he;
-
-    if(TX_st->function && (he = hv_fetch_ent(TX_st->function, TX_op_arg, FALSE, 0U))) {
-        TX_st_sa = hv_iterval(TX_st->function, he);
+    if(TX_st->macro && (he = hv_fetch_ent(TX_st->macro, name, FALSE, 0U))) {
+        TX_st_sa = hv_iterval(TX_st->macro, he);
     }
-    else {
-        croak("Function %s is not registered", tx_neat(aTHX_ TX_op_arg));
+
+    if(!SvOK(TX_st_sa)) {
+        croak("Macro %s is not defined", tx_neat(aTHX_ name));
     }
 
     TX_st->pc++;
 }
 
-XSLATE(call) {
+XSLATE_w_key(function) {
+    SV* const name = TX_op_arg;
+    HE* he;
+
+    if(TX_st->function && (he = hv_fetch_ent(TX_st->function, name, FALSE, 0U))) {
+        TX_st_sa = hv_iterval(TX_st->function, he);
+    }
+    else {
+        croak("Function %s is not registered", tx_neat(aTHX_ name));
+    }
+
+    TX_st->pc++;
+}
+
+
+XSLATE(funcall) {
     /* PUSHMARK & PUSH must be done */
     TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "calling");
 
@@ -693,6 +716,8 @@ XSLATE(call) {
 XSLATE_goto(goto) {
     TX_st->pc = SvUVX(TX_op_arg);
 }
+
+XSLATE_w_sv(depend); /* indicate files for templates to depend on */
 
 XSLATE(exit) {
     TX_st->pc = TX_st->code_len;
@@ -719,8 +744,8 @@ XS(XS_Text__Xslate__error) {
     XSRETURN_EMPTY; /* not reached */
 }
 
-static SV*
-tx_exec(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
+static void
+tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     dMY_CXT;
     Size_t const code_len = base->code_len;
     tx_state_t st;
@@ -750,19 +775,20 @@ tx_exec(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     }
 
     while(st.pc < code_len) {
+#ifdef DEBUGGING
         Size_t const old_pc = st.pc;
+#endif
         CALL_FPTR(st.code[st.pc].exec_code)(aTHX_ &st);
-
+#ifdef DEBUGGING
         if(UNLIKELY(old_pc == st.pc)) {
             croak("panic: pogram counter has not been changed on [%d]", (int)st.pc);
         }
+#endif
     }
 
     base->hint_size = SvCUR(st.output);
 
     MY_CXT.depth--;
-
-    return st.output;
 }
 
 
@@ -799,7 +825,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     Safefree(st->lines);
 
     SvREFCNT_dec(st->function);
-    SvREFCNT_dec(st->block);
+    SvREFCNT_dec(st->macro);
     SvREFCNT_dec(st->locals);
     SvREFCNT_dec(st->targ);
     SvREFCNT_dec(st->self);
@@ -838,7 +864,7 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
     Copy(proto_lines, st->lines, len, U16);
 
     st->function = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->function, param);
-    st->block    = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->block,    param);
+    st->macro    = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->macro,    param);
     st->locals   = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->locals, param);
     st->targ     =      tx_sv_dup_inc(aTHX_ st->targ, param);
     st->self     =      tx_sv_dup_inc(aTHX_ st->self, param);
@@ -874,10 +900,46 @@ tx_invoke_load_file(pTHX_ SV* const self, SV* const name) {
     PUSHs(name);
     PUTBACK;
 
-    call_method("_load_file", G_EVAL | G_VOID);
+    call_method("load_file", G_EVAL | G_VOID);
 
     FREETMPS;
     LEAVE;
+}
+
+static bool
+tx_all_deps_are_fresh(pTHX_ AV* const tmpl, Time_t const mtime) {
+    I32 const len = AvFILLp(tmpl) + 1;
+    if(len > TXo_size) { /* cascading templates have dependencies */
+        I32 i;
+        Stat_t f;
+
+        for(i = TXo_size; i < len; i++) {
+            SV* const path = AvARRAY(tmpl)[i];
+            //PerlIO_stdoutf("check deps: %"SVf" ... ", path); // */
+            if(PerlLIO_stat(SvPV_nolen_const(path), &f) < 0
+                   || f.st_mtime > mtime) {
+                SV* const mainpath = AvARRAY(tmpl)[TXo_FULLPATH];
+
+                /* compiled files are no longer fresh, so it must be discarded */
+                PerlLIO_unlink(SvPV_nolen_const(path));
+
+                if(SvOK(mainpath)) {
+                    STRLEN l;
+                    const char* const s = SvPV_const(mainpath, l);
+                    if(s[l-1] == 'c') {
+                        PerlLIO_unlink(s);
+                    }
+                }
+
+                //PerlIO_stdoutf("too old\n", path); // */
+                return FALSE;
+            }
+            else {
+                //PerlIO_stdoutf("fresh enough\n", path); // */
+            }
+        }
+    }
+    return TRUE;
 }
 
 static tx_state_t*
@@ -892,6 +954,8 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     MAGIC* mg;
     int retried = 0;
 
+    //PerlIO_stdoutf("load_template(%"SVf")\n", name);
+
     if(!(SvROK(self) && SvTYPE(SvRV(self)) == SVt_PVHV)) {
         croak("Invalid xslate object");
     }
@@ -899,11 +963,14 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     hv = (HV*)SvRV(self);
 
     retry:
-    if(++retried > 2) {
+    if(retried > 1) {
         why = "something's wrong";
         goto err;
     }
 
+    /* validation by modified time (mtime) */
+
+    /* my $ttable = $self->{template} */
     svp = hv_fetchs(hv, "template", FALSE);
     if(!svp) {
         why = "template table is not found";
@@ -918,6 +985,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
 
     ttable = (HV*)SvRV(sv);
 
+    /* $tmpl = $ttable->{$name} */
     he = hv_fetch_ent(ttable, name, FALSE, 0U);
     if(!he) {
         tx_invoke_load_file(aTHX_ self, name);
@@ -926,6 +994,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
             goto err;
         }
 
+        retried++;
         goto retry;
     }
 
@@ -938,31 +1007,47 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     tmpl = (AV*)SvRV(sv);
     mg   = mgx_find(aTHX_ (SV*)tmpl, &xslate_vtbl);
 
-    if(AvFILLp(tmpl) >= (TXo_size-1)) {
-        why = "template entry is broken";
+    if(AvFILLp(tmpl) < (TXo_size-1)) {
+        why = form("template entry is broken (size:%d < %d)", AvFILLp(tmpl)+1, TXo_size);
+        goto err;
     }
+
+    /* check mtime */
 
     if(SvOK(AvARRAY(tmpl)[TXo_FULLPATH])) { /* for files */
         SV* const fullpath = AvARRAY(tmpl)[TXo_FULLPATH];
         SV* const mtime    = AvARRAY(tmpl)[TXo_MTIME];
         Stat_t f;
 
-        if(PerlLIO_stat(SvPV_nolen_const(fullpath), &f) < 0) {
-            why = "failed to stat(2)";
+        if(!SvOK(mtime)) { /* non-checking mode (i.e. release mode) */
+            return (tx_state_t*)mg->mg_ptr;
+        }
+
+        if(PerlLIO_stat(SvPV_nolen_const(fullpath), &f) < 0 && errno != ENOENT) {
+            why = form("failed to stat(2) for %"SVf, fullpath);
             goto err;
         }
 
-        if(SvIV(mtime) == (IV)f.st_mtime) {
+        if(SvIV(mtime) == (IV)f.st_mtime
+                && (retried > 0 || tx_all_deps_are_fresh(aTHX_ tmpl, f.st_mtime))) {
             return (tx_state_t*)mg->mg_ptr;
         }
         else {
             tx_invoke_load_file(aTHX_ self, name);
+            retried++;
             goto retry;
         }
 
     }
-    else { /* for strings */
-        return (tx_state_t*)mg->mg_ptr;
+    else { /* for strings (i.e. <input>) */
+        if(retried > 0 || tx_all_deps_are_fresh(aTHX_ tmpl, PL_basetime /* $^T */)) {
+            return (tx_state_t*)mg->mg_ptr;
+        }
+        else {
+            tx_invoke_load_file(aTHX_ self, name);
+            retried++;
+            goto retry;
+        }
     }
 
     err:
@@ -976,7 +1061,7 @@ PROTOTYPES: DISABLE
 
 BOOT:
 {
-    HV* const ops = get_hv("Text::Xslate::_ops", GV_ADDMULTI);
+    HV* const ops = get_hv("Text::Xslate::OPS", GV_ADDMULTI);
     MY_CXT_INIT;
     MY_CXT.depth = 0;
     MY_CXT.escaped_string_stash = gv_stashpvs(TX_ESC_CLASS, GV_ADDMULTI);
@@ -1004,7 +1089,7 @@ _initialize(HV* self, AV* proto, SV* name = undef, SV* fullpath = undef, SV* mti
 CODE:
 {
     MAGIC* mg;
-    HV* const ops = get_hv("Text::Xslate::_ops", GV_ADD);
+    HV* const ops = get_hv("Text::Xslate::OPS", GV_ADD);
     I32 const len = av_len(proto) + 1;
     I32 i;
     U16 l = 0;
@@ -1146,12 +1231,16 @@ CODE:
 
 
             /* special cases */
-            if(opnum == TXOP_begin_block) {
-                if(!st.block) {
-                    st.block = newHV();
-                    ((tx_state_t*)mg->mg_ptr)->block = st.block;
+            if(opnum == TXOP_macro_begin) {
+                if(!st.macro) {
+                    st.macro = newHV();
+                    ((tx_state_t*)mg->mg_ptr)->macro = st.macro;
                 }
-                (void)hv_store_ent(st.block, st.code[i].arg, newSViv(i), 0U);
+                (void)hv_store_ent(st.macro, st.code[i].arg, newSViv(i), 0U);
+            }
+            else if(opnum == TXOP_depend) {
+                /* add a dependent file to the tmpl object */
+                av_push(tmpl, SvREFCNT_inc_simple_NN(st.code[i].arg));
             }
         }
         else {
@@ -1201,7 +1290,7 @@ CODE:
     sv_grow(RETVAL, st->hint_size);
     SvPOK_on(RETVAL);
 
-    tx_exec(aTHX_ st, RETVAL, vars);
+    tx_execute(aTHX_ st, RETVAL, vars);
 
     ST(0) = RETVAL;
     XSRETURN(1);
@@ -1244,3 +1333,4 @@ CODE:
     ST(0) = SvRV(self);
     XSRETURN(1);
 }
+

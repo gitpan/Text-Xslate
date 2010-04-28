@@ -1,10 +1,12 @@
 package Text::Xslate;
 
+# The Xslate engine class
+
 use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.001_08';
+our $VERSION = '0.001_09';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -12,15 +14,16 @@ XSLoader::load(__PACKAGE__, $VERSION);
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string);
 
-our $DEBUG;
-$DEBUG = $ENV{XSLATE} // $DEBUG // '';
+use Text::Xslate::Util;
+
+use constant _DUMP_LOAD_FILE => ($Text::Xslate::DEBUG =~ /\b dump=load_file \b/xms);
 
 my $dquoted = qr/" (?: \\. | [^"\\] )* "/xms; # " for poor editors
 my $squoted = qr/' (?: \\. | [^'\\] )* '/xms; # ' for poor editors
 my $STRING  = qr/(?: $dquoted | $squoted )/xms;
 my $NUMBER  = qr/(?: [+-]? [0-9]+ (?: \. [0-9]+)? )/xms;
 
-my $IDENT   = qr/(?: [.]? [a-zA-Z_][a-zA-Z0-9_]* )/xms;
+my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
 my $XSLATE_MAGIC = ".xslate $VERSION\n";
 
@@ -28,6 +31,7 @@ sub new {
     my $class = shift;
     my %args  = (@_ == 1 ? %{$_[0]} : @_);
 
+    $args{suffix}       //= '.tx';
     $args{path}         //= [ $class->default_path ];
     $args{input_layer}  //= ':utf8';
     $args{cache}        //= 1;
@@ -39,30 +43,11 @@ sub new {
     my $self = bless \%args, $class;
 
     if(my $file = $args{file}) {
-        $self->_load_file($_)
+        $self->load_file($_)
             for ref($file) ? @{$file} : $file;
     }
 
-    my $source = 0;
-
-    if($args{string}) {
-        $source++;
-        $self->_load_string($args{string});
-    }
-
-    if($args{assembly}) {
-        $source++;
-        $self->_load_assembly($args{assembly});
-    }
-
-    if($args{protocode}) {
-        $source++;
-        $self->_initialize($args{protocode});
-    }
-
-    if($source > 1) {
-        $self->throw_error("Multiple template sources are specified");
-    }
+    $self->_load_input();
 
     return $self;
 }
@@ -78,78 +63,103 @@ sub render;
 
 sub _initialize;
 
-sub _load_file {
+sub _load_input { # for <input>
+    my($self) = @_;
+
+    my $source = 0;
+    my $protocode;
+
+    if($self->{string}) {
+        $source++;
+        $protocode = $self->_load_string($self->{string});
+    }
+
+    if($self->{assembly}) {
+        $source++;
+        $protocode = $self->_load_assembly($self->{assembly});
+    }
+
+    if($self->{protocode}) {
+        $source++;
+        $self->_initialize($protocode = $self->{protocode});
+    }
+
+    if($source > 1) {
+        $self->throw_error("Multiple template sources are specified");
+    }
+
+    #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper $protocode;
+
+    return $protocode;
+}
+
+sub load_file {
     my($self, $file) = @_;
 
-    my $fullpath;
-    my $is_assembly = 0;
+    print STDOUT "load_file($file)\n" if _DUMP_LOAD_FILE;
 
-    foreach my $p(@{ $self->{path} }) {
-        $fullpath = "$p/${file}";
-        if(-f "${fullpath}c") {
-            my $m1 = -M _;
-            my $m2 = -M $fullpath;
-
-            if($m1 == $m2) {
-                $fullpath     .= 'c';
-                $is_assembly   = 1;
-            }
-            last;
-        }
-        elsif(-f $fullpath) {
-            last;
-        }
-        else {
-            $fullpath = undef;
-        }
+    if($file eq '<input>') { # simply reload it
+        return $self->_load_input() // $self->throw_error("Template source <input> does not exist");
     }
 
-    if(not defined $fullpath) {
-        $self->throw_error("Cannot find $file (path: @{$self->{path}})");
+    my $f = Text::Xslate::Util::find_file($file, $self->{path});
+
+    if(not defined $f) {
+        $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
+
+    my $fullpath    = $f->{fullpath};
+    my $mtime       = $f->{mtime};
+    my $is_compiled = $f->{is_compiled};
+
+    print STDOUT "---> $fullpath\n" if _DUMP_LOAD_FILE;
+
+    # if $mtime is undef, the runtime does not check freshness of caches.
+    undef $mtime if $self->{cache} >= 2;
 
     my $string;
     {
         open my($in), '<' . $self->{input_layer}, $fullpath
-            or $self->throw_error("Cannot open $fullpath for reading: $!");
+            or $self->throw_error("LoadError: Cannot open $fullpath for reading: $!");
 
-        if($is_assembly && scalar(<$in>) ne $XSLATE_MAGIC) {
+        if($is_compiled && scalar(<$in>) ne $XSLATE_MAGIC) {
             # magic token is not matched
             close $in;
-            unlink $fullpath or Carp::croak("Cannot unlink $fullpath: $!");
-            goto &_load_file; # retry
+            unlink $fullpath or $self->throw_error("LoadError: Cannot unlink $fullpath: $!");
+            goto &load_file; # retry
         }
         local $/;
         $string = <$in>;
     }
 
-    my $mtime = ( stat $fullpath )[9];
-
-    if($is_assembly) {
-        $self->_load_assembly($string, $file, $fullpath, $mtime);
+    my $protocode;
+    if($is_compiled) {
+        $protocode = $self->_load_assembly($string, $file, $fullpath, $mtime);
     }
     else {
-        my $protocode = $self->_compiler->compile($string);
+        $protocode = $self->_compiler->compile($string, file => $file);
 
         if($self->{cache}) {
             # compile templates into assemblies
-            open my($out), '>:raw:utf8', "${fullpath}c"
-                or $self->throw_error("Cannot open ${fullpath}c for writing: $!");
+            my $pathc = "${fullpath}c";
+            open my($out), '>:raw:utf8', $pathc
+                or $self->throw_error("LoadError: Cannot open $pathc for writing: $!");
 
             print $out $XSLATE_MAGIC;
             print $out $self->_compiler->as_assembly($protocode);
             if(!close $out) {
-                 Carp::carp("Xslate: Cannot close ${fullpath}c (ignored): $!");
-                 unlink "${fullpath}c";
+                 Carp::carp("Xslate: Cannot close $pathc (ignored): $!");
+                 unlink $pathc;
             }
             else {
-                 utime $mtime, $mtime, "${fullpath}c";
+                my $t = $mtime // ( stat $fullpath )[9];
+                utime $t, $t, $pathc;
             }
         }
 
         $self->_initialize($protocode, $file, $fullpath, $mtime);
     }
-    return;
+    return $protocode;
 }
 
 sub _compiler {
@@ -172,19 +182,10 @@ sub _compiler {
             }
         }
 
-        $compiler = $compiler->new();
+        $compiler = $compiler->new(engine => $self);
 
         if(my $funcs = $self->{function}) {
-            while(my $name = each %{$funcs}) {
-                my $symbol = $compiler->symbol($name);
-                $symbol->set_nud(sub {
-                    my($p, $s) = @_;
-                    my $f = $s->clone(arity => 'function');
-                    $p->reserve($f);
-                    return $f;
-                });
-                $symbol->value($name);
-            }
+            $compiler->define_function(keys %{$funcs});
         }
 
         $self->{compiler} = $compiler;
@@ -198,7 +199,7 @@ sub _load_string {
 
     my $protocode = $self->_compiler->compile($string);
     $self->_initialize($protocode, @args);
-    return;
+    return $protocode;
 }
 
 sub _load_assembly {
@@ -234,7 +235,7 @@ sub _load_assembly {
     #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper(\@protocode);
 
     $self->_initialize(\@protocode, @args);
-    return;
+    return \@protocode;
 }
 
 sub throw_error {
@@ -249,11 +250,11 @@ __END__
 
 =head1 NAME
 
-Text::Xslate - High performance template engine (ALPHA)
+Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.001_08.
+This document describes Text::Xslate version 0.001_09.
 
 =head1 SYNOPSIS
 
@@ -302,11 +303,12 @@ This document describes Text::Xslate version 0.001_08.
 =head1 DESCRIPTION
 
 B<Text::Xslate> is a template engine tuned for persistent applications.
-This engine introduces virtual machines. That is, templates are compiled
-into xslate opcodes, and then executed by the xslate virtual machine just
-like as Perl does.
+This engine introduces the virtual machine paradigm. That is, templates are
+compiled into xslate opcodes, and then executed by the xslate virtual machine
+just like as Perl does. Accordingly, Xslate is much faster than other template
+engines.
 
-This software is under development. Any interfaces will be changed.
+Note that B<this software is under development>.
 
 =head1 INTERFACE
 
@@ -322,13 +324,21 @@ Options:
 
 =item C<< string => $template_string >>
 
+Specifies the template string, which is called C<< <input> >> internally.
+
 =item C<< file => $template_file | \@template_files >>
+
+Specifies file(s) to be preloaded.
 
 =item C<< path => \@path // ["$FindBin::Bin/../template"] >>
 
+Specifies the include paths. Default to C<<["$FindBin::Bin/../template"]>>.
+
 =item C<< function => \%functions >>
 
-=item C<< cache => $bool // true >>
+
+
+=item C<< cache => $level // 1 >>
 
 =back
 
@@ -417,16 +427,12 @@ Operator precedence:
 
 =head2 Template inclusion
 
-    ? include "foo.tx"
+    : include "foo.tx"
 
 Xslate templates may be recursively included, but including depth is
 limited to 100.
 
-=head2 Cascading templates
-
-Also called as B<template inheritance>.
-
-(NOT YET IMPLEMENTED)
+=head2 Template cascading
 
 Base templates F<mytmpl/base.tx>:
 
@@ -434,24 +440,28 @@ Base templates F<mytmpl/base.tx>:
         [My Template!]
     : }
 
-    : block body is abstract # without default
+    : block body -> {;} # without default
 
-Derived templates F<mytmpl/foo.tx>:
+Another derived template F<mytmpl/foo.tx>:
 
-    : cascade base
+    : cascade mytmpl::base
     : # use default title
-    : override body {
+    : around body -> {
         My Template Body!
     : }
 
-Derived templates F<mytmpl/bar.tx>:
+Yet another derived template F<mytmpl/bar.tx>:
 
-    : cascade foo
-    : # use default title
-    : before body {
+    : cascade mytmpl::foo
+    : around title -> {
+        --------------
+        : super
+        --------------
+    : }
+    : before body -> {
         Before body!
     : }
-    : after body {
+    : after body -> {
         After body!
     : }
 
@@ -462,11 +472,27 @@ Then, Perl code:
 
 Output:
 
+        --------------
         [My Template!]
+        --------------
 
         Before body!
         My Template Body!
-        Before Body!
+        After Body!
+
+This is also called as B<template inheritance>.
+
+=head2 Macro blocks
+
+    : macro add ->($x, $y) {
+    :   x + $y;
+    : }
+    := add(10, 20)
+
+    : macro signeture -> {
+        This is foo version <:= $VERSION :>
+    : }
+    : signeture()
 
 =head1 DEPENDENCIES
 
@@ -484,7 +510,7 @@ L<Text::MicroTemplate>
 
 L<Text::ClearSilver>
 
-L<Template>
+L<Template-Toolkit>
 
 L<HTML::Template>
 

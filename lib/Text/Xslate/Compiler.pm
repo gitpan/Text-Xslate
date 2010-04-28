@@ -2,15 +2,15 @@ package Text::Xslate::Compiler;
 use 5.010;
 use Mouse;
 
-use Text::Xslate;
+use Text::Xslate::Util;
+use Text::Xslate::Parser;
+
 use Scalar::Util ();
 
 use constant _DUMP_ASM => ($Text::Xslate::DEBUG =~ /\b dump=asm \b/xms);
 use constant _OPTIMIZE => ($Text::Xslate::DEBUG =~ /\b optimize=(\d+) \b/xms);
 
-extends qw(Text::Xslate::Parser);
-
-our @CARP_NOT = qw(Text::Xslate);
+our @CARP_NOT = qw(Text::Xslate Text::Xslate::Parser);
 
 my %bin = (
     '==' => 'eq',
@@ -38,6 +38,12 @@ my %bin_r = (
     '//' => 'dor',
 );
 
+my %unary = (
+    '!' => 'not',
+    '+' => 'plus',
+    '-' => 'minus',
+);
+
 has lvar_id => ( # local varialbe id
     is  => 'rw',
     isa => 'Int',
@@ -58,18 +64,49 @@ has lvar => ( # local varialbe id table
     default => sub{ {} },
 );
 
-has block_table => (
+has macro_table => (
     is  => 'rw',
     isa => 'HashRef',
 
-    clearer => 'clear_block_table',
+    clearer => 'clear_macro_table',
 
     lazy    => 1,
     default => sub{ {} },
 );
 
+has engine => (
+    is  => 'ro',
+    isa => 'Object', # Text::Xslate
+
+    weak_ref => 1,
+
+    required => 0,
+);
+
+has parser => (
+    is  => 'ro',
+    isa => 'Object', # Text::Xslate::Parser
+
+    handles => [qw(file line define_constant define_function)],
+
+    default => sub {
+        return Text::Xslate::Parser->new();
+    },
+
+    required => 0,
+);
+
+has cascading => (
+    is  => 'rw',
+    isa => 'Maybe[Str]',
+
+    required => 0,
+);
+
 sub compile_str {
     my($self, $str) = @_;
+
+    require Text::Xslate;
 
     return Text::Xslate->new(
         protocode    => $self->compile($str),
@@ -81,34 +118,56 @@ sub compile_str {
 }
 
 sub compile {
-    my($self, $str, $optimize) = @_;
+    my($self, $str, %args) = @_;
 
-    my $ast = $self->parse($str);
+    my $parser = $self->parser;
 
+    $parser->file($args{file}) if defined $args{file};
+    $parser->line(0);
+
+    my $ast = $parser->parse($str);
+
+    # main
     my @code = $self->_compile_ast($ast);
-    push @code, ['exit'];
 
-    # sub blocks
-    foreach my $block(values %{ $self->block_table }) {
-        push @code, [ 'begin_block', $block->{name} ];
+    my $mtable = $self->macro_table;
+    my $main = delete $mtable->{'@main'}; # cascade
 
-        if($block->{name} eq 'after') {
-            push @code, ['super'];
+    if(defined $main) {
+        # all the main code will be discarded
+        foreach my $c(@code) {
+            if(!($c->[0] eq 'print_raw_s' && $c->[1] =~ m{\A [ \t\r\n]* \z}xms)) {
+                if($c->[0] eq 'print_raw_s') {
+                    Carp::carp("Xslate: Uselses use of text '$c->[1]'");
+                }
+                else {
+                    Carp::carp("Xslate: Useless use of $c->[0] " . ($c->[1] // 'undef'));
+                }
+            }
         }
 
-        push @code, @{ $block->{body} };
-
-        if($block->{name} eq 'before') {
-            push @code, ['super'];
-        }
-
-        push @code, [ 'end_block' ];
+        @code = $self->_compile_cascade($main);
     }
-    $self->clear_block_table();
+    else {
+        push @code, ['exit'];
+    }
 
-    $self->_optimize(\@code) if $optimize // _OPTIMIZE // 1;
+    # macros
+    foreach my $macros(values %{ $mtable }) {
+        foreach my $macro(ref($macros) eq 'ARRAY' ? @{$macros} : $macros) {
+            push @code, [ 'macro_begin', $macro->{name}, $macro->{line} ];
+            push @code, @{ $macro->{body} };
+            push @code, [ 'macro_end' ];
+        }
+    }
+    $self->clear_macro_table();
 
-    print $self->as_assembly(\@code) if _DUMP_ASM;
+    $self->_optimize(\@code) for 1 .. $args{optimize} // _OPTIMIZE // 2;
+
+    print "// ", $self->file, "\n", $self->as_assembly(\@code) if _DUMP_ASM;
+
+    $self->file("<input>"); # reset
+
     return \@code;
 }
 
@@ -120,13 +179,85 @@ sub _compile_ast {
 
     confess("Not an ARRAY reference: $ast") if ref($ast) ne 'ARRAY';
     foreach my $node(@{$ast}) {
+        blessed($node) or Carp::confess("Not a node object: $node");
         my $generator = $self->can('_generate_' . $node->arity)
-            || Carp::croak("Cannot generate codes for " . $node->dump);
+            || Carp::croak("Cannot generate codes for " . $node->arity . ": " . $node->dump);
 
         push @code, $self->$generator($node);
     }
 
     return @code;
+}
+
+sub _compile_cascade {
+    my($self, $main) = @_;
+    my $mtable = $self->macro_table;
+
+    my @code = @{$main};
+    for(my $i = 0; $i < @code; $i++) {
+        my $c = $code[$i];
+        if($c->[0] ne 'macro_begin') {
+            next;
+        }
+
+        # macro
+        my $name = $c->[1];
+        #warn "macro ", $name, "\n";
+
+        if(exists $mtable->{$name}) {
+            Carp::croak(
+                "Xslate($mtable->{$name}{line}): " .
+                "$name is already defined in " . $self->cascading . "\n" .
+                "(you must use before/around/after to override blocks)",
+            );
+        }
+
+        my $before = delete $mtable->{$name . '@before'};
+        my $around = delete $mtable->{$name . '@around'};
+        my $after  = delete $mtable->{$name . '@after'};
+
+        if(defined $before) {
+            my $n = scalar @code;
+            foreach my $m(@{$before}) {
+                splice @code, $i+1, 0, @{$m->{body}};
+            }
+            $i += scalar(@code) - $n;
+        }
+
+        my $macro_start = $i+1;
+        $i++ while($code[$i][0] ne 'macro_end'); # move to the end
+
+        if(defined $around) {
+            my @original = splice @code, $macro_start, ($i - $macro_start);
+            $i = $macro_start;
+
+            my @body;
+            foreach my $m(@{$around}) {
+                push @body, @{$m->{body}};
+            }
+            for(my $j = 0; $j < @body; $j++) {
+                if($body[$j][0] eq 'super') {
+                    splice @body, $j, 1, @original;
+                }
+            }
+            splice @code, $macro_start, 0, @body;
+
+            $i += scalar(@body);
+        }
+
+        if(defined $after) {
+            foreach my $m(@{$after}) {
+                splice @code, $i, 0, @{$m->{body}};
+            }
+        }
+    }
+    $self->cascading(undef);
+    return @code;
+}
+
+{
+    package Text::Xslate;
+    our %OPS; # to avoid 'once' warnings;
 }
 
 sub _generate_command {
@@ -136,7 +267,7 @@ sub _generate_command {
 
     my $proc = $node->id;
     foreach my $arg(@{ $node->first }){
-        if($arg->arity eq 'literal'){
+        if(exists $Text::Xslate::OPS{$proc . '_s'} && $arg->arity eq 'literal'){
             my $value = $self->_literal_to_value($arg);
             push @code, [ $proc . '_s' => $value, $node->line ];
         }
@@ -153,8 +284,23 @@ sub _generate_bare_command {
 
     my @code;
 
-    Carp::croak("Not yet implemented: " . $node->dump);
+    if($node->id eq 'cascade') {
+        my $engine         = $self->engine
+            // Carp::croak("Cannot cascade without an Xslate engine");
+        my $template_name  = $node->first;
+        #my $components_ref = $node->second;
 
+        my $file = $template_name . $engine->{suffix};
+        $file =~ s{::}{/}g;
+
+        my $c = $self->macro_table->{'@main'} = $engine->load_file($file);
+        $self->cascading($template_name);
+
+        unshift @{$c}, [depend => Text::Xslate::Util::find_file($file, $engine->{path})->{fullpath}];
+    }
+    else {
+        Carp::croak("Unknown command $node");
+    }
     return @code;
 }
 
@@ -173,7 +319,7 @@ sub _generate_for {
     my $lvar_id   = $self->lvar_id;
     my $lvar_name = $iter_var->id;
 
-    local $self->lvar->{$lvar_name} = $lvar_id;
+    local $self->lvar->{$lvar_name} = [ fetch_lvar => $lvar_id, undef, $lvar_name ];
 
     push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
 
@@ -191,29 +337,49 @@ sub _generate_for {
     return @code;
 }
 
-sub _generate_proc {
+sub _generate_proc { # block, before, around, after
     my($self, $node) = @_;
+    my $type   = $node->id;
     my $name   = $node->first;
-    my $params = $node->second;
+    my @args   = map{ $_->id } @{$node->second};
     my $block  = $node->third;
 
-    if(exists $self->block_table->{$name}) {
-        Carp::croak("Redefinition of block $name is found");
+    local @{ $self->lvar }{ @args };
+    my $arg_ix = 0;
+    foreach my $arg(@args) {
+        # to fetch ST(ix)
+        # note that ix must start 1, not 0
+        $self->lvar->{$arg} = [ fetch_arg => ++$arg_ix ];
     }
 
-    $self->block_table->{$name} = {
-        type   => $node->id,
+    my %macro = (
+        type   => $type,
         name   => $name,
-        params => [ map{ $_->id } @{$params} ],
+        nargs  => $arg_ix,
         body   => [ $self->_compile_ast($block) ],
-    };
+        line   => $node->line,
+    );
 
-    if($node->id eq 'block') {
-        return [ insert_block => $name ];
+    if($type ~~ [qw(macro block)]) {
+        if(exists $self->macro_table->{$name}) {
+            Carp::croak("Redefinition of $type $name is found.");
+        }
+        $self->macro_table->{$name} = \%macro;
+        if($type eq 'block') {
+            return(
+                [ pushmark  => () ],
+                [ macro     => $name ],
+                [ macrocall => undef ],
+            );
+        }
     }
     else {
-        return;
+        my $fq_name = sprintf '%s@%s', $name, $type;
+        $macro{name} = $fq_name;
+        push @{ $self->macro_table->{ $fq_name } //= [] }, \%macro;
     }
+
+    return; # no code, only definition
 }
 
 sub _generate_if {
@@ -246,22 +412,28 @@ sub _generate_expr {
 sub _generate_variable {
     my($self, $node) = @_;
 
-    if(defined(my $lvar_id = $self->lvar->{$node->id})) {
-        return [ fetch_lvar => $lvar_id, $node->line, $node->id ];
+    my @fetch;
+    if(defined(my $lvar_code = $self->lvar->{$node->id})) {
+        @fetch = @{$lvar_code};
     }
     else {
-        return [ fetch_s => $self->_variable_to_value($node), $node->line ];
+        @fetch = ( fetch_s => $self->_variable_to_value($node) );
     }
+    $fetch[2] = $node->line;
+    return \@fetch;
+}
+
+sub _generate_name {
+    my($self, $node) = @_;
+
+    return [ $node->id => undef, $node->line ];
 }
 
 sub _generate_literal {
     my($self, $node) = @_;
 
     my $value = $self->_literal_to_value($node);
-    if(Mouse::Util::TypeConstraints::Int($value)) {
-        return [ literal_i => $value ];
-    }
-    elsif(defined $value){
+    if(defined $value){
         return [ literal => $value ];
     }
     else {
@@ -273,13 +445,13 @@ sub _generate_unary {
     my($self, $node) = @_;
 
     given($node->id) {
-        when('!') {
+        when(%unary) {
             return
                 $self->_generate_expr($node->first),
-                [ not => () ];
+                [ $unary{$_} => () ];
         }
         default {
-            Carp::croak("Unary operator $_ is not yet implemented");
+            Carp::croak("Unary operator $_ is not implemented");
         }
     }
 }
@@ -342,21 +514,34 @@ sub _generate_ternary { # the conditional operator
 
 sub _generate_call {
     my($self, $node) = @_;
-    my $function = $node->first;
+    my $callable = $node->first; # function or macro
     my $args     = $node->second;
 
-    return(
+    my @code = (
         [ pushmark => () ],
-        ( map { $self->_generate_expr($_), [ 'push' ] } @{$args} ),
-        $self->_generate_expr($function),
-        [ call => undef, $node->line ],
+        (map { $self->_generate_expr($_), [ 'push' ] } @{$args}),
+        $self->_generate_expr($callable),
     );
+
+    if($code[-1][0] eq 'macro') {
+        push @code, [ macrocall => undef, $node->line ];
+    }
+    else {
+        push @code, [ funcall => undef, $node->line ];
+    }
+    return @code;
 }
 
 sub _generate_function {
     my($self, $node) = @_;
 
     return [ function => $node->value ];
+}
+
+sub _generate_macro {
+    my($self, $node) = @_;
+
+    return [ macro => $node->value ];
 }
 
 sub _variable_to_value {
@@ -384,29 +569,35 @@ sub _literal_to_value {
     return $value;
 }
 
-#my %goto;
-#@goto{qw(
-#    for_next
-#    and
-#    or
-#    dor
-#    goto
-#)} = ();
+my %goto_family;
+@goto_family{qw(
+    for_iter
+    and
+    or
+    dor
+    goto
+)} = ();
+
+sub _noop {
+    my($op) = @_;
+    @{$op} = (noop => undef, undef, "ex-$op->[0]");
+    return;
+}
 
 sub _optimize {
-    my($self, $cr) = @_;
+    my($self, $c) = @_;
 
-    for(my $i = 0; $i < @{$cr}; $i++) {
-        given($cr->[$i][0]) {
+    for(my $i = 0; $i < @{$c}; $i++) {
+        given($c->[$i][0]) {
             when('print_raw_s') {
                 # merge a set of print_raw_s into single command
                 for(my $j = $i + 1;
-                    $j < @{$cr} && $cr->[$j][0] eq 'print_raw_s';
+                    $j < @{$c} && $c->[$j][0] eq 'print_raw_s';
                     $j++) {
 
-                    my $op = $cr->[$j];
-                    $cr->[$i][1] .= $op->[1];
-                    @{$op} = (noop => undef, undef, 'optimized away');
+                    $c->[$i][1] .= $c->[$j][1];
+
+                    _noop($c->[$j]);
                 }
             }
             when('store_to_lvar') {
@@ -419,44 +610,92 @@ sub _optimize {
                 # convert into:
                 #   move_sa_to_sb
                 #   blah blah blah
-                my $it = $cr->[$i];
-                my $nn = $cr->[$i+2]; # next next
+                my $it = $c->[$i];
+                my $nn = $c->[$i+2]; # next next
                 if(defined($nn)
                     && $nn->[0] eq 'load_lvar_to_sb'
                     && $nn->[1] == $it->[1]) {
-                    @{$it} = ('move_sa_to_sb', undef, undef, 'optimized from store_to_lvar');
+                    @{$it} = ('move_sa_to_sb', undef, undef, "ex-$it->[0]");
 
-                    # replace to noop, need to adjust goto address
-                    @{$cr->[$i+2]} = (noop => undef, undef, 'optimized away');
+                    _noop($nn);
+                }
+            }
+            when('literal') {
+                if(Mouse::Util::TypeConstraints::Int($c->[$i][1])) {
+                    $c->[$i][0] = 'literal_i';
+                }
+            }
+            when('fetch_field') {
+                my $prev = $c->[$i-1];
+                if($prev->[0] =~ /^literal/) { # literal or literal_i
+                    $c->[$i][0] = 'fetch_field_s';
+                    $c->[$i][1] = $prev->[1];
+
+                    _noop($prev);
                 }
             }
         }
     }
 
-    # TODO: recalculate goto address
-#    my @goto_addr;
-#    for(my $i = 0; $i < @{$cr}; $i++) {
-#        if(exists $goto{ $cr->[$i][0] }) { # goto family
-#            my $addr = $cr->[$i][1]; # relational addr
-#
-#            my @range = $addr > 0
-#                ? ($i .. ($i+$addr))
-#                : (($i+$addr) .. $i);
-#            foreach my $j(@range) {
-#                push @{$goto_addr[$j] //= []}, $cr->[$i];
-#            }
-#        }
-#    }
+    # recalculate goto addresses
+    # eg:
+    #
+    # goto +3
+    # foo
+    # noop
+    # bar // goto destination
+    #
+    # to be:
+    #
+    # goto +2
+    # foo
+    # bar // goto destination
+
+    my @goto_addr;
+    for(my $i = 0; $i < @{$c}; $i++) {
+        if(exists $goto_family{ $c->[$i][0] }) {
+            my $addr = $c->[$i][1]; # relational addr
+
+            # mark ragens that goto family have its effects
+            my @range = $addr > 0
+                ? ($i .. ($i+$addr-1))  # positive
+                : (($i+$addr) .. $i); # negative
+
+            foreach my $j(@range) {
+                push @{$goto_addr[$j] //= []}, $c->[$i];
+            }
+        }
+    }
+
+    # remove noop
+    for(my $i = 0; $i < @{$c}; $i++) {
+        if($c->[$i][0] eq 'noop') {
+            if(defined $goto_addr[$i]) {
+                foreach my $goto(@{ $goto_addr[$i] }) {
+                    # reduce its absolute value
+                    $goto->[1] > 0
+                        ? $goto->[1]--  # positive
+                        : $goto->[1]++; # negative
+                }
+            }
+            splice @{$c}, $i, 1;
+            # adjust @goto_addr, but it may be empty
+            splice @goto_addr, $i, 1 if @goto_addr > $i;
+        }
+    }
     return;
 }
-
 
 sub as_assembly {
     my($self, $code_ref) = @_;
 
+    my $addix = ($Text::Xslate::DEBUG =~ /\b addix \b/xms);
+
     my $as = "";
-    foreach my $op(@{$code_ref}) {
-        my($opname, $arg, $line, $comment) = @{$op};
+    foreach my $ix(0 .. (@{$code_ref}-1)) {
+        my($opname, $arg, $line, $comment) = @{$code_ref->[$ix]};
+        $as .= "$ix:" if $addix;
+
         $as .= $opname;
         if(defined $arg) {
             $as .= " ";
@@ -484,3 +723,9 @@ sub as_assembly {
 
 no Mouse;
 __PACKAGE__->meta->make_immutable;
+
+=head1 NAME
+
+Text::Xslate::Compiler - An Xslate compiler
+
+=cut

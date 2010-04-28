@@ -63,3 +63,7 @@ Text-Xslate-
 ppport\.h$
 
 \.txc$
+
+\.stackdump$
+
+TTLike\.pm$
