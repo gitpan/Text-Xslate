@@ -6,7 +6,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1000';
+our $VERSION = '0.1001';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -14,14 +14,12 @@ XSLoader::load(__PACKAGE__, $VERSION);
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string);
 
-use Text::Xslate::Util;
+use Text::Xslate::Util qw(
+    $NUMBER $STRING $DEBUG
+    find_file literal_to_value
+);
 
-use constant _DUMP_LOAD_FILE => ($Text::Xslate::DEBUG =~ /\b dump=load_file \b/xms);
-
-my $dquoted = qr/" (?: \\. | [^"\\] )* "/xms; # " for poor editors
-my $squoted = qr/' (?: \\. | [^'\\] )* '/xms; # ' for poor editors
-my $STRING  = qr/(?: $dquoted | $squoted )/xms;
-my $NUMBER  = qr/(?: [+-]? [0-9]+ (?: \. [0-9]+)? )/xms;
+use constant _DUMP_LOAD_FILE => ($DEBUG =~ /\b dump=load_file \b/xms);
 
 my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
@@ -36,7 +34,7 @@ sub new {
     $args{input_layer}  //= ':utf8';
     $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
-   #$args{functions}    //= {}; # see _compiler()
+   #$args{function}     //= {}; # see _compiler()
 
     $args{template}       = {};
 
@@ -95,7 +93,7 @@ sub load_file {
         return $self->_load_input() // $self->throw_error("Template source <input> does not exist");
     }
 
-    my $f = Text::Xslate::Util::find_file($file, $self->{path});
+    my $f = find_file($file, $self->{path});
 
     if(not defined $f) {
         $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
@@ -212,17 +210,7 @@ sub _load_assembly {
         my $value = $2;
         my $line  = $3;
 
-        if(defined($value)) {
-            if($value =~ s/"(.*)"/$1/){
-                $value =~ s/\\n/\n/g;
-                $value =~ s/\\t/\t/g;
-                $value =~ s/\\(.)/$1/g;
-            }
-            elsif($value =~ s/'(.*)'/$1/) {
-                $value =~ s/\\(['\\])/$1/g; # ' for poor editors
-            }
-        }
-        push @protocode, [ $name, $value, $line ];
+        push @protocode, [ $name, literal_to_value($value), $line ];
     }
 
     #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper(\@protocode);
@@ -247,7 +235,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1000.
+This document describes Text::Xslate version 0.1001.
 
 =head1 SYNOPSIS
 
@@ -298,20 +286,34 @@ This document describes Text::Xslate version 0.1000.
 B<Text::Xslate> is a template engine tuned for persistent applications.
 This engine introduces the virtual machine paradigm. That is, templates are
 compiled into xslate opcodes, and then executed by the xslate virtual machine
-just like as Perl does. Accordingly, Xslate is much faster than other template
-engines.
+just like as Perl does.
 
 Note that B<this software is under development>.
+
+=head2 Features
+
+=head3 High performance
+
+Xslate has an virtual machine written in XS, which is highly optimized.
+According to benchmarks, Xslate is B<2-10> times faster than other template
+engines (Template-Toolkit, HTML::Template::Pro, Text::MicroTemplate, etc).
+
+=head3 Template cascading
+
+Xslate supports template cascading, which allows one to extend
+templates with block modifiers.
+
+This mechanism is also called as template inheritance.
 
 =head1 INTERFACE
 
 =head2 Methods
 
-=head3 B<< Text::Xslate->new(%options) -> TX >>
+=head3 B<< Text::Xslate->new(%options) -> Xslate >>
 
-Creates a new xslate template code.
+Creates a new xslate template engine.
 
-Options:
+Possible options ares:
 
 =over
 
@@ -355,7 +357,7 @@ so you have to escape these strings.
 For example:
 
     my $tx = Text::Xslate->new(
-        string => "Mailaddress: <:= $email :>",
+        string => 'Mailaddress: <:= $email :>',
     );
     my %vars = (
         email => "Foo &lt;foo@example.com&gt;",
@@ -413,13 +415,17 @@ Relational operators (C<< == != < <= > >= >>):
 
 Arithmetic operators (C<< + - * / % >>):
 
-    := $var + 10
+    := $var * 10_000
     := ($var % 10) == 0
 
 Logical operators (C<< || && // >>)
 
     := $var >= 0 && $var <= 10 ? "ok" : "too smaller or too larger"
     := $var // "foo" # as a default value
+
+String operators (C<< ~ >>)
+
+    := "[" ~ $var ~ "]" # concatination
 
 Operator precedence:
 
@@ -434,6 +440,8 @@ limited to 100.
 
 =head2 Template cascading
 
+You can extend templates with block modifiers.
+
 Base templates F<mytmpl/base.tx>:
 
     : block title -> { # with default
@@ -444,6 +452,7 @@ Base templates F<mytmpl/base.tx>:
 
 Another derived template F<mytmpl/foo.tx>:
 
+    : # cascade "mytmpl/base.tx" is also okey
     : cascade mytmpl::base
     : # use default title
     : around body -> {
@@ -485,14 +494,19 @@ This is also called as B<template inheritance>.
 =head2 Macro blocks
 
     : macro add ->($x, $y) {
-    :   x + $y;
+    :=   $x + $y;
     : }
     := add(10, 20)
 
     : macro signeture -> {
         This is foo version <:= $VERSION :>
     : }
-    : signeture()
+    := signeture()
+
+Note that return values of macros are values that their routines renders.
+That is, macros themselves output nothing.
+
+
 
 =head1 TODO
 
@@ -521,6 +535,8 @@ to cpan-RT.  Patches are welcome :)
 =head1 SEE ALSO
 
 L<Text::MicroTemplate>
+
+L<Text::MicroTemplate::Extended>
 
 L<Text::ClearSilver>
 

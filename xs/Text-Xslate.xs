@@ -15,17 +15,13 @@ START_MY_CXT
 
 #define TX_ESC_CLASS "Text::Xslate::EscapedString"
 
-/* buffer size coefficient (bits), used for memory allocation */
-/* (1 << 6) * U16_MAX = about 4 MiB */
-#define TX_BUFFER_SIZE_C 6
-
-#define XSLATE(name) static void CAT2(TXCODE_, name)(pTHX_ tx_state_t* const txst)
-/* XSLATE_xxx macros provide the information of arguments, interpreted by tool/opcode.pl */
-#define XSLATE_w_sv(n)  XSLATE(n) /* has TX_op_arg as a SV */
-#define XSLATE_w_int(n) XSLATE(n) /* has TX_op_arg as an integer (i.e. can SvIVX(arg)) */
-#define XSLATE_w_key(n) XSLATE(n) /* has TX_op_arg as a keyword */
-#define XSLATE_w_var(n) XSLATE(n) /* has TX_op_arg as a local variable */
-#define XSLATE_goto(n)  XSLATE(n) /* does goto */
+#define TXC(name) static void CAT2(TXCODE_, name)(pTHX_ tx_state_t* const txst)
+/* TXC_xxx macros provide the information of arguments, interpreted by tool/opcode.pl */
+#define TXC_w_sv(n)  TXC(n) /* has TX_op_arg as a SV */
+#define TXC_w_int(n) TXC(n) /* has TX_op_arg as an integer (i.e. can SvIVX(arg)) */
+#define TXC_w_key(n) TXC(n) /* has TX_op_arg as a keyword */
+#define TXC_w_var(n) TXC(n) /* has TX_op_arg as a local variable */
+#define TXC_goto(n)  TXC(n) /* does goto */
 
 #define TXARGf_SV   ((U8)(0x01))
 #define TXARGf_INT  ((U8)(0x02))
@@ -44,6 +40,9 @@ START_MY_CXT
 
 #define TX_pop()   (*(PL_stack_sp--))
 
+#define TX_current_framex(st) ((AV*)AvARRAY((st)->frame)[(st)->current_frame])
+#define TX_current_frame()    TX_current_framex(TX_st)
+
 enum txo_ix {
     TXo_NAME,
     TXo_FULLPATH,
@@ -51,6 +50,14 @@ enum txo_ix {
     TXo_ERROR_HANDLER,
 
     TXo_size
+};
+
+enum txframeo_ix {
+    TXframe_NAME,
+    TXframe_OUTPUT,
+    TXframe_RETADDR,
+
+    TXframe_START_LVAR
 };
 
 struct tx_code_s;
@@ -78,17 +85,18 @@ struct tx_state_s {
     /* variables */
 
     HV* vars;    /* template variables */
-    AV* locals;  /* local variables */
-    SV** pad;    /* AvARRAY(locals) */
-    I32 lvar_max;
 
-    HV* function;
+    /* stack frame */
+    AV* frame;         /* [ macroname (or 'main'), return-address, local-variables ... ] */
+    I32 current_frame; /* current frame index */
+    SV** pad;          /* AvARRAY(frame[current_frame]) + 3 */
 
-    HV* macro;
+    HV* macro;    /* name -> $addr */
+    HV* function; /* name => \&body */
 
-    U32 hint_size;
+    U32 hint_size; /* suggested template size (bytes) */
 
-    AV* tmpl; /* [name, fullpath, mtime, error_handler] */
+    AV* tmpl; /* [name, fullpath, mtime, error_handler, dependencies...] */
     SV* self;
     U16* lines;  /* code index -> line number */
 };
@@ -111,36 +119,44 @@ tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, in
     return svp;
 }
 
-#define TX_lvarx(st, ix) *tx_fetch_lvar(aTHX_ (st), ix)
+#define TX_lvarx_get(st, ix) tx_lvar_get_safe(aTHX_ st, ix)
 
-static SV**
-tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_id) {
-    assert(st);
-    if(AvFILLp(st->locals) < lvar_id) {
-        croak("panic[%d]: local variable storage is smaller (%d < %d)",
-            (int)st->pc,
-            (int)AvFILLp(st->locals), (int)lvar_id);
+static SV*
+tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
+    AV* const cframe  = TX_current_framex(st);
+    I32 const real_ix = lvar_ix + TXframe_START_LVAR;
+
+    assert(SvTYPE(cframe) == SVt_PVAV);
+
+    if(AvFILLp(cframe) < real_ix) {
+        croak("panic: local variable storage is too small (%d < %d)",
+            (int)(AvFILLp(cframe) - TXframe_START_LVAR), (int)lvar_ix); 
     }
+
     if(!st->pad) {
-        croak("panic[%d]: no local variable storage", (int)st->pc);
+        croak("panic: access local variable (%d) before initialization",
+            (int)lvar_ix);
     }
-    if( SvREADONLY(st->pad[lvar_id]) ){
-        croak("panic[%d]: local variable 0x%p[%d] is read only",
-            (int)st->pc, st->pad, (int)lvar_id);
-    }
-    return &( (st->pad)[lvar_id] );
+    return st->pad[lvar_ix];
 }
+
+
 #else /* DEBUGGING */
 #define TX_st_sa        (TX_st->sa)
 #define TX_st_sb        (TX_st->sb)
 #define TX_op_arg       (TX_op->arg)
-#define TX_lvarx(st, ix) ((st)->pad[ix])
-#endif
 
-#define TX_lvar(ix) TX_lvarx(TX_st, ix)
+#define TX_lvarx_get(st, ix) ((st)->pad[ix])
+#endif /* DEBUGGING */
 
-#define TXCODE_literal_i TXCODE_literal
-#define TXCODE_depend    TXCODE_noop
+#define TX_lvarx(st, ix) tx_fetch_lvar(aTHX_ st, ix)
+
+#define TX_lvar(ix)     TX_lvarx(TX_st, ix)     /* init if uninitialized */
+#define TX_lvar_get(ix) TX_lvarx_get(TX_st, ix)
+
+/* aliases */
+#define TXCODE_literal_i   TXCODE_literal
+#define TXCODE_depend      TXCODE_noop
 
 #include "xslate_ops.h"
 
@@ -171,6 +187,40 @@ tx_neat(pTHX_ SV* const sv) {
         }
     }
     return "undef";
+}
+
+static SV*
+tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_ix) { /* the guts of TX_lvar() */
+    AV* const cframe  = TX_current_framex(st);
+    I32 const real_ix = lvar_ix + TXframe_START_LVAR;
+
+    assert(SvTYPE(cframe) == SVt_PVAV);
+
+    if(AvFILLp(cframe) < real_ix) {
+        av_store(cframe, real_ix, newSV(0));
+    }
+    st->pad = AvARRAY(cframe) + TXframe_START_LVAR;
+
+    return TX_lvarx_get(st, lvar_ix);
+}
+
+static AV*
+tx_push_frame(pTHX_ tx_state_t* const st) {
+    AV* newframe;
+
+    if(++st->current_frame > 100) {
+        croak("Macro call is too deep (> 100)");
+    }
+
+    newframe = (AV*)*av_fetch(st->frame, st->current_frame, TRUE);
+
+    SvUPGRADE((SV*)newframe, SVt_PVAV);
+    if(AvFILLp(newframe) < TXframe_START_LVAR) {
+        av_extend(newframe, TXframe_START_LVAR);
+    }
+    /* switch the pad */
+    st->pad = AvARRAY(newframe) + TXframe_START_LVAR;
+    return newframe;
 }
 
 static SV*
@@ -208,7 +258,7 @@ static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     SV* sv = NULL;
     PERL_UNUSED_ARG(st);
-    if(sv_isobject(var)) {
+    if(sv_isobject(var)) { /* sv_isobject() invokes SvGETMAGIC */
         dSP;
         PUSHMARK(SP);
         XPUSHs(var);
@@ -249,7 +299,7 @@ tx_escaped_string(pTHX_ SV* const str) {
 }
 
 static bool
-tx_str_is_escaped(pTHX_ const SV* const sv) {
+tx_str_is_escaped(pTHX_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
         dMY_CXT;
         if(!SvOK(SvRV(sv))) {
@@ -260,27 +310,27 @@ tx_str_is_escaped(pTHX_ const SV* const sv) {
     return FALSE;
 }
 
-XSLATE(noop) {
+TXC(noop) {
     TX_st->pc++;
 }
 
-XSLATE(move_sa_to_sb) {
+TXC(move_sa_to_sb) {
     TX_st_sb = TX_st_sa;
 
     TX_st->pc++;
 }
 
-XSLATE_w_var(store_to_lvar) {
+TXC_w_var(store_to_lvar) {
     sv_setsv(TX_lvar(SvIVX(TX_op_arg)), TX_st_sa);
     TX_st->pc++;
 }
 
-XSLATE_w_var(load_lvar_to_sb) {
-    TX_st_sb = TX_lvar(SvIVX(TX_op_arg));
+TXC_w_var(load_lvar_to_sb) {
+    TX_st_sb = TX_lvar_get(SvIVX(TX_op_arg));
     TX_st->pc++;
 }
 
-XSLATE(push) {
+TXC(push) {
     dSP;
     XPUSHs(TX_st_sa);
     PUTBACK;
@@ -288,35 +338,35 @@ XSLATE(push) {
     TX_st->pc++;
 }
 
-XSLATE(pop) {
+TXC(pop) {
     TX_st_sa = TX_pop();
 
     TX_st->pc++;
 }
 
-XSLATE(pushmark) {
+TXC(pushmark) {
     dSP;
     PUSHMARK(SP);
 
     TX_st->pc++;
 }
 
-XSLATE(nil) {
+TXC(nil) {
     TX_st_sa = &PL_sv_undef;
 
     TX_st->pc++;
 }
 
-XSLATE_w_sv(literal) {
+TXC_w_sv(literal) {
     TX_st_sa = TX_op_arg;
 
     TX_st->pc++;
 }
 
 /* the same as literal, but make sure its argument is an integer */
-XSLATE_w_int(literal_i);
+TXC_w_int(literal_i);
 
-XSLATE_w_key(fetch_s) { /* fetch a field from the top */
+TXC_w_key(fetch_s) { /* fetch a field from the top */
     HV* const vars = TX_st->vars;
     HE* const he   = hv_fetch_ent(vars, TX_op_arg, FALSE, 0U);
 
@@ -325,30 +375,21 @@ XSLATE_w_key(fetch_s) { /* fetch a field from the top */
     TX_st->pc++;
 }
 
-XSLATE_w_var(fetch_lvar) {
-    SV* const idsv = TX_op_arg;
+TXC_w_var(fetch_lvar) {
+    IV const id      = SvIVX(TX_op_arg);
+    AV* const cframe = TX_current_frame();
 
-    TX_st_sa = TX_lvar(SvIVX(idsv));
-
-    TX_st->pc++;
-}
-
-XSLATE_w_int(fetch_arg) {
-    dSP;
-    SV** const topmark = PL_stack_base + TOPMARK;
-    IV const items     = SP - topmark;
-    IV const ix        = SvIVX(TX_op_arg);
-
-    if(items <= ix) {
-        croak("Too few arguments for macro");
+    /* XXX: is there a better way? */
+    if(AvFILLp(cframe) < (id + TXframe_START_LVAR)) {
+        croak("Too few arguments for %"SVf, AvARRAY(cframe)[TXframe_NAME]);
     }
 
-    TX_st_sa = *(topmark + ix);
+    TX_st_sa = TX_lvar_get(id);
 
     TX_st->pc++;
 }
 
-XSLATE(fetch_field) { /* fetch a field from a variable (bin operator) */
+TXC(fetch_field) { /* fetch a field from a variable (bin operator) */
     SV* const var = TX_st_sb;
     SV* const key = TX_st_sa;
 
@@ -356,7 +397,7 @@ XSLATE(fetch_field) { /* fetch a field from a variable (bin operator) */
     TX_st->pc++;
 }
 
-XSLATE_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
+TXC_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
     SV* const var = TX_st_sa;
     SV* const key = TX_op_arg;
 
@@ -364,7 +405,7 @@ XSLATE_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
     TX_st->pc++;
 }
 
-XSLATE(print) {
+TXC(print) {
     SV* const sv          = TX_st_sa;
     SV* const output      = TX_st->output;
 
@@ -378,6 +419,8 @@ XSLATE(print) {
         STRLEN len;
         const char*       cur = SvPV_const(sv, len);
         const char* const end = cur + len;
+
+        (void)SvGROW(output, SvCUR(output) + len);
 
         while(cur != end) {
             const char* parts;
@@ -429,19 +472,19 @@ XSLATE(print) {
     TX_st->pc++;
 }
 
-XSLATE(print_raw) {
+TXC(print_raw) {
     sv_catsv_nomg(TX_st->output, TX_st_sa);
 
     TX_st->pc++;
 }
 
-XSLATE_w_sv(print_raw_s) {
+TXC_w_sv(print_raw_s) {
     sv_catsv_nomg(TX_st->output, TX_op_arg);
 
     TX_st->pc++;
 }
 
-XSLATE(include) {
+TXC(include) {
     tx_state_t* const st = tx_load_template(aTHX_ TX_st->self, TX_st_sa);
 
     ENTER; /* for error handlers */
@@ -452,86 +495,102 @@ XSLATE(include) {
 }
 
 
-XSLATE_w_var(for_start) {
+TXC_w_var(for_start) {
     SV* const avref = TX_st_sa;
     IV  const id    = SvIVX(TX_op_arg);
 
+    SvGETMAGIC(avref);
     if(!(SvROK(avref) && SvTYPE(SvRV(avref)) == SVt_PVAV)) {
         croak("Iterator variables must be an ARRAY reference, not %s",
             tx_neat(aTHX_ avref));
     }
 
-    /* id+0 for each item */
+    (void)   TX_lvar(id+0); /* for each item, ensure to allocate a sv */
     sv_setsv(TX_lvar(id+1), avref);
     sv_setiv(TX_lvar(id+2), -1); /* (re)set iterator */
 
     TX_st->pc++;
 }
 
-XSLATE_goto(for_iter) {
-    SV* const idsv = TX_st_sa;
-    IV  const id   = SvIVX(idsv); /* by literal_i */
-    SV* const item =           TX_lvar(id+0);
-    AV* const av   = (AV*)SvRV(TX_lvar(id+1));
-    SV* const i    =           TX_lvar(id+2);
+TXC_goto(for_iter) {
+    SV* const idsv  = TX_st_sa;
+    IV  const id    = SvIVX(idsv); /* by literal_i */
+    SV* const item  = TX_lvar_get(id+0);
+    SV* const avref = TX_lvar_get(id+1);
+    SV* const i     = TX_lvar_get(id+2);
+    AV* const av    = (AV*)SvRV(avref);
 
     assert(SvTYPE(av) == SVt_PVAV);
     assert(SvIOK(i));
 
     //warn("for_next[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
-    if(LIKELY(++SvIVX(i) <= av_len(av))) {
-        SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
-        sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
-        TX_st->pc++;
+    if(SvRMAGICAL(av)) {
+        if(LIKELY(++SvIVX(i) <= av_len(av))) {
+            SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
+            sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
+        }
+        else {
+            goto finish_loop;
+        }
     }
     else {
-        /* finish the for loop */
-        sv_setsv(item, &PL_sv_undef);
-
-        /* don't need to clear iterator variables,
-           they will be cleaned at the end of render() */
-
-        TX_st->pc = SvUVX(TX_op_arg);
+        if(LIKELY(++SvIVX(i) <= AvFILLp(av))) {
+            sv_setsv(item, AvARRAY(av)[SvIVX(i)]);
+        }
+        else {
+            goto finish_loop;
+        }
     }
 
+    TX_st->pc++;
+
+    return;
+
+    finish_loop:
+
+    /* finish the for loop */
+    sv_setsv(item,  &PL_sv_undef);
+    sv_setsv(avref, &PL_sv_undef);
+    /* don't need to clear the iterator, it's only an integer */
+
+    TX_st->pc = SvUVX(TX_op_arg);
 }
 
 
 /* For arithmatic operators, SvIV_please() can make stringification faster,
    although I don't know why it is :)
 */
-XSLATE(add) {
+TXC(add) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) + SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
-XSLATE(sub) {
+TXC(sub) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) - SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
-XSLATE(mul) {
+TXC(mul) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) * SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
-XSLATE(div) {
+TXC(div) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) / SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
-XSLATE(mod) {
+TXC(mod) {
     sv_setiv(TX_st->targ, SvIVx(TX_st_sb) % SvIVx(TX_st_sa));
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
 
-/* NOTE: XSLATE_w_sv will make it faster, but it may be unimportant */
-XSLATE_w_sv(concat) {
+TXC_w_sv(concat) {
     SV* const sv = TX_op_arg;
     sv_setsv_nomg(sv, TX_st_sb);
     sv_catsv_nomg(sv, TX_st_sa);
@@ -541,7 +600,7 @@ XSLATE_w_sv(concat) {
     TX_st->pc++;
 }
 
-XSLATE(filt) {
+TXC(filt) {
     SV* const arg    = TX_st_sb;
     SV* const filter = TX_st_sa;
     dSP;
@@ -555,7 +614,7 @@ XSLATE(filt) {
     TX_st->pc++;
 }
 
-XSLATE_goto(and) {
+TXC_goto(and) {
     if(sv_true(TX_st_sa)) {
         TX_st->pc++;
     }
@@ -564,7 +623,7 @@ XSLATE_goto(and) {
     }
 }
 
-XSLATE_goto(or) {
+TXC_goto(or) {
     if(!sv_true(TX_st_sa)) {
         TX_st->pc++;
     }
@@ -573,7 +632,7 @@ XSLATE_goto(or) {
     }
 }
 
-XSLATE_goto(dor) {
+TXC_goto(dor) {
     SV* const sv = TX_st_sa;
     SvGETMAGIC(sv);
     if(!SvOK(sv)) {
@@ -584,18 +643,18 @@ XSLATE_goto(dor) {
     }
 }
 
-XSLATE(not) {
+TXC(not) {
     TX_st_sa = boolSV( !sv_true(TX_st_sa) );
 
     TX_st->pc++;
 }
 
-XSLATE(plus) { /* unary plus */
+TXC(plus) { /* unary plus */
     sv_setnv(TX_st->targ, +SvNVx(TX_st_sa));
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
-XSLATE(minus) { /* unary minus */
+TXC(minus) { /* unary minus */
     sv_setnv(TX_st->targ, -SvNVx(TX_st_sa));
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
@@ -627,80 +686,103 @@ tx_sv_eq(pTHX_ SV* const a, SV* const b) {
     }
 }
 
-XSLATE(eq) {
+TXC(eq) {
     TX_st_sa = boolSV(  tx_sv_eq(aTHX_ TX_st_sa, TX_st_sb) );
 
     TX_st->pc++;
 }
 
-XSLATE(ne) {
+TXC(ne) {
     TX_st_sa = boolSV( !tx_sv_eq(aTHX_ TX_st_sa, TX_st_sb) );
 
     TX_st->pc++;
 }
 
-XSLATE(lt) {
+TXC(lt) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) < SvNVx(TX_st_sa) );
     TX_st->pc++;
 }
-XSLATE(le) {
+TXC(le) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) <= SvNVx(TX_st_sa) );
     TX_st->pc++;
 }
-XSLATE(gt) {
+TXC(gt) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) > SvNVx(TX_st_sa) );
     TX_st->pc++;
 }
-XSLATE(ge) {
+TXC(ge) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) >= SvNVx(TX_st_sa) );
     TX_st->pc++;
 }
 
-XSLATE(macrocall) {
+TXC(macrocall) {
     U32 const addr = (U32)SvUVX(TX_st_sa);
+    AV* cframe;
     dSP;
+    dMARK;
+    I32 i;
+    SV* tmp;
 
     ENTER;
     SAVETMPS;
 
-    if(TX_st->lvar_max > 0){
-        AV* const locals = TX_st->locals;
-        I32 const len = AvFILLp(locals) + TX_st->lvar_max + 1;
-        I32 i;
-        av_extend(locals, len);
-        for(i = AvFILLp(locals) + 1; i < len; i++) {
-            sv_setsv(*av_fetch(locals, i, TRUE), &PL_sv_undef);
-        }
-        TX_st->pad = AvARRAY(locals) + TX_st->lvar_max;
-    }
+    /* push a new frame */
+    cframe = tx_push_frame(aTHX_ TX_st);
 
-    mXPUSHu(TX_st->pc + 1); /* return address */
-    PUTBACK;
+    tmp                             = *av_fetch(cframe, TXframe_OUTPUT, TRUE);
+    AvARRAY(cframe)[TXframe_OUTPUT] = TX_st->output;
+    TX_st->output                   = tmp;
+    sv_setpvs(tmp, "");
+
+    /* macroname will be set by macro_begin */
+    sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), TX_st->pc + 1);
+
+    if(SP != MARK) { /* has arguments */
+        dORIGMARK;
+        MARK++;
+        i = 0; /* must start zero */
+        while(MARK <= SP) {
+            sv_setsv(TX_lvar(i), *MARK);
+            MARK++;
+            i++;
+        }
+        SP = ORIGMARK;
+        PUTBACK;
+    }
 
     TX_st->pc = addr;
 }
 
-XSLATE_w_key(macro_begin) {
+TXC_w_key(macro_begin) {
+    AV* const cframe  = TX_current_frame();
+
+    sv_setsv(*av_fetch(cframe, TXframe_NAME, TRUE), TX_op_arg);
+
     TX_st->pc++;
 }
 
-XSLATE(macro_end) {
-    SV* const retaddr = TX_pop();
+TXC(macro_end) {
+    AV* const oldframe  = TX_current_frame();
+    AV* const cframe    = (AV*)AvARRAY(TX_st->frame)[--TX_st->current_frame];
+    SV* const retaddr = AvARRAY(oldframe)[TXframe_RETADDR];
+    SV* tmp;
+
+    TX_st->pad = AvARRAY(cframe) + TXframe_START_LVAR; /* switch the pad */
+
+    sv_setsv(TX_st->targ, tx_escaped_string(aTHX_ TX_st->output)); 
+    TX_st_sa = TX_st->targ; /* retval */
+
+    tmp                               = AvARRAY(oldframe)[TXframe_OUTPUT];
+    AvARRAY(oldframe)[TXframe_OUTPUT] = TX_st->output;
+    TX_st->output                     = tmp;
+
     TX_st->pc = SvUVX(retaddr);
-
-    if(TX_st->lvar_max > 0) {
-        AV* const locals = TX_st->locals;
-        av_fill(locals, AvFILLp(locals) - TX_st->lvar_max);
-        TX_st->pad -= TX_st->lvar_max;
-    }
-
-    (void)POPMARK;
 
     FREETMPS;
     LEAVE;
 }
 
-XSLATE_w_key(macro) {
+TXC_w_key(macro) {
     SV* const name = TX_op_arg;
     HE* he;
     if(TX_st->macro && (he = hv_fetch_ent(TX_st->macro, name, FALSE, 0U))) {
@@ -714,7 +796,7 @@ XSLATE_w_key(macro) {
     TX_st->pc++;
 }
 
-XSLATE_w_key(function) {
+TXC_w_key(function) {
     SV* const name = TX_op_arg;
     HE* he;
 
@@ -729,28 +811,30 @@ XSLATE_w_key(function) {
 }
 
 
-XSLATE(funcall) {
+TXC(funcall) {
     /* PUSHMARK & PUSH must be done */
     TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "calling");
 
     TX_st->pc++;
 }
 
-XSLATE_goto(goto) {
+TXC_goto(goto) {
     TX_st->pc = SvUVX(TX_op_arg);
 }
 
-XSLATE_w_sv(depend); /* indicate files for templates to depend on */
+TXC_w_sv(depend); /* indicate files for templates to depend on */
 
-XSLATE(exit) {
+TXC(exit) {
     TX_st->pc = TX_st->code_len;
 }
 
 XS(XS_Text__Xslate__error); /* -Wmissing-prototypes */
 XS(XS_Text__Xslate__error) {
     dVAR; dXSARGS;
-    tx_state_t* const st = (tx_state_t*)XSANY.any_ptr;
     dMY_CXT;
+    tx_state_t* const st = (tx_state_t*)XSANY.any_ptr;
+    AV* const cframe     = TX_current_framex(st);
+    SV* const name       = AvARRAY(cframe)[TXframe_NAME];
 
     PERL_UNUSED_ARG(items);
 
@@ -762,8 +846,22 @@ XS(XS_Text__Xslate__error) {
 
     assert(st);
 
-    croak("Xslate(%s:%d): %"SVf,
-        tx_file(aTHX_ st), tx_line(aTHX_ st), ST(0));
+    /* unroll the stack frame */
+    /* to fix TXframe_OUTPUT */
+    while(st->current_frame > 0) {
+        AV* const frame = (AV*)AvARRAY(st->frame)[st->current_frame];
+        SV* tmp;
+        st->current_frame--;
+
+        /* swap st->output and TXframe_OUTPUT */
+        tmp                            = AvARRAY(frame)[TXframe_OUTPUT];
+        AvARRAY(frame)[TXframe_OUTPUT] = st->output;
+        st->output                     = tmp;
+    }
+
+    croak("Xslate(%s:%d &%"SVf"[%d]): %"SVf,
+        tx_file(aTHX_ st), tx_line(aTHX_ st),
+        name, (int)st->pc, ST(0));
     XSRETURN_EMPTY; /* not reached */
 }
 
@@ -779,8 +877,6 @@ tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     }
 
     StructCopy(base, &st, tx_state_t);
-
-    st.pad = AvARRAY(st.locals) + AvFILLp(st.locals) + 1 - st.lvar_max;
 
     st.output = output;
     st.vars   = hv;
@@ -851,7 +947,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
 
     SvREFCNT_dec(st->function);
     SvREFCNT_dec(st->macro);
-    SvREFCNT_dec(st->locals);
+    SvREFCNT_dec(st->frame);
     SvREFCNT_dec(st->targ);
     SvREFCNT_dec(st->self);
 
@@ -890,7 +986,7 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
 
     st->function = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->function, param);
     st->macro    = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->macro,    param);
-    st->locals   = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->locals, param);
+    st->frame    = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->frame,    param);
     st->targ     =      tx_sv_dup_inc(aTHX_ st->targ, param);
     st->self     =      tx_sv_dup_inc(aTHX_ st->self, param);
 #else
@@ -1118,11 +1214,11 @@ CODE:
     I32 const len = av_len(proto) + 1;
     I32 i;
     U16 l = 0;
-    I32 lvar_max = -1;
     tx_state_t st;
     AV* tmpl;
     SV* tobj;
     SV** svp;
+    AV* mainframe;
 
     Zero(&st, 1, tx_state_t);
 
@@ -1176,7 +1272,13 @@ CODE:
     st.sb       = &PL_sv_undef;
     st.targ     = newSV(0);
 
-    st.locals   = newAV();
+    /* stack frame */
+    st.frame         = newAV();
+    st.current_frame = -1;
+
+    mainframe = tx_push_frame(aTHX_ &st);
+    av_store(mainframe, TXframe_NAME,    newSVpvs_share("main"));
+    av_store(mainframe, TXframe_RETADDR, newSVuv(len));
 
     Newxz(st.lines, len, U16);
 
@@ -1215,16 +1317,6 @@ CODE:
                 }
                 else if(tx_oparg[opnum] & TXARGf_INT) {
                     st.code[i].arg = newSViv(SvIV(*arg));
-
-                    if(tx_oparg[opnum] & TXARGf_VAR) { /* local variable id */
-                        I32 id = SvIVX(st.code[i].arg);
-                        if(opnum == TXOP_for_start) {
-                                id += 2;
-                        }
-                        if(lvar_max < id) {
-                            lvar_max = id;
-                        }
-                    }
 
                     if(tx_oparg[opnum] & TXARGf_GOTO) {
                         /* calculate relational addresses to absolute addresses */
@@ -1271,16 +1363,7 @@ CODE:
         else {
             croak("Oops: Broken code found on [%d]", (int)i);
         }
-    } /* end for */
-    if(lvar_max >= 0) {
-        av_extend(st.locals, lvar_max);
-        lvar_max++;
-        for(i = 0; i < lvar_max; i++) {
-            av_store(st.locals, i, newSV(0));
-        }
-        ((tx_state_t*)mg->mg_ptr)->pad      = NULL; /* set by tx_execute() */
-        ((tx_state_t*)mg->mg_ptr)->lvar_max = lvar_max;
-    }
+    } /* end for each code */
 }
 
 SV*

@@ -2,13 +2,16 @@ package Text::Xslate::Compiler;
 use 5.010;
 use Mouse;
 
-use Text::Xslate::Util;
 use Text::Xslate::Parser;
+use Text::Xslate::Util qw(
+    $DEBUG
+    literal_to_value find_file
+);
 
 use Scalar::Util ();
 
-use constant _DUMP_ASM => ($Text::Xslate::DEBUG =~ /\b dump=asm \b/xms);
-use constant _OPTIMIZE => ($Text::Xslate::DEBUG =~ /\b optimize=(\d+) \b/xms);
+use constant _DUMP_ASM => ($DEBUG =~ /\b dump=asm \b/xms);
+use constant _OPTIMIZE => ($DEBUG =~ /\b optimize=(\d+) \b/xms);
 
 our @CARP_NOT = qw(Text::Xslate Text::Xslate::Parser);
 
@@ -50,8 +53,8 @@ has lvar_id => ( # local varialbe id
 
     traits  => [qw(Counter)],
     handles => {
-        _lvar_id_inc => 'inc',
-        _lvar_id_dec => 'dec',
+        _lvar_use     => 'inc',
+        _lvar_release => 'dec',
     },
 
     default => 0,
@@ -134,6 +137,8 @@ sub compile {
     my $main = delete $mtable->{'@main'}; # cascade
 
     if(defined $main) {
+        my @new_code = $self->_compile_cascade($main);
+
         # all the main code will be discarded
         foreach my $c(@code) {
             if(!($c->[0] eq 'print_raw_s' && $c->[1] =~ m{\A [ \t\r\n]* \z}xms)) {
@@ -141,12 +146,11 @@ sub compile {
                     Carp::carp("Xslate: Uselses use of text '$c->[1]'");
                 }
                 else {
-                    Carp::carp("Xslate: Useless use of $c->[0] " . ($c->[1] // 'undef'));
+                    Carp::carp("Xslate: Useless use of $c->[0] " . ($c->[1] // ""));
                 }
             }
         }
-
-        @code = $self->_compile_cascade($main);
+        @code = @new_code;
     }
     else {
         push @code, ['exit'];
@@ -205,10 +209,9 @@ sub _compile_cascade {
         #warn "macro ", $name, "\n";
 
         if(exists $mtable->{$name}) {
-            Carp::croak(
-                "Xslate($mtable->{$name}{line}): " .
-                "$name is already defined in " . $self->cascading . "\n" .
-                "(you must use before/around/after to override blocks)",
+            $self->_error($mtable->{$name}{line},
+                "Redefinition of macro/block $name in " . $self->cascading
+                . " (you must use before/around/after to override macros/blocks)",
             );
         }
 
@@ -268,8 +271,7 @@ sub _generate_command {
     my $proc = $node->id;
     foreach my $arg(@{ $node->first }){
         if(exists $Text::Xslate::OPS{$proc . '_s'} && $arg->arity eq 'literal'){
-            my $value = $self->_literal_to_value($arg);
-            push @code, [ $proc . '_s' => $value, $node->line ];
+            push @code, [ $proc . '_s' => literal_to_value($arg->value), $node->line ];
         }
         else {
             push @code,
@@ -285,21 +287,26 @@ sub _generate_bare_command {
     my @code;
 
     if($node->id eq 'cascade') {
-        my $engine         = $self->engine
-            // Carp::croak("Cannot cascade without an Xslate engine");
-        my $template_name  = $node->first;
+        my $engine = $self->engine
+            // $self->_error($node, "Cannot cascade without an Xslate engine");
+        my $file   = $node->first;
         #my $components_ref = $node->second;
 
-        my $file = $template_name . $engine->{suffix};
-        $file =~ s{::}{/}g;
+        if(ref($file) eq 'ARRAY') {
+            $file  = join '/', @{$file};
+            $file .= $engine->{suffix};
+        }
+        else {
+            $file = literal_to_value($file);
+        }
 
         my $c = $self->macro_table->{'@main'} = $engine->load_file($file);
-        $self->cascading($template_name);
+        $self->cascading($file);
 
-        unshift @{$c}, [depend => Text::Xslate::Util::find_file($file, $engine->{path})->{fullpath}];
+        unshift @{$c}, [depend => find_file($file, $engine->{path})->{fullpath}];
     }
     else {
-        Carp::croak("Unknown command $node");
+        $self->_error($node, "Unknown command $node");
     }
     return @code;
 }
@@ -310,7 +317,7 @@ sub _generate_for {
     my $vars  = $node->second;
     my $block = $node->third;
     if(@{$vars} != 1) {
-        Carp::croak("For-loop requires single variable for each items");
+        $self->_error($node, "For-loop requires single variable for each items");
     }
     my($iter_var) = @{$vars};
 
@@ -324,9 +331,9 @@ sub _generate_for {
     push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
 
     # a for statement uses three local variables (container, iterator, and item)
-    $self->_lvar_id_inc(3);
+    $self->_lvar_use(3);
     my @block_code = $self->_compile_ast($block);
-    $self->_lvar_id_dec(3);
+    $self->_lvar_release(3);
 
     push @code,
         [ literal_i => $lvar_id, $expr->line, $lvar_name ],
@@ -348,9 +355,11 @@ sub _generate_proc { # block, before, around, after
     my $arg_ix = 0;
     foreach my $arg(@args) {
         # to fetch ST(ix)
-        # note that ix must start 1, not 0
-        $self->lvar->{$arg} = [ fetch_arg => ++$arg_ix ];
+        # Note that arg_ix must be start from 1
+        $self->lvar->{$arg} = [ fetch_lvar => $arg_ix++, $node->line, $arg ];
     }
+
+    $self->_lvar_use($arg_ix);
 
     my %macro = (
         type   => $type,
@@ -362,7 +371,7 @@ sub _generate_proc { # block, before, around, after
 
     if($type ~~ [qw(macro block)]) {
         if(exists $self->macro_table->{$name}) {
-            Carp::croak("Redefinition of $type $name is found.");
+            $self->_error($node, "Redefinition of $type $name is found");
         }
         $self->macro_table->{$name} = \%macro;
         if($type eq 'block') {
@@ -370,6 +379,7 @@ sub _generate_proc { # block, before, around, after
                 [ pushmark  => () ],
                 [ macro     => $name ],
                 [ macrocall => undef ],
+                [ print     => undef ],
             );
         }
     }
@@ -378,6 +388,8 @@ sub _generate_proc { # block, before, around, after
         $macro{name} = $fq_name;
         push @{ $self->macro_table->{ $fq_name } //= [] }, \%macro;
     }
+
+    $self->_lvar_release($arg_ix);
 
     return; # no code, only definition
 }
@@ -432,7 +444,7 @@ sub _generate_name {
 sub _generate_literal {
     my($self, $node) = @_;
 
-    my $value = $self->_literal_to_value($node);
+    my $value = literal_to_value($node->value);
     if(defined $value){
         return [ literal => $value ];
     }
@@ -451,7 +463,7 @@ sub _generate_unary {
                 [ $unary{$_} => () ];
         }
         default {
-            Carp::croak("Unary operator $_ is not implemented");
+            $self->_error($node, "Unary operator $_ is not implemented");
         }
     }
 }
@@ -472,9 +484,9 @@ sub _generate_binary {
                 [ store_to_lvar => $lvar ],
             );
 
-            $self->_lvar_id_inc(1);
+            $self->_lvar_use(1);
             push @code, $self->_generate_expr($node->second);
-            $self->_lvar_id_dec(1);
+            $self->_lvar_release(1);
 
             push @code,
                 [ load_lvar_to_sb => $lvar ],
@@ -489,7 +501,7 @@ sub _generate_binary {
                 @right;
         }
         default {
-            Carp::croak("Binary operator $_ is not yet implemented");
+            $self->_error($node, "Binary operator $_ is not yet implemented");
         }
     }
     return;
@@ -550,23 +562,6 @@ sub _variable_to_value {
     my $name = $arg->value;
     $name =~ s/\$//;
     return $name;
-}
-
-
-sub _literal_to_value {
-    my($self, $arg) = @_;
-
-    my $value = $arg->value // return undef;
-
-    if($value =~ s/"(.*)"/$1/){
-        $value =~ s/\\n/\n/g;
-        $value =~ s/\\t/\t/g;
-        $value =~ s/\\(.)/$1/g;
-    }
-    elsif($value =~ s/'(.*)'/$1/) {
-        $value =~ s/\\(['\\])/$1/g; # ' for poor editors
-    }
-    return $value;
 }
 
 my %goto_family;
@@ -689,7 +684,7 @@ sub _optimize {
 sub as_assembly {
     my($self, $code_ref) = @_;
 
-    my $addix = ($Text::Xslate::DEBUG =~ /\b addix \b/xms);
+    my $addix = ($DEBUG =~ /\b addix \b/xms);
 
     my $as = "";
     foreach my $ix(0 .. (@{$code_ref}-1)) {
@@ -706,6 +701,7 @@ sub as_assembly {
             else {
                 $arg =~ s/\\/\\\\/g;
                 $arg =~ s/\n/\\n/g;
+                $arg =~ s/\r/\\r/g;
                 $arg =~ s/"/\\"/g;
                 $as .= qq{"$arg"};
             }
@@ -719,6 +715,13 @@ sub as_assembly {
         $as .= "\n";
     }
     return $as;
+}
+
+sub _error {
+    my($self, $node, $message) = @_;
+
+    my $line = ref($node) ? $node->line : $node;
+    Carp::croak(sprintf 'Xslate::Compiler(%s:%d): %s', $self->file, $line, $message);
 }
 
 no Mouse;
