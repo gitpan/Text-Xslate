@@ -6,7 +6,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1003';
+our $VERSION = '0.1004';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -107,6 +107,10 @@ sub load_file {
     my $fullpath    = $f->{fullpath};
     my $is_compiled = $f->{is_compiled};
 
+    if($self->{cache} == 0) {
+        $is_compiled = 0;
+    }
+
     print STDOUT "---> $fullpath ($is_compiled)\n" if _DUMP_LOAD_FILE;
 
     my $pathc = $fullpath . "c";
@@ -201,7 +205,6 @@ sub _compiler {
 sub _load_assembly {
     my($self, $assembly) = @_;
 
-    # name ?arg comment
     my @protocode;
     while($assembly =~ m{
             ^[ \t]*
@@ -237,7 +240,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1003.
+This document describes Text::Xslate version 0.1004.
 
 =head1 SYNOPSIS
 
@@ -355,11 +358,13 @@ Specifies PerlIO layers for reading templates.
 
 =back
 
-=head3 B<< $tx->render($name, \%vars) -> Str >>
+=head3 B<< $tx->render($file, \%vars) -> Str >>
 
 Renders a template with variables, and returns the result.
 
-If I<$name> is omitted, C<< <input> >> is used. See the C<string> option for C<new>.
+If I<$file> is omitted, C<< <input> >> is used. See the C<string> option for C<new>.
+
+Note that I<$file> may be cached according to the cache level.
 
 =head3 Exportable functions
 
