@@ -56,6 +56,7 @@ t/010_internals/003_altparser.t
 t/010_internals/004_magic.t
 t/010_internals/005_load_file.t
 t/010_internals/006_errhandler.t
+t/010_internals/007_compile_errs.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/020_features/001_interpolate.t
@@ -80,6 +81,7 @@ t/020_features/019_utf8.t
 t/020_features/020_funcs.t
 t/020_features/021_more_macro.t
 t/020_features/022_literal.t
+t/020_features/023_dynamic_filters.t
 t/020_features/100_examples.t
 t/020_features/101_eg_cascade.t
 t/lib/Util.pm
@@ -87,7 +89,7 @@ t/template/eg/base.tx
 t/template/eg/child.tx
 t/template/for.tx
 t/template/hello.tx
-t/template/hello2.tx
+t/template/hello.tx.mod
 t/template/hello_utf8.tx
 t/template/include.tx
 t/template/include2.tx

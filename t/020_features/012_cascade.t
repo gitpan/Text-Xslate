@@ -127,4 +127,22 @@ HEAD
 FOOT
 T
 
+note "file";
+is $tx->render('myapp/derived.tx', {lang => 'Xslate'}), <<'T', "file ($_)" for 1 .. 2;
+HEAD
+    D-BEFORE
+    Hello, Xslate world!
+    D-AFTER
+FOOT
+T
+
+$tx = Text::Xslate->new(path => [path]);
+is $tx->render('myapp/derived.tx', {lang => 'Xslate'}), <<'T', "file again ($_)" for 1 .. 2;
+HEAD
+    D-BEFORE
+    Hello, Xslate world!
+    D-AFTER
+FOOT
+T
+
 done_testing;

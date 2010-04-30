@@ -43,13 +43,14 @@ START_MY_CXT
 #define TX_current_framex(st) ((AV*)AvARRAY((st)->frame)[(st)->current_frame])
 #define TX_current_frame()    TX_current_framex(TX_st)
 
-enum txo_ix {
+enum txtmplo_ix {
     TXo_NAME,
-    TXo_FULLPATH,
-    TXo_MTIME,
     TXo_ERROR_HANDLER,
+    TXo_MTIME,
 
-    TXo_size
+    TXo_FULLPATH,
+    /* dependencies here */
+    TXo_least_size
 };
 
 enum txframeo_ix {
@@ -57,7 +58,9 @@ enum txframeo_ix {
     TXframe_OUTPUT,
     TXframe_RETADDR,
 
-    TXframe_START_LVAR
+    TXframe_START_LVAR,
+    /* local variables here */
+    TXframe_least_size = TXframe_START_LVAR
 };
 
 struct tx_code_s;
@@ -87,7 +90,7 @@ struct tx_state_s {
     HV* vars;    /* template variables */
 
     /* stack frame */
-    AV* frame;         /* [ macroname (or 'main'), return-address, local-variables ... ] */
+    AV* frame;         /* see enum txframeo_ix */
     I32 current_frame; /* current frame index */
     SV** pad;          /* AvARRAY(frame[current_frame]) + 3 */
 
@@ -96,7 +99,7 @@ struct tx_state_s {
 
     U32 hint_size; /* suggested template size (bytes) */
 
-    AV* tmpl; /* [name, fullpath, mtime, error_handler, dependencies...] */
+    AV* tmpl; /* see enum txtmplo_ix */
     SV* self;
     U16* lines;  /* code index -> line number */
 };
@@ -524,36 +527,28 @@ TXC_goto(for_iter) {
     assert(SvIOK(i));
 
     //warn("for_next[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
-    if(SvRMAGICAL(av)) {
+    if(LIKELY(SvRMAGICAL(av) == 0)) {
+        if(LIKELY(++SvIVX(i) <= AvFILLp(av))) {
+            sv_setsv(item, AvARRAY(av)[SvIVX(i)]);
+            TX_st->pc++;
+            return;
+        }
+    }
+    else { /* magical variables */
         if(LIKELY(++SvIVX(i) <= av_len(av))) {
             SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
             sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
-        }
-        else {
-            goto finish_loop;
-        }
-    }
-    else {
-        if(LIKELY(++SvIVX(i) <= AvFILLp(av))) {
-            sv_setsv(item, AvARRAY(av)[SvIVX(i)]);
-        }
-        else {
-            goto finish_loop;
+            TX_st->pc++;
+            return;
         }
     }
 
-    TX_st->pc++;
-
-    return;
-
-    finish_loop:
-
-    /* finish the for loop */
+    /* the loop finished */
     sv_setsv(item,  &PL_sv_undef);
     sv_setsv(avref, &PL_sv_undef);
     /* don't need to clear the iterator, it's only an integer */
 
-    TX_st->pc = SvUVX(TX_op_arg);
+    TX_st->pc = SvUVX(TX_op_arg); /* goto */
 }
 
 
@@ -872,10 +867,6 @@ tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     tx_state_t st;
     SV* eh;
 
-    if(++MY_CXT.depth > 100) {
-        croak("Execution is too deep (> 100)");
-    }
-
     StructCopy(base, &st, tx_state_t);
 
     st.output = output;
@@ -893,6 +884,10 @@ tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     if(SvROK(eh) && SvTYPE(SvRV(eh)) == SVt_PVCV
         && CvXSUB((CV*)SvRV(eh)) == XS_Text__Xslate__error) {
         CvXSUBANY((CV*)SvRV(eh)).any_ptr = &st;
+    }
+
+    if(++MY_CXT.depth > 100) {
+        croak("Execution is too deep (> 100)");
     }
 
     while(st.pc < code_len) {
@@ -1028,36 +1023,34 @@ tx_invoke_load_file(pTHX_ SV* const self, SV* const name) {
 }
 
 static bool
-tx_all_deps_are_fresh(pTHX_ AV* const tmpl, Time_t const mtime) {
+tx_all_deps_are_fresh(pTHX_ AV* const tmpl, Time_t const cache_mtime) {
     I32 const len = AvFILLp(tmpl) + 1;
-    if(len > TXo_size) { /* cascading templates have dependencies */
-        I32 i;
-        Stat_t f;
+    I32 i;
+    Stat_t f;
 
-        for(i = TXo_size; i < len; i++) {
-            SV* const path = AvARRAY(tmpl)[i];
-            //PerlIO_stdoutf("check deps: %"SVf" ... ", path); // */
-            if(PerlLIO_stat(SvPV_nolen_const(path), &f) < 0
-                   || f.st_mtime > mtime) {
-                SV* const mainpath = AvARRAY(tmpl)[TXo_FULLPATH];
+    for(i = TXo_FULLPATH; i < len; i++) {
+        SV* const deppath = AvARRAY(tmpl)[i];
 
-                /* compiled files are no longer fresh, so it must be discarded */
-                PerlLIO_unlink(SvPV_nolen_const(path));
+        if(!SvOK(deppath)) {
+            continue;
+        }
 
-                if(SvOK(mainpath)) {
-                    STRLEN l;
-                    const char* const s = SvPV_const(mainpath, l);
-                    if(s[l-1] == 'c') {
-                        PerlLIO_unlink(s);
-                    }
-                }
+        //PerlIO_stdoutf("check deps: %"SVf" ... ", path); // */
+        if(PerlLIO_stat(SvPV_nolen_const(deppath), &f) < 0
+               || f.st_mtime > cache_mtime) {
+            SV* const mainpath = AvARRAY(tmpl)[TXo_FULLPATH];
+            /* compiled files are no longer fresh, so it must be discarded */
 
-                //PerlIO_stdoutf("too old\n", path); // */
-                return FALSE;
+            if(i != TXo_FULLPATH && SvOK(mainpath)) {
+                PerlLIO_unlink(Perl_form(aTHX_ "%"SVf"c", mainpath));
             }
-            else {
-                //PerlIO_stdoutf("fresh enough\n", path); // */
-            }
+            PerlLIO_unlink(Perl_form(aTHX_ "%"SVf"c", deppath));
+
+            //PerlIO_stdoutf("%"SVf": too old (%d > %d)\n", deppath, (int)f.st_mtime, (int)cache_mtime); // */
+            return FALSE;
+        }
+        else {
+            //PerlIO_stdoutf("%"SVf": fresh enough\n", deppath); // */
         }
     }
     return TRUE;
@@ -1073,6 +1066,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     HV* ttable;
     AV* tmpl;
     MAGIC* mg;
+    SV* cache_mtime;
     int retried = 0;
 
     //PerlIO_stdoutf("load_template(%"SVf")\n", name);
@@ -1085,7 +1079,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
 
     retry:
     if(retried > 1) {
-        why = "something's wrong";
+        why = "retried reloading, but failed";
         goto err;
     }
 
@@ -1128,47 +1122,29 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     tmpl = (AV*)SvRV(sv);
     mg   = mgx_find(aTHX_ (SV*)tmpl, &xslate_vtbl);
 
-    if(AvFILLp(tmpl) < (TXo_size-1)) {
-        why = form("template entry is broken (size:%d < %d)", AvFILLp(tmpl)+1, TXo_size);
+    if(AvFILLp(tmpl) < (TXo_least_size-1)) {
+        why = form("template entry is broken (size:%d < %d)", AvFILLp(tmpl)+1, TXo_least_size);
         goto err;
     }
 
     /* check mtime */
 
-    if(SvOK(AvARRAY(tmpl)[TXo_FULLPATH])) { /* for files */
-        SV* const fullpath = AvARRAY(tmpl)[TXo_FULLPATH];
-        SV* const mtime    = AvARRAY(tmpl)[TXo_MTIME];
-        Stat_t f;
+    cache_mtime = AvARRAY(tmpl)[TXo_MTIME];
 
-        if(!SvOK(mtime)) { /* non-checking mode (i.e. release mode) */
-            return (tx_state_t*)mg->mg_ptr;
-        }
-
-        if(PerlLIO_stat(SvPV_nolen_const(fullpath), &f) < 0 && errno != ENOENT) {
-            why = form("failed to stat(2) for %"SVf, fullpath);
-            goto err;
-        }
-
-        if(SvIV(mtime) == (IV)f.st_mtime
-                && (retried > 0 || tx_all_deps_are_fresh(aTHX_ tmpl, f.st_mtime))) {
-            return (tx_state_t*)mg->mg_ptr;
-        }
-        else {
-            tx_invoke_load_file(aTHX_ self, name);
-            retried++;
-            goto retry;
-        }
-
+    if(!SvIOK(cache_mtime)) { /* non-checking mode (i.e. release mode) */
+        return (tx_state_t*)mg->mg_ptr;
     }
-    else { /* for strings (i.e. <input>) */
-        if(retried > 0 || tx_all_deps_are_fresh(aTHX_ tmpl, PL_basetime /* $^T */)) {
-            return (tx_state_t*)mg->mg_ptr;
-        }
-        else {
-            tx_invoke_load_file(aTHX_ self, name);
-            retried++;
-            goto retry;
-        }
+
+    //PerlIO_stdoutf("###%d %d >= %d\n", (int)retried, (int)SvIVX(cache_mtime), (int)f.st_mtime);
+
+    if(retried > 0 /* if already retried, it should be valid */
+            || tx_all_deps_are_fresh(aTHX_ tmpl, SvIVX(cache_mtime))) {
+        return (tx_state_t*)mg->mg_ptr;
+    }
+    else {
+        tx_invoke_load_file(aTHX_ self, name);
+        retried++;
+        goto retry;
     }
 
     err:
@@ -1226,9 +1202,12 @@ CODE:
     if(!(svp && SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV)) {
         croak("The xslate object has no template table");
     }
-    if(!SvOK(name)) {
-        name = newSVpvs_flags("<input>", SVs_TEMP);
+
+    if(!SvOK(name)) { /* for strings */
+        name  = newSVpvs_flags("<input>", SVs_TEMP);
+        mtime = sv_2mortal(newSViv( time(NULL) ));
     }
+
     tobj = hv_iterval((HV*)SvRV(*svp),
          hv_fetch_ent((HV*)SvRV(*svp), name, TRUE, 0U)
     );
@@ -1246,6 +1225,7 @@ CODE:
 
     tmpl = newAV();
     sv_setsv(tobj, sv_2mortal(newRV_noinc((SV*)tmpl)));
+    av_extend(tmpl, TXo_least_size - 1);
 
     /* tmpl = [name, fullpath, mtime of the file, error_handler] */
 
@@ -1258,9 +1238,9 @@ CODE:
         sv_setsv(*av_fetch(tmpl, TXo_ERROR_HANDLER, TRUE), sv_2mortal(newRV_noinc((SV*)eh)));
     }
 
+    sv_setsv(*av_fetch(tmpl, TXo_NAME,     TRUE), name);
     sv_setsv(*av_fetch(tmpl, TXo_MTIME,    TRUE), mtime );
     sv_setsv(*av_fetch(tmpl, TXo_FULLPATH, TRUE), fullpath);
-    sv_setsv(*av_fetch(tmpl, TXo_NAME,     TRUE), name);
 
     st.tmpl = tmpl;
     st.self = newRV_inc((SV*)self);
