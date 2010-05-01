@@ -6,7 +6,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1004';
+our $VERSION = '0.1005';
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -34,7 +34,8 @@ sub new {
     $args{input_layer}  //= ':utf8';
     $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
-   #$args{function}     //= {}; # see _compiler()
+    $args{syntax}       //= 'Kolon'; # passed directly to the compiler
+   #$args{function}     //= {};      # see _compiler()
 
     $args{template}       = {};
 
@@ -175,22 +176,15 @@ sub _compiler {
     my $compiler = $self->{compiler};
 
     if(!ref $compiler){
-        if(!$compiler->can('new')){
-            my $f = $compiler;
-            $f =~ s{::}{/}g;
-            $f .= ".pm";
-
-            my $e = do {
-                local $@;
-                eval { require $f };
-                $@;
-            };
-            if($e) {
-                $self->throw_error("Xslate: Cannot load the compiler: $e");
-            }
+        if(!$compiler->can('new')) {
+            require Mouse::Util;
+            Mouse::Util::load_class($compiler);
         }
 
-        $compiler = $compiler->new(engine => $self);
+        $compiler = $compiler->new(
+            engine => $self,
+            syntax => $self->{syntax},
+        );
 
         if(my $funcs = $self->{function}) {
             $compiler->define_function(keys %{$funcs});
@@ -240,7 +234,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1004.
+This document describes Text::Xslate version 0.1005.
 
 =head1 SYNOPSIS
 
@@ -257,16 +251,16 @@ This document describes Text::Xslate version 0.1004.
         ],
     );
 
-    # for multiple files
+    # for files
     my $tx = Text::Xslate->new();
     print $tx->render_file('hello.tx', \%vars);
 
     # for strings
     my $template = q{
-        <h1><:= $title :></h1>
+        <h1><: $title :></h1>
         <ul>
         : for $books ->($book) {
-            <li><:= $book.title :></li>
+            <li><: $book.title :></li>
         : } # for
         </ul>
     };
@@ -286,6 +280,11 @@ This document describes Text::Xslate version 0.1004.
         'gfx &lt;gfuji at cpan.org&gt;',
     ); # if you don't want to pollute your namespace.
 
+
+    # if you want Template-Toolkit syntx:
+    $tx = Text::Xslate->new(syntax => 'TTerse');
+    # ...
+
 =head1 DESCRIPTION
 
 B<Text::Xslate> is a template engine tuned for persistent applications.
@@ -293,7 +292,9 @@ This engine introduces the virtual machine paradigm. That is, templates are
 compiled into xslate opcodes, and then executed by the xslate virtual machine
 just like as Perl does.
 
-Note that B<this software is under development>.
+B<This software is under development>.
+Version 0.1xxx is a developing stage, which may include radical changes.
+Version 0.2xxx and more will be somewhat stable.
 
 =head2 Features
 
@@ -309,6 +310,14 @@ Xslate supports template cascading, which allows one to extend
 templates with block modifiers.
 
 This mechanism is also called as template inheritance.
+
+=head3 Syntax alternation
+
+The Xslate engine and parser/compiler are completely separated so that
+one can use alternative parsers.
+
+Currently, C<TTerse>, a Template-Toolkit-like parser, is supported as an
+alternative.
 
 =head1 INTERFACE
 
@@ -328,7 +337,8 @@ Specifies the template string, which is called C<< <input> >> internally.
 
 =item C<< file => $template_file | \@template_files >>
 
-Specifies file(s) to be preloaded.
+Specifies file(s) to be preloaded. Note that C<render()> loads files
+automatically, so this option is not necessarily required.
 
 =item C<< path => \@path // ["."] >>
 
@@ -356,6 +366,12 @@ I<$level> == 0 creates no caches. It's only for testing.
 
 Specifies PerlIO layers for reading templates.
 
+=item C<< syntax => $moniker >>
+
+Specifies the template syntax.
+
+If I<$moniker> is undefined, the default parser will be used.
+
 =back
 
 =head3 B<< $tx->render($file, \%vars) -> Str >>
@@ -376,7 +392,7 @@ so you have to escape these strings.
 For example:
 
     my $tx = Text::Xslate->new(
-        string => 'Mailaddress: <:= $email :>',
+        string => 'Mailaddress: <: $email :>',
     );
     my %vars = (
         email => "Foo &lt;foo@example.com&gt;",
@@ -386,187 +402,24 @@ For example:
 
 =head1 TEMPLATE SYNTAX
 
-TODO
-
-=head1 EXAMPLES
-
-=head2 Variable access
-
-    <:= $var :>
-    <:= $var.field :>
-    <:= $var["field"] :>
-    <:= $var[0] :>
-
-Variables may be HASH references, ARRAY references, or objects.
-
-=head2 Loop (C<for>)
-
-    : for $data ->($item) {
-        [<:= $item.field =>]
-    : }
-
-Iterating data may be ARRAY references.
-
-=head2 Conditional statement (C<if>)
-
-    : if $var == nil {
-        $var is nil.
-    : }
-    : else if $var != "foo" {
-        $var is not nil nor "foo".
-    : }
-    : else {
-        $var is "foo".
-    : }
-
-    : if( $var >= 1 && $var <= 10 ) {
-        $var is 1 .. 10
-    : }
-
-    := $var.value == nil ? "nil" : $var.value
-
-=head2 Expressions
-
-Relational operators (C<< == != < <= > >= >>):
-
-    := $var == 10 ? "10"     : "not 10"
-    := $var != 10 ? "not 10" : "10"
-
-Arithmetic operators (C<< + - * / % >>):
-
-    := $var * 10_000
-    := ($var % 10) == 0
-
-Logical operators (C<< || && // >>)
-
-    := $var >= 0 && $var <= 10 ? "ok" : "too smaller or too larger"
-    := $var // "foo" # as a default value
-
-String operators (C<< ~ >>)
-
-    := "[" ~ $var ~ "]" # concatination
-
-Operator precedence:
-
-    (TODO)
-
-=head2 Functions and filters
-
-Once you have registered functions, you can call them with C<()> or C<|>.
-
-    := f()        # without args
-    := f(1, 2, 3) # with args
-    := 42 | f     # the same as f(42)
-
-Dynamic functions/filters:
-
-    # code
-    sub mk_indent {
-        my($prefix) = @_;
-        return sub {
-            my($str) = @_;
-            $str =~ s/^/$prefix/xmsg;
-            return $str;
-        }
-    }
-    my $tx = Text::Xslate->new(
-        function => {
-            indent => \&mk_indent,
-        },
-    );
-
-    :# template
-    := $value | indent("> ")
-    := indent("> ")($value)
-
-=head2 Template inclusion
-
-    : include "foo.tx"
-
-Xslate templates may be recursively included, but including depth is
-limited to 100.
-
-=head2 Template cascading
-
-You can extend templates with block modifiers.
-
-Base templates F<mytmpl/base.tx>:
-
-    : block title -> { # with default
-        [My Template!]
-    : }
-
-    : block body -> {;} # without default
-
-Another derived template F<mytmpl/foo.tx>:
-
-    : # cascade "mytmpl/base.tx" is also okey
-    : cascade mytmpl::base
-    : # use default title
-    : around body -> {
-        My Template Body!
-    : }
-
-Yet another derived template F<mytmpl/bar.tx>:
-
-    : cascade mytmpl::foo
-    : around title -> {
-        --------------
-        : super
-        --------------
-    : }
-    : before body -> {
-        Before body!
-    : }
-    : after body -> {
-        After body!
-    : }
-
-Then, Perl code:
-
-    my $tx = Text::Xslate->new( file => 'mytmpl/bar.tx' );
-    $tx->render({});
-
-Output:
-
-        --------------
-        [My Template!]
-        --------------
-
-        Before body!
-        My Template Body!
-        After Body!
-
-This is also called as B<template inheritance>.
-
-=head2 Macro blocks
-
-    : macro add ->($x, $y) {
-    :=   $x + $y;
-    : }
-    := add(10, 20)
-
-    : macro signeture -> {
-        This is foo version <:= $VERSION :>
-    : }
-    := signeture()
-
-Note that return values of macros are values that their routines renders.
-That is, macros themselves output nothing.
-
-
-
-=head1 TODO
+There are syntaxes you can use:
 
 =over
 
-=item *
+=item Kolon
 
-Template-Toolkit-like syntax
+B<Kolon> is the default syntax, using C<< <: ... :> >> tags and
+C<< : ... >> line code, which is explained in L<Text::Xslate::Syntax::Kolon>.
 
-=item *
+=item Metakolon
 
-HTML::Template-like syntax
+B<Metakolon> is the same as Kolon except for using C<< [% ... %] >> tags and
+C<< % ... >> line code, instead of C<< <: ... :> >> and C<< : ... >>.
+
+=item TTerse
+
+B<TTerse> is a syntax that is a subset of Template-Toolkit 2, called B<TTerse>,
+which is explained in L<Text::Xslate::Syntax::TTerse>.
 
 =back
 
@@ -582,6 +435,16 @@ to cpan-RT.  Patches are welcome :)
 
 =head1 SEE ALSO
 
+Xslate template syntaxes:
+
+L<Text::Xslate::Syntax::Kolon>
+
+L<Text::Xslate::Syntax::Metakolon>
+
+L<Text::Xslate::Syntax::TTerse>
+
+Other template modules:
+
 L<Text::MicroTemplate>
 
 L<Text::MicroTemplate::Extended>
@@ -593,6 +456,10 @@ L<Template-Toolkit>
 L<HTML::Template>
 
 L<HTML::Template::Pro>
+
+Benchmarks:
+
+L<Template::Benchmark>
 
 =head1 AUTHOR
 

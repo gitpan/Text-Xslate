@@ -30,6 +30,13 @@ has value => (
     default => sub{ $_[0]->id },
 );
 
+has is_end => (
+    is  => 'rw',
+    isa => 'Bool',
+
+    required => 0,
+);
+
 has nud => ( # null denotation
     is  => 'bare',
     isa => 'CodeRef',
@@ -38,6 +45,8 @@ has nud => ( # null denotation
     reader    => 'get_nud',
     predicate => 'has_nud',
     clearer   => 'remove_nud',
+
+    lazy_build => 1,
 
     required => 0,
 );
@@ -51,6 +60,8 @@ has led => ( # left denotation
     predicate => 'has_led',
     clearer   => 'remove_led',
 
+    lazy_build => 1,
+
     required => 0,
 );
 
@@ -62,6 +73,8 @@ has std => ( # statement denotation
     reader    => 'get_std',
     predicate => 'has_std',
     clearer   => 'remove_std',
+
+    lazy_build => 1,
 
     required => 0,
 );
@@ -85,7 +98,7 @@ has arity => (
     isa => 'Str',
 
     lazy    => 1,
-    default => 'symbol',
+    default => 'name',
 
     required => 0.
 );
@@ -120,41 +133,58 @@ has line => (
     required => 0,
 );
 
+
+sub _build_nud {
+    my($self) = @_;
+    return $self->can('_nud_default');
+}
+
+sub _build_led {
+    my($self) = @_;
+    return $self->can('_led_default');
+}
+
+sub _build_std {
+    my($self) = @_;
+    return $self->can('_std_default');
+}
+
+sub _nud_default {
+    my($parser, $symbol) = @_;
+    $parser->near_token($parser->token);
+    $parser->_error(
+        sprintf 'Undefined symbol (%s): %s',
+        $symbol->arity, $symbol->id);
+}
+
+sub _led_default {
+    my($parser, $symbol) = @_;
+    $parser->near_token($parser->token);
+    $parser->_error(
+        sprintf 'Missing operator (%s): %s',
+        $symbol->arity, $symbol->id);
+}
+
+sub _std_default {
+    my($parser, $symbol) = @_;
+    $parser->near_token($parser->token);
+    $parser->_error(
+        sprintf 'Not a statement (%s): %s',
+        $symbol->arity, $symbol->id);
+}
+
 sub nud {
     my($self, $parser) = @_;
-
-    if(!$self->has_nud) {
-        $parser->near_token($parser->token);
-        $parser->_error(
-            sprintf 'Undefined symbol (%s): %s',
-            $self->arity, $self->id);
-    }
-
     return $self->get_nud()->($parser, $self);
 }
 
 sub led {
     my($self, $parser, $left) = @_;
-
-    if(!$self->has_led) {
-        $parser->near_token($parser->token);
-        $parser->_error(
-            sprintf 'Missing operator (%s): %s',
-            $self->arity, $self->id);
-    }
-
     return $self->get_led()->($parser, $self, $left);
 }
 
 sub std {
     my($self, $parser) = @_;
-
-    if(!$self->has_std) {
-        $parser->_error(
-            sprintf 'Not a statement (%s): %s',
-            $self->arity, $self->id);
-    }
-
     return $self->get_std()->($parser, $self);
 }
 

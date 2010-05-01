@@ -4,20 +4,24 @@ use Test::More;
 
 use Text::Xslate::Compiler;
 
-#use Data::Dumper; $Data::Dumper::Indent = 1;
+my $txc = Text::Xslate::Compiler->new(syntax => 'TTerse');
 
-my $txc = Text::Xslate::Compiler->new();
+my $tx;
 
-my $tx = $txc->compile_str(<<'TX');
-: if $var == nil {
+$tx = $txc->compile_str(<<'TX');
+Hello, [% dialect %] world!
+TX
+
+is $tx->render({ dialect => 'TTerse' }), "Hello, TTerse world!\n", "Hello, world";
+
+$tx = $txc->compile_str(<<'TX');
+[% IF var == nil -%]
     $var is nil.
-: }
-: else if $var != "foo" {
+[% ELSIF var != "foo" -%]
     $var is not nil nor "foo".
-: }
-: else {
+[% ELSE -%]
     $var is "foo".
-: }
+[% END -%]
 TX
 
 is $tx->render({ var => undef }),   "    \$var is nil.\n";
@@ -25,9 +29,9 @@ is $tx->render({ var => 0 }),     qq{    \$var is not nil nor "foo".\n};
 is $tx->render({ var => "foo" }), qq{    \$var is "foo".\n};
 
 $tx = $txc->compile_str(<<'TX');
-: if( $var >= 1 && $var <= 10 ) {
+[% IF var >= 1 && var <= 10 -%]
     $var is 1 .. 10
-: }
+[% END -%]
 TX
 
 is $tx->render({ var =>  5 }), "    \$var is 1 .. 10\n";
@@ -35,16 +39,16 @@ is $tx->render({ var =>  0 }), "";
 is $tx->render({ var => 11 }), "";
 
 $tx = $txc->compile_str(<<'TX');
-:= $var.value == nil ? "nil" : $var.value
+[% $var.value == nil ? "nil" : $var.value -%]
 TX
 
 is $tx->render({ var => {} }), "nil";
 is $tx->render({ var => { value => "<foo>" }}), "&lt;foo&gt;";
 
 $tx = $txc->compile_str(<<'TX');
-: for $data ->($item) {
-[<:= $item + 5 :>]
-: } # end for
+[% FOREACH item IN data -%]
+[[% item + 5 %]]
+[% END -%]
 TX
 
 is $tx->render({ data => [1 .. 100] }),

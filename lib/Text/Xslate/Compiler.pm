@@ -57,14 +57,16 @@ has lvar_id => ( # local varialbe id
         _lvar_release => 'dec',
     },
 
-    default => 0,
+    default  => 0,
+    init_arg => undef,
 );
 
 has lvar => ( # local varialbe id table
     is  => 'rw',
     isa => 'HashRef[Int]',
 
-    default => sub{ {} },
+    default  => sub{ {} },
+    init_arg => undef,
 );
 
 has macro_table => (
@@ -73,8 +75,9 @@ has macro_table => (
 
     clearer => 'clear_macro_table',
 
-    lazy    => 1,
-    default => sub{ {} },
+    lazy     => 1,
+    default  => sub{ {} },
+    init_arg => undef,
 );
 
 has engine => (
@@ -86,14 +89,28 @@ has engine => (
     required => 0,
 );
 
+has syntax => (
+    is  => 'rw',
+    isa => 'Str',
+
+    default  => 'Kolon',
+    required => 0,
+);
+
 has parser => (
-    is  => 'ro',
+    is  => 'rw',
     isa => 'Object', # Text::Xslate::Parser
 
     handles => [qw(file line define_constant define_function)],
 
+    lazy    => 1,
     default => sub {
-        return Text::Xslate::Parser->new();
+        my($self) = @_;
+        my $parser_class = Mouse::Util::load_first_existing_class(
+            "Text::Xslate::Syntax::" . $self->syntax,
+            $self->syntax,
+        );
+        return $parser_class->new();
     },
 
     required => 0,
@@ -434,7 +451,7 @@ sub _generate_variable {
     return \@fetch;
 }
 
-sub _generate_name {
+sub _generate_marker {
     my($self, $node) = @_;
 
     return [ $node->id => undef, $node->line ];

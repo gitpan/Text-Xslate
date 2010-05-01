@@ -10,20 +10,26 @@ use Text::Xslate::Util qw(
 use constant _DUMP_PROTO => ($DEBUG =~ /\b dump=proto \b/xmsi);
 use constant _DUMP_TOKEN => ($DEBUG =~ /\b dump=token \b/xmsi);
 
-our @CARP_NOT = qw(Text::Xslate::Compiler);
+our @CARP_NOT = qw(Text::Xslate::Compiler Text::Xslate::Symbol);
 
-my $ID      = qr/(?: [A-Za-z_][A-Za-z0-9_]* )/xms;
+my $ID      = qr/(?: [A-Za-z_\$][A-Za-z0-9_]* )/xms;
 
 my $OPERATOR = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     ...
     ..
     == != <=> <= >=
     << >>
+    += -= *= /= %= ~=
+    &&= ||= //=
+    ~~ =~
+
     && || //
     -> =>
     ::
 
+
     < >
+    =
     + - * / %
     & | ^ 
     !
@@ -36,6 +42,11 @@ my $OPERATOR = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     ;
 ), ',');
 
+my %shortcut_table = (
+    '=' => 'print',
+);
+
+my $CHOMP_FLAGS = qr/-/xms; # should support [-=~+] like Template-Toolkit?
 
 my $COMMENT = qr/\# [^\n;]* (?=[;\n])?/xms;
 
@@ -56,7 +67,7 @@ has scope => (
 
     default => sub{ [ {} ] },
 
-    required => 0,
+    init_arg => undef,
 );
 
 has token => (
@@ -73,24 +84,33 @@ has input => (
     init_arg => undef,
 );
 
-
 has line_start => (
     is      => 'ro',
     isa     => 'Maybe[RegexpRef]',
-    default => sub{ qr/\Q:/xms },
+    builder => '_build_line_start',
 );
+sub _build_line_start { qr/\Q:/xms }
 
 has tag_start => (
     is      => 'ro',
     isa     => 'RegexpRef',
-    default => sub{ qr/\Q<:/xms },
+    builder => '_build_tag_start',
 );
+sub _build_tag_start { qr/\Q<:/xms }
 
 has tag_end => (
     is      => 'ro',
     isa     => 'RegexpRef',
-    default => sub{ qr/\Q:>/xms },
+    builder => '_build_tag_end',
 );
+sub _build_tag_end { qr/\Q:>/xms }
+
+has shortcut_table => (
+    is      => 'ro',
+    isa     => 'HashRef[Str]',
+    builder => '_build_shortcut_table',
+);
+sub _build_shortcut_table { \%shortcut_table }
 
 # attributes for error messages
 
@@ -119,6 +139,8 @@ has line => (
     required => 0,
 );
 
+sub symbol_class() { 'Text::Xslate::Symbol' }
+
 sub _trim {
     my($s) = @_;
 
@@ -138,7 +160,7 @@ sub split {
     my $tag_end       = $self->tag_end;
 
     my $lex_line = defined($line_start) && qr/\A ^ [ \t]* $line_start ([^\n]* \n?) /xms;
-    my $lex_tag  = qr/\A ([^\n]*?) $tag_start ($CODE) $tag_end /xms;
+    my $lex_tag  = qr/\A ([^\n]*?) $tag_start ($CHOMP_FLAGS?) ($CODE) ($CHOMP_FLAGS?) $tag_end /xms;
     my $lex_text = qr/\A ([^\n]* \n) /xms;
 
     while($_) {
@@ -147,11 +169,18 @@ sub split {
                 [ code => _trim($1) ];
         }
         elsif(s/$lex_tag//xms) {
-            if($1){
-                push @tokens, [ text => $1 ];
+            my($text, $prechomp, $code, $postchomp) = ($1, $2, $3, $4);
+            if($text){
+                push @tokens, [ text => $text ];
             }
-            push @tokens,
-                [ code => _trim($2) ];
+            if($prechomp) {
+                push @tokens, [ 'prechomp' ];
+            }
+            push @tokens, [ code => _trim($code) ];
+
+            if($postchomp) {
+                push @tokens, [ 'postchomp' ];
+            }
         }
         elsif(s/$lex_text//xms) {
             push @tokens, [ text => $1 ];
@@ -171,22 +200,52 @@ sub preprocess {
     my $tokens_ref = $self->split(@_);
     my $code = '';
 
-    foreach my $token(@{$tokens_ref}) {
+    my $shortcut_table = $self->shortcut_table;
+    my $shortcut       = join('|', map{ quotemeta } keys %shortcut_table);
+    my $shortcut_rx    = qr/\A ($shortcut)/xms;
+
+    for(my $i = 0; $i < @{$tokens_ref}; $i++) {
+        my $token = $tokens_ref->[$i];
         given($token->[0]) {
             when('text') {
                 my $s = $token->[1];
+
                 $s =~ s/(["\\])/\\$1/gxms; # " for poor editors
 
-                if($s =~ s/\n/\\n/xms) {
-                    $code .= qq{print_raw "$s";\n};
+                # $s may have  single new line
+                my $nl = ($s =~ s/\n/\\n/xms);
+
+                my $p = $tokens_ref->[$i-1]; # pre-token
+                if(defined($p) && $p->[0] eq 'postchomp') {
+                    # <: ... -:>  \nfoobar
+                    #           ^^^^
+                    $s =~ s/\A [ \t]* \\n//xms;
                 }
-                else {
-                    $code .= qq{print_raw "$s";};
+
+                if($nl && defined($p = $tokens_ref->[$i+1])) {
+                    if($p->[0] eq 'prechomp') {
+                        # \n  <:- ... -:>
+                        # ^^^^
+                        $s =~ s/\\n [ \t]* \z//xms;
+                    }
+                    elsif($p->[1] =~ /\A [ \t]+ \z/xms){
+                        my $nn = $tokens_ref->[$i+2];
+                        if(defined($nn) && $nn->[0] eq 'prechomp') {
+                            $p->[1] = '';               # chomp the next
+                            $s =~ s/\\n [ \t]* \z//xms; # chomp this
+                        }
+                    }
                 }
+
+                $code .= qq{print_raw "$s";};
+                $code .= qq{\n} if $nl;
             }
             when('code') {
                 my $s = $token->[1];
-                $s =~ s/\A =/print/xms;
+
+                # shortcut commands
+                $s =~ s/$shortcut_rx/$shortcut_table->{$1}/xms
+                    if $shortcut;
 
                 #if($s =~ /[\{\}\[\]]\n?\z/xms){ # ???
                 if($s =~ /[\}]\n?\z/xms){
@@ -199,6 +258,12 @@ sub preprocess {
                     $code .= qq{$s;};
                 }
             }
+            when('prechomp') {
+                # noop, just a marker
+            }
+            when('postchomp') {
+                # noop, just a marker
+            }
             default {
                 $self->_error("Unknown token: $_");
             }
@@ -208,7 +273,7 @@ sub preprocess {
     return $code;
 }
 
-sub next_token {
+sub lex {
     my($self) = @_;
 
     local *_ = \$self->{input};
@@ -229,14 +294,11 @@ sub next_token {
         $value =~ s/_//g;
         return [ number => $value ];
     }
-    elsif(s/\A (\$ $ID)//xmso) {
-        return [ variable => $1 ];
-    }
     elsif(s/\A $COMMENT //xmso) {
-        goto &next_token; # tail call
+        goto &lex; # tail call
     }
     elsif(s/\A (\S+)//xms) {
-        $self->_error("Unexpected symbol '$1'");
+        $self->_error("Unexpected lex symbol '$1'");
     }
     else { # empty
         return undef;
@@ -263,35 +325,36 @@ sub parse {
 
 sub BUILD {
     my($parser) = @_;
-    $parser->define_grammer();
+    $parser->_define_basic_symbols();
+    $parser->define_symbols();
     return;
 }
 
 # The grammer
 
-sub define_grammer {
+sub _define_basic_symbols {
     my($parser) = @_;
 
-    # separators
-    $parser->symbol(':');
-    $parser->symbol(';');
-    $parser->symbol(',');
-    $parser->symbol(')');
-    $parser->symbol(']');
-    $parser->symbol('}');
-    $parser->symbol('->');
-    $parser->symbol('else');
-    $parser->symbol('with');
-    $parser->symbol('::');
+    $parser->symbol('(end)')->is_end(1); # EOF
 
-    # meta symbols
-    $parser->symbol('(end)');
     $parser->symbol('(name)');
+    my $s = $parser->symbol('(variable)');
+    $s->arity('variable');
+    $s->set_nud(\&_nud_literal);
 
     $parser->symbol('(literal)')->set_nud(\&_nud_literal);
-    $parser->symbol('(variable)')->set_nud(\&_nud_literal);
 
-    # operators
+    $parser->symbol(';');
+
+    # basic commands
+    $parser->symbol('print')    ->set_std(\&_std_command);
+    $parser->symbol('print_raw')->set_std(\&_std_command);
+
+    return;
+}
+
+sub define_basic_operators {
+    my($parser) = @_;
 
     $parser->infix('*', 80);
     $parser->infix('/', 80);
@@ -299,9 +362,7 @@ sub define_grammer {
 
     $parser->infix('+', 70);
     $parser->infix('-', 70);
-
-    $parser->infix('~',  70); # connect
-
+    $parser->infix('~', 70); # connect
 
     $parser->infix('<',  60);
     $parser->infix('<=', 60);
@@ -313,19 +374,48 @@ sub define_grammer {
 
     $parser->infix('|',  40); # filter
 
-    $parser->infix('?', 20, \&_led_ternary);
-
-    $parser->infix('.', 100, \&_led_dot);
-    $parser->infix('[', 100, \&_led_fetch);
-    $parser->infix('(', 100, \&_led_call);
-
     $parser->infixr('&&', 35);
     $parser->infixr('||', 30);
     $parser->infixr('//', 30);
 
+    $parser->symbol(':');
+    $parser->infix('?', 20, \&_led_ternary);
+
+    $parser->assignment('=');
+    $parser->assignment('+=');
+    $parser->assignment('-=');
+    $parser->assignment('*=');
+    $parser->assignment('/=');
+    $parser->assignment('%=');
+    $parser->assignment('~=');
+    $parser->assignment('&&=');
+    $parser->assignment('||=');
+    $parser->assignment('//=');
+
     $parser->prefix('!');
     $parser->prefix('+');
     $parser->prefix('-');
+}
+
+sub define_symbols {
+    my($parser) = @_;
+
+    # separators
+    $parser->symbol(',');
+    $parser->symbol(')');
+    $parser->symbol(']');
+    $parser->symbol('}')->is_end(1); # block end
+    $parser->symbol('->');
+    $parser->symbol('else');
+    $parser->symbol('with');
+    $parser->symbol('::');
+
+    # operators
+    $parser->define_basic_operators();
+
+    $parser->infix('.', 100, \&_led_dot);
+    $parser->infix('[', 100, \&_led_fetch);
+    $parser->infix('(', 100, \&_led_call);
 
     $parser->prefix('(', \&_nud_paren);
 
@@ -338,9 +428,6 @@ sub define_grammer {
     $parser->symbol('for')      ->set_std(\&_std_for);
     $parser->symbol('if')       ->set_std(\&_std_if);
 
-    $parser->symbol('print')    ->set_std(\&_std_command);
-    $parser->symbol('print_raw')->set_std(\&_std_command);
-
     $parser->symbol('include')  ->set_std(\&_std_command);
 
     # template inheritance
@@ -351,7 +438,7 @@ sub define_grammer {
     $parser->symbol('around')   ->set_std(\&_std_proc);
     $parser->symbol('before')   ->set_std(\&_std_proc);
     $parser->symbol('after')    ->set_std(\&_std_proc);
-    $parser->symbol('super')    ->set_nud(\&_nud_literal);
+    $parser->symbol('super')    ->set_std(\&_std_marker);
 
     return;
 }
@@ -367,7 +454,7 @@ sub symbol {
         }
     }
     else {
-        $s = Text::Xslate::Symbol->new(id => $id);
+        $s = $parser->symbol_class->new(id => $id);
         $s->lbp($bp) if $bp;
         $parser->symbol_table->{$id} = $s;
     }
@@ -381,14 +468,14 @@ sub advance {
 
     my $t = $parser->token;
     if($id && $t->id ne $id) {
-        $parser->_error("Expected '$id', but '$t'");
+        $parser->_error("Expected '$id' but '$t'");
     }
 
     $parser->near_token($t);
 
     my $symtab = $parser->symbol_table;
 
-    $t = $parser->next_token();
+    $t = $parser->lex();
 
     if(not defined $t) {
         return $parser->token( $symtab->{"(end)"} );
@@ -402,13 +489,7 @@ sub advance {
     given($arity) {
         when("name") {
             $proto = $parser->find($value);
-        }
-        when("variable") {
-            $proto = $parser->find($value);
-
-            if($proto->id eq '(name)') { # undefined variable
-                $proto = $symtab->{'(variable)'};
-            }
+            $arity = $proto->arity;
         }
         when("operator") {
             $proto = $symtab->{$value};
@@ -482,6 +563,20 @@ sub infixr {
     return;
 }
 
+sub _led_assignment {
+    my($parser, $symbol, $left) = @_;
+
+    $parser->near_token($left);
+    $parser->_error("Assignment ($symbol) is forbidden");
+}
+
+sub assignment {
+    my($parser, $id) = @_;
+
+    $parser->symbol($id, 10)->set_led(\&_led_assignment);
+    return;
+}
+
 sub _led_ternary {
     my($parser, $symbol, $left) = @_;
 
@@ -498,8 +593,11 @@ sub _led_dot {
     my($parser, $symbol, $left) = @_;
 
     my $t = $parser->token;
-    if($t->arity ne 'name') {
-        $parser->_error("Expected a field name");
+    if($t->arity ne "name") {
+        if(!($t->arity eq "literal"
+                && Mouse::Util::TypeConstraints::Int($t->id))) {
+            $parser->_error("Expected a field name but $t");
+        }
     }
 
     my $dot = $symbol->clone(arity => 'binary');
@@ -586,18 +684,25 @@ sub new_scope {
     return;
 }
 
+sub undefined_name {
+    my($parser, $name) = @_;
+    if($name =~ /\A \$/xms) {
+        return $parser->symbol_table->{'(variable)'};
+    }
+    else {
+        return $parser->symbol_table->{'(name)'};
+    }
+}
+
 sub find { # find a name from all the scopes
     my($parser, $name) = @_;
-
     foreach my $scope(reverse @{$parser->scope}){
         my $o = $scope->{$name};
         if($o) {
             return $o;
         }
     }
-
-    my $symtab = $parser->symbol_table;
-    return $symtab->{$name} || $symtab->{'(name)'};
+    return $parser->symbol_table->{$name} // $parser->undefined_name($name);
 }
 
 sub reserve { # reserve a name to the scope
@@ -607,7 +712,7 @@ sub reserve { # reserve a name to the scope
     }
 
     my $top = $parser->scope->[-1];
-    my $t = $top->{$symbol->value};
+    my $t = $top->{$symbol->id};
     if($t) {
         if($t->reserved) {
             return;
@@ -616,7 +721,7 @@ sub reserve { # reserve a name to the scope
            confess("Already defined: $symbol");
         }
     }
-    $top->{$symbol->value} = $symbol;
+    $top->{$symbol->id} = $symbol;
     $symbol->reserved(1);
     return;
 }
@@ -625,12 +730,12 @@ sub define { # define a name to the scope
     my($parser, $symbol) = @_;
     my $top = $parser->scope->[-1];
 
-    my $t = $top->{$symbol->value};
+    my $t = $top->{$symbol->id};
     if(defined $t) {
         confess($t->reserved ? "Already reserved: $t" : "Already defined: $t");
     }
 
-    $top->{$symbol->value} = $symbol;
+    $top->{$symbol->id} = $symbol;
 
     $symbol->reserved(0);
     $symbol->set_nud(\&_nud_literal);
@@ -705,7 +810,13 @@ sub statement { # process one or more statements
 #        confess("Bad expression statement");
 #    }
     $parser->advance(";");
-    return $expr;
+    return $parser->symbol_class->new(
+        arity  => 'command',
+        id     => 'print',
+        first  => [$expr],
+        line   => $expr->line,
+    );
+    #return $expr;
 }
 
 sub statements { # process statements
@@ -715,7 +826,7 @@ sub statements { # process statements
     $parser->advance();
     while(1) {
         my $t = $parser->token;
-        if($t->id eq "}" || $t->id eq "(end)") {
+        if($t->is_end) {
             last;
         }
 
@@ -823,7 +934,7 @@ sub _std_proc {
     my $proc = $symbol->clone(arity => "proc");
     my $name = $parser->token;
     if($name->arity ne "name") {
-        $parser->_error("Expected name, but " . $parser->token . " is not");
+        $parser->_error("Expected a name but " . $parser->token);
     }
 
     $parser->define_macro($name->id);
@@ -898,7 +1009,7 @@ sub _get_bare_name {
 
     my $t = $parser->token;
     if(!($t->arity ~~ [qw(name literal)])) {
-        $parser->_error("Expected name, but $t is not");
+        $parser->_error("Expected name or string literal");
     }
 
     # "string" is ok
@@ -919,7 +1030,7 @@ sub _get_bare_name {
             $t = $parser->advance("::");
 
             if($t->arity ne "name") {
-                $parser->_error("Expected name, but $t is not");
+                $parser->_error("Expected a name but $t");
             }
 
             push @parts, $t->id;
@@ -955,6 +1066,13 @@ sub _std_bare_command {
         arity  => 'bare_command');
 }
 
+# markers for the compiler
+sub _std_marker {
+    my($parser, $symbol) = @_;
+    $parser->advance(';');
+    return $symbol->clone(arity => 'marker');
+}
+
 sub _error {
     my($self, $message) = @_;
 
@@ -969,6 +1087,6 @@ __END__
 
 =head1 NAME
 
-Text::Xslate::Parser - An Xslate template parser used by default
+Text::Xslate::Parser - The base class of template parsers
 
 =cut

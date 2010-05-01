@@ -1,13 +1,22 @@
 #!perl -w
+use 5.010;
 use strict;
+
 use Text::Xslate;
 use Text::MicroTemplate::Extended;
 
 use Benchmark qw(:all);
-use Config; printf "Perl/%vd %s\n", $^V, $Config{archname};
-
 use FindBin qw($Bin);
 use Test::More;
+
+use Config; printf "Perl/%vd %s\n", $^V, $Config{archname};
+foreach my $mod(qw(Text::Xslate Text::MicroTemplate Text::MicroTemplate::Extended)){
+    say $mod, '/', $mod->VERSION;
+}
+
+my %args = @ARGV;
+
+my $cache = $args{'--cache'} // 1;
 
 {
     package BlogEntry;
@@ -41,24 +50,26 @@ my @blog_entries = map{ BlogEntry->new($_) } (
 
 my $tx = Text::Xslate->new(
     path  => ["$Bin/template"],
+    cache => $cache,
 );
 my $mt = Text::MicroTemplate::Extended->new(
     include_path  => ["$Bin/template"],
     template_args => { blog_entries => \@blog_entries },
+    cache         => $cache,
 );
 
 {
     plan tests => 1;
     my $x = $tx->render('child.tx', { blog_entries => \@blog_entries });
     my $y = $mt->render('child');
-    $x =~ s/\s//g;
-    $y =~ s/\s//g;
+    $x =~ s/\n//g;
+    $y =~ s/\n//g;
 
-    is $x, $y or exit 1;
+    is $x, $y, "Xslate eq T::MT::Ex" or exit 1;
 }
 
 print "Benchmarks for template cascading\n";
 cmpthese -1 => {
-    MT => sub{ my $body = [ $mt->render('child') ] },
-    TX => sub{ my $body = [ $tx->render('child.tx', { blog_entries => \@blog_entries }) ] },
+    MTEx => sub{ my $body = [ $mt->render('child') ] },
+    TX   => sub{ my $body = [ $tx->render('child.tx', { blog_entries => \@blog_entries }) ] },
 };
