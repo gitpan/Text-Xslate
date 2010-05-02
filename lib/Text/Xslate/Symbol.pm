@@ -10,7 +10,7 @@ use overload
 our @CARP_NOT = qw(Text::Xslate::Parser);
 
 has id => (
-    is       => 'ro',
+    is       => 'rw',
     isa      => 'Str',
     required => 1,
 );
@@ -21,6 +21,13 @@ has lbp => (
 
     lazy     => 1,
     default  => 0,
+);
+
+has ubp => (
+    is       => 'rw',
+    isa      => 'Int',
+
+    required => 0,
 );
 
 has value => (

@@ -6,20 +6,22 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1006';
-
-use XSLoader;
-XSLoader::load(__PACKAGE__, $VERSION);
+our $VERSION = '0.1007';
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string);
 
+use XSLoader;
+XSLoader::load(__PACKAGE__, $VERSION);
+
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
-    find_file literal_to_value
+    literal_to_value
 );
 
 use constant _DUMP_LOAD_FILE => ($DEBUG =~ /\b dump=load_file \b/xms);
+
+use File::Spec;
 
 my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
@@ -31,6 +33,7 @@ sub new {
 
     $args{suffix}       //= '.tx';
     $args{path}         //= [ '.' ];
+    $args{cache_dir}    //= File::Spec->tmpdir;
     $args{input_layer}  //= ':utf8';
     $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
@@ -41,9 +44,12 @@ sub new {
 
     my $self = bless \%args, $class;
 
-    if(my $file = $args{file}) {
-        $self->load_file($_)
-            for ref($file) ? @{$file} : $file;
+    if(exists $args{file}) {
+        Carp::carp('"file" option makes no sense. Use render($file, \%vars) directly');
+    }
+
+    if(!ref $args{path}) {
+        $args{path} = [$args{path}];
     }
 
     $self->_load_input();
@@ -81,7 +87,7 @@ sub _load_input { # for <input>
     }
 
     if(defined $protocode) {
-        $self->_initialize($protocode);
+        $self->_initialize($protocode, undef, undef, undef, undef);
     }
 
     #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper $protocode;
@@ -89,8 +95,59 @@ sub _load_input { # for <input>
     return $protocode;
 }
 
+sub find_file {
+    my($self, $file, $mtime) = @_;
+
+    my $fullpath;
+    my $cachepath;
+    my $orig_mtime;
+    my $cache_mtime;
+    my $is_compiled;
+
+    foreach my $p(@{$self->{path}}) {
+        $fullpath = File::Spec->catfile($p, $file);
+        $orig_mtime = (stat($fullpath))[9] // next; # does not exist
+
+        $cachepath = File::Spec->catfile($self->{cache_dir}, $file . 'c');
+        # find the cache
+        # TODO
+
+        if(-f $cachepath) {
+            $cache_mtime = (stat(_))[9]; # compiled
+
+            # see tx_load_template() in xs/Text-Xslate.xs
+            if(($mtime // $cache_mtime) >= $orig_mtime) {
+                $is_compiled   = 1;
+            }
+            else {
+                $is_compiled = 0;
+            }
+            last;
+        }
+        else {
+            $is_compiled = 0;
+        }
+    }
+
+    if(defined $orig_mtime) {
+        return {
+            fullpath    => $fullpath,
+            cachepath   => $cachepath,
+
+            orig_mtime  => $orig_mtime,
+            cache_mtime => $cache_mtime,
+
+            is_compiled => $is_compiled,
+        };
+    }
+    else {
+        return undef;
+    }
+}
+
+
 sub load_file {
-    my($self, $file) = @_;
+    my($self, $file, $mtime) = @_;
 
     print STDOUT "load_file($file)\n" if _DUMP_LOAD_FILE;
 
@@ -99,13 +156,14 @@ sub load_file {
             // $self->throw_error("LoadError: Template source <input> does not exist");
     }
 
-    my $f = find_file($file, $self->{path});
+    my $f = $self->find_file($file, $mtime);
 
     if(not defined $f) {
         $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
 
     my $fullpath    = $f->{fullpath};
+    my $cachepath   = $f->{cachepath};
     my $is_compiled = $f->{is_compiled};
 
     if($self->{cache} == 0) {
@@ -114,17 +172,17 @@ sub load_file {
 
     print STDOUT "---> $fullpath ($is_compiled)\n" if _DUMP_LOAD_FILE;
 
-    my $pathc = $fullpath . "c";
-
     my $string;
     {
-        open my($in), '<' . $self->{input_layer}, $is_compiled ? $pathc : $fullpath
-            or $self->throw_error("LoadError: Cannot open $fullpath for reading: $!");
+        my $to_read = $is_compiled ? $cachepath : $fullpath;
+        open my($in), '<' . $self->{input_layer}, $to_read
+            or $self->throw_error("LoadError: Cannot open $to_read for reading: $!");
 
         if($is_compiled && scalar(<$in>) ne $XSLATE_MAGIC) {
             # magic token is not matched
             close $in;
-            unlink $pathc or $self->throw_error("LoadError: Cannot unlink $pathc: $!");
+            unlink $cachepath
+                or $self->throw_error("LoadError: Cannot unlink $cachepath: $!");
             goto &load_file; # retry
         }
 
@@ -140,16 +198,22 @@ sub load_file {
         $protocode = $self->_compiler->compile($string, file => $file);
 
         if($self->{cache}) {
-            # compile templates into assemblies
-            open my($out), '>:raw:utf8', $pathc
-                or $self->throw_error("LoadError: Cannot open $pathc for writing: $!");
+            require File::Basename;
+
+            my $cachedir = File::Basename::dirname($cachepath);
+            if(not -e $cachedir) {
+                require File::Path;
+                File::Path::mkpath($cachedir);
+            }
+            open my($out), '>:raw:utf8', $cachepath
+                or $self->throw_error("LoadError: Cannot open $cachepath for writing: $!");
 
             print $out $XSLATE_MAGIC;
             print $out $self->_compiler->as_assembly($protocode);
 
             if(!close $out) {
-                 Carp::carp("Xslate: Cannot close $pathc (ignored): $!");
-                 unlink $pathc;
+                 Carp::carp("Xslate: Cannot close $cachepath (ignored): $!");
+                 unlink $cachepath;
             }
             else {
                 $is_compiled = 1;
@@ -157,17 +221,17 @@ sub load_file {
         }
     }
     # if $mtime is undef, the runtime does not check freshness of caches.
-    my $mtime;
+    my $cache_mtime;
     if($self->{cache} < 2) {
         if($is_compiled) {
-            $mtime = $f->{cache_mtime} // ( stat $pathc )[9];
+            $cache_mtime = $f->{cache_mtime} // ( stat $cachepath )[9];
         }
         else {
-            $mtime = 0; # no compiled cache, always need to reload
+            $cache_mtime = 0; # no compiled cache, always need to reload
         }
     }
 
-    $self->_initialize($protocode, $file, $fullpath, $mtime);
+    $self->_initialize($protocode, $file, $fullpath, $cachepath, $cache_mtime);
     return $protocode;
 }
 
@@ -225,6 +289,16 @@ sub throw_error {
     goto &Carp::croak;
 }
 
+sub dump :method {
+    my($self) = @_;
+    require 'Data/Dumper.pm'; # we don't want to create its namespace
+    my $dd = Data::Dumper->new([$self], ['xslate']);
+    $dd->Indent(1);
+    $dd->Sortkeys(1);
+    $dd->Useqq(1);
+    return $dd->Dump();
+}
+
 1;
 __END__
 
@@ -234,7 +308,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1006.
+This document describes Text::Xslate version 0.1007.
 
 =head1 SYNOPSIS
 
@@ -253,7 +327,7 @@ This document describes Text::Xslate version 0.1006.
 
     # for files
     my $tx = Text::Xslate->new();
-    print $tx->render_file('hello.tx', \%vars);
+    print $tx->render('hello.tx', \%vars);
 
     # for strings
     my $template = q{
@@ -323,7 +397,7 @@ alternative.
 
 =head2 Methods
 
-=head3 B<< Text::Xslate->new(%options) -> Xslate >>
+=head3 B<< Text::Xslate->new(%options) :XslateEngine >>
 
 Creates a new xslate template engine.
 
@@ -334,11 +408,6 @@ Possible options ares:
 =item C<< string => $template_string >>
 
 Specifies the template string, which is called C<< <input> >> internally.
-
-=item C<< file => $template_file | \@template_files >>
-
-Specifies file(s) to be preloaded. Note that C<render()> loads files
-automatically, so this option is not necessarily required.
 
 =item C<< path => \@path // ["."] >>
 
@@ -374,7 +443,7 @@ If I<$moniker> is undefined, the default parser will be used.
 
 =back
 
-=head3 B<< $tx->render($file, \%vars) -> Str >>
+=head3 B<< $tx->render($file, \%vars) :Str >>
 
 Renders a template with variables, and returns the result.
 
@@ -382,11 +451,18 @@ If I<$file> is omitted, C<< <input> >> is used. See the C<string> option for C<n
 
 Note that I<$file> may be cached according to the cache level.
 
+=head3 B<< $tx->load_file($file) :Void >>
+
+Loads I<$file> for following C<render($file, \%vars)>. Compiles and caches it
+if needed.
+
+This method may be used for pre-compiling template files.
+
 =head3 Exportable functions
 
 =head3 C<< escaped_string($str :Str) -> EscapedString >>
 
-Mark I<$str> as escaped. Escaped strings will not be escaped by the engine,
+Marks I<$str> as escaped. Escaped strings will not be escaped by the engine,
 so you have to escape these strings.
 
 For example:
@@ -418,10 +494,34 @@ C<< % ... >> line code, instead of C<< <: ... :> >> and C<< : ... >>.
 
 =item TTerse
 
-B<TTerse> is a syntax that is a subset of Template-Toolkit 2, called B<TTerse>,
+B<TTerse> is a syntax that is a subset of Template-Toolkit 2,
 which is explained in L<Text::Xslate::Syntax::TTerse>.
 
 =back
+
+=head1 NOTES
+
+In Xslate templates, you cannot use C<undef> as a valid value.
+The use of C<undef> will cause fatal errors as if
+C<use warnings FALTAL => "all"> was specified.
+However, unlike Perl, you can use equal operators to check whether
+the value is defined or not:
+
+    : if $value == nil { ; }
+    : if $value != nil { ; }
+
+    [% # on TTerse syntax -%]
+    [% IF $value == nil %] [% END %]
+    [% IF $value != nil %] [% END %]
+
+Or, you can also use defined-or operator (//):
+
+    : # on Kolon syntax
+    Hello, <: $value // "Xslate" :> world!
+
+    [% # on TTerse syntax %]
+    Hello, [% $value // "Xslate" %] world!
+
 
 =head1 DEPENDENCIES
 
@@ -460,6 +560,12 @@ L<HTML::Template::Pro>
 Benchmarks:
 
 L<Template::Benchmark>
+
+=head1 ACKNOWLEDGEMENTS
+
+Thanks to lestrrat for the suggestion to the interface of C<render()>.
+
+Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug-finding.
 
 =head1 AUTHOR
 

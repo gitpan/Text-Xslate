@@ -48,7 +48,8 @@ enum txtmplo_ix {
     TXo_ERROR_HANDLER,
     TXo_MTIME,
 
-    TXo_FULLPATH,
+    TXo_CACHEPATH,
+    TXo_FULLPATH, /* TXo_FULLPATH must be the last one */
     /* dependencies here */
     TXo_least_size
 };
@@ -58,7 +59,7 @@ enum txframeo_ix {
     TXframe_OUTPUT,
     TXframe_RETADDR,
 
-    TXframe_START_LVAR,
+    TXframe_START_LVAR, /* TXframe_START_LVAR must be the last one */
     /* local variables here */
     TXframe_least_size = TXframe_START_LVAR
 };
@@ -199,7 +200,7 @@ tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_ix) { /* the guts of TX
 
     assert(SvTYPE(cframe) == SVt_PVAV);
 
-    if(AvFILLp(cframe) < real_ix) {
+    if(AvFILLp(cframe) < real_ix || SvREADONLY(AvARRAY(cframe)[real_ix])) {
         av_store(cframe, real_ix, newSV(0));
     }
     st->pad = AvARRAY(cframe) + TXframe_START_LVAR;
@@ -228,8 +229,7 @@ tx_push_frame(pTHX_ tx_state_t* const st) {
 
 static SV*
 tx_call(pTHX_ tx_state_t* const st, SV* proc, I32 const flags, const char* const name) {
-    ENTER;
-    SAVETMPS;
+    /* ENTER & SAVETMPS must be done */
 
     if(!(flags & G_METHOD)) {
         HV* dummy_stash;
@@ -263,6 +263,9 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     PERL_UNUSED_ARG(st);
     if(sv_isobject(var)) { /* sv_isobject() invokes SvGETMAGIC */
         dSP;
+        ENTER;
+        SAVETMPS;
+
         PUSHMARK(SP);
         XPUSHs(var);
         PUTBACK;
@@ -305,10 +308,8 @@ static bool
 tx_str_is_escaped(pTHX_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
         dMY_CXT;
-        if(!SvOK(SvRV(sv))) {
-            croak("Cannot use escaped string: not a reference to a string");
-        }
-        return SvSTASH(SvRV(sv)) == MY_CXT.escaped_string_stash;
+        return SvOK(SvRV(sv))
+            && SvSTASH(SvRV(sv)) == MY_CXT.escaped_string_stash;
     }
     return FALSE;
 }
@@ -317,14 +318,20 @@ TXC(noop) {
     TX_st->pc++;
 }
 
-TXC(move_sa_to_sb) {
+TXC(move_to_sb) {
     TX_st_sb = TX_st_sa;
-
+    TX_st->pc++;
+}
+TXC(move_from_sb) {
+    TX_st_sa = TX_st_sb;
     TX_st->pc++;
 }
 
-TXC_w_var(store_to_lvar) {
-    sv_setsv(TX_lvar(SvIVX(TX_op_arg)), TX_st_sa);
+TXC_w_var(save_to_lvar) {
+    SV* const sv = TX_lvar(SvIVX(TX_op_arg));
+    sv_setsv(sv, TX_st_sa);
+    TX_st_sa = sv;
+
     TX_st->pc++;
 }
 
@@ -335,7 +342,7 @@ TXC_w_var(load_lvar_to_sb) {
 
 TXC(push) {
     dSP;
-    XPUSHs(TX_st_sa);
+    XPUSHs(sv_mortalcopy(TX_st_sa));
     PUTBACK;
 
     TX_st->pc++;
@@ -349,6 +356,9 @@ TXC(pop) {
 
 TXC(pushmark) {
     dSP;
+    ENTER;
+    SAVETMPS;
+
     PUSHMARK(SP);
 
     TX_st->pc++;
@@ -497,7 +507,6 @@ TXC(include) {
     TX_st->pc++;
 }
 
-
 TXC_w_var(for_start) {
     SV* const avref = TX_st_sa;
     IV  const id    = SvIVX(TX_op_arg);
@@ -599,6 +608,9 @@ TXC(filt) {
     SV* const arg    = TX_st_sb;
     SV* const filter = TX_st_sa;
     dSP;
+
+    ENTER;
+    SAVETMPS;
 
     PUSHMARK(SP);
     XPUSHs(arg);
@@ -718,9 +730,6 @@ TXC(macrocall) {
     I32 i;
     SV* tmp;
 
-    ENTER;
-    SAVETMPS;
-
     /* push a new frame */
     cframe = tx_push_frame(aTHX_ TX_st);
 
@@ -773,6 +782,7 @@ TXC(macro_end) {
 
     TX_st->pc = SvUVX(retaddr);
 
+    /* ENTER & SAVETMPS will be done by TXC(pushmark) */
     FREETMPS;
     LEAVE;
 }
@@ -808,7 +818,14 @@ TXC_w_key(function) {
 
 TXC(funcall) {
     /* PUSHMARK & PUSH must be done */
-    TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "calling");
+    TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "function call");
+
+    TX_st->pc++;
+}
+
+TXC_w_key(methodcall_s) {
+    /* PUSHMARK & PUSH must be done */
+    TX_st_sa = tx_call(aTHX_ TX_st, TX_op_arg, G_METHOD, "method call");
 
     TX_st->pc++;
 }
@@ -1005,15 +1022,18 @@ static MGVTBL xslate_vtbl = { /* for identity */
 
 
 static void
-tx_invoke_load_file(pTHX_ SV* const self, SV* const name) {
+tx_invoke_load_file(pTHX_ SV* const self, SV* const name, SV* const mtime) {
     dSP;
     ENTER;
     SAVETMPS;
 
     PUSHMARK(SP);
-    EXTEND(SP, 2);
+    EXTEND(SP, 3);
     PUSHs(self);
     PUSHs(name);
+    if(mtime) {
+        PUSHs(mtime);
+    }
     PUTBACK;
 
     call_method("load_file", G_EVAL | G_VOID);
@@ -1038,13 +1058,13 @@ tx_all_deps_are_fresh(pTHX_ AV* const tmpl, Time_t const cache_mtime) {
         //PerlIO_stdoutf("check deps: %"SVf" ... ", path); // */
         if(PerlLIO_stat(SvPV_nolen_const(deppath), &f) < 0
                || f.st_mtime > cache_mtime) {
-            SV* const mainpath = AvARRAY(tmpl)[TXo_FULLPATH];
-            /* compiled files are no longer fresh, so it must be discarded */
+            SV* const main_cache = AvARRAY(tmpl)[TXo_CACHEPATH];
+            /* compiled caches are no longer fresh, so it must be discarded */
 
-            if(i != TXo_FULLPATH && SvOK(mainpath)) {
-                PerlLIO_unlink(Perl_form(aTHX_ "%"SVf"c", mainpath));
+            if(i != TXo_FULLPATH && SvOK(main_cache)) {
+                PerlLIO_unlink(SvPV_nolen_const(main_cache));
             }
-            PerlLIO_unlink(Perl_form(aTHX_ "%"SVf"c", deppath));
+            //PerlLIO_unlink(SvPV_nolen_const(AvARRAY(tmpl);
 
             //PerlIO_stdoutf("%"SVf": too old (%d > %d)\n", deppath, (int)f.st_mtime, (int)cache_mtime); // */
             return FALSE;
@@ -1103,7 +1123,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     /* $tmpl = $ttable->{$name} */
     he = hv_fetch_ent(ttable, name, FALSE, 0U);
     if(!he) {
-        tx_invoke_load_file(aTHX_ self, name);
+        tx_invoke_load_file(aTHX_ self, name, NULL);
         if(sv_true(ERRSV)){
             why = SvPVx_nolen_const(ERRSV);
             goto err;
@@ -1142,7 +1162,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
         return (tx_state_t*)mg->mg_ptr;
     }
     else {
-        tx_invoke_load_file(aTHX_ self, name);
+        tx_invoke_load_file(aTHX_ self, name, cache_mtime);
         retried++;
         goto retry;
     }
@@ -1179,10 +1199,8 @@ CODE:
 
 #endif
 
-#define undef &PL_sv_undef
-
 void
-_initialize(HV* self, AV* proto, SV* name = undef, SV* fullpath = undef, SV* mtime = undef)
+_initialize(HV* self, AV* proto, SV* name, SV* fullpath, SV* cachepath, SV* mtime)
 CODE:
 {
     MAGIC* mg;
@@ -1204,8 +1222,9 @@ CODE:
     }
 
     if(!SvOK(name)) { /* for strings */
-        name  = newSVpvs_flags("<input>", SVs_TEMP);
-        mtime = sv_2mortal(newSViv( time(NULL) ));
+        name     = newSVpvs_flags("<input>", SVs_TEMP);
+        fullpath = cachepath = &PL_sv_undef;
+        mtime    = sv_2mortal(newSViv( time(NULL) ));
     }
 
     tobj = hv_iterval((HV*)SvRV(*svp),
@@ -1238,9 +1257,10 @@ CODE:
         sv_setsv(*av_fetch(tmpl, TXo_ERROR_HANDLER, TRUE), sv_2mortal(newRV_noinc((SV*)eh)));
     }
 
-    sv_setsv(*av_fetch(tmpl, TXo_NAME,     TRUE), name);
-    sv_setsv(*av_fetch(tmpl, TXo_MTIME,    TRUE), mtime );
-    sv_setsv(*av_fetch(tmpl, TXo_FULLPATH, TRUE), fullpath);
+    sv_setsv(*av_fetch(tmpl, TXo_NAME,     TRUE),  name);
+    sv_setsv(*av_fetch(tmpl, TXo_MTIME,    TRUE),  mtime );
+    sv_setsv(*av_fetch(tmpl, TXo_CACHEPATH, TRUE), cachepath);
+    sv_setsv(*av_fetch(tmpl, TXo_FULLPATH, TRUE),  fullpath);
 
     st.tmpl = tmpl;
     st.self = newRV_inc((SV*)self);

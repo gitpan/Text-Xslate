@@ -3,8 +3,9 @@
  */
 /* forward decl */
 TXC(noop);
-TXC(move_sa_to_sb);
-TXC_w_var(store_to_lvar);
+TXC(move_to_sb);
+TXC(move_from_sb);
+TXC_w_var(save_to_lvar);
 TXC_w_var(load_lvar_to_sb);
 TXC(push);
 TXC(pop);
@@ -47,66 +48,70 @@ TXC(macro_end);
 TXC_w_key(macro);
 TXC_w_key(function);
 TXC(funcall);
+TXC_w_key(methodcall_s);
 TXC_goto(goto);
 TXC_w_sv(depend); /* indicate files for templates to depend on */
 TXC(end);
 
 enum tx_opcode_t {
     TXOP_noop, /* 0 */
-    TXOP_move_sa_to_sb, /* 1 */
-    TXOP_store_to_lvar, /* 2 */
-    TXOP_load_lvar_to_sb, /* 3 */
-    TXOP_push, /* 4 */
-    TXOP_pop, /* 5 */
-    TXOP_pushmark, /* 6 */
-    TXOP_nil, /* 7 */
-    TXOP_literal, /* 8 */
-    TXOP_literal_i, /* 9 */
-    TXOP_fetch_s, /* 10 */
-    TXOP_fetch_lvar, /* 11 */
-    TXOP_fetch_field, /* 12 */
-    TXOP_fetch_field_s, /* 13 */
-    TXOP_print, /* 14 */
-    TXOP_print_raw, /* 15 */
-    TXOP_print_raw_s, /* 16 */
-    TXOP_include, /* 17 */
-    TXOP_for_start, /* 18 */
-    TXOP_for_iter, /* 19 */
-    TXOP_add, /* 20 */
-    TXOP_sub, /* 21 */
-    TXOP_mul, /* 22 */
-    TXOP_div, /* 23 */
-    TXOP_mod, /* 24 */
-    TXOP_concat, /* 25 */
-    TXOP_filt, /* 26 */
-    TXOP_and, /* 27 */
-    TXOP_or, /* 28 */
-    TXOP_dor, /* 29 */
-    TXOP_not, /* 30 */
-    TXOP_plus, /* 31 */
-    TXOP_minus, /* 32 */
-    TXOP_eq, /* 33 */
-    TXOP_ne, /* 34 */
-    TXOP_lt, /* 35 */
-    TXOP_le, /* 36 */
-    TXOP_gt, /* 37 */
-    TXOP_ge, /* 38 */
-    TXOP_macrocall, /* 39 */
-    TXOP_macro_begin, /* 40 */
-    TXOP_macro_end, /* 41 */
-    TXOP_macro, /* 42 */
-    TXOP_function, /* 43 */
-    TXOP_funcall, /* 44 */
-    TXOP_goto, /* 45 */
-    TXOP_depend, /* 46 */
-    TXOP_end, /* 47 */
+    TXOP_move_to_sb, /* 1 */
+    TXOP_move_from_sb, /* 2 */
+    TXOP_save_to_lvar, /* 3 */
+    TXOP_load_lvar_to_sb, /* 4 */
+    TXOP_push, /* 5 */
+    TXOP_pop, /* 6 */
+    TXOP_pushmark, /* 7 */
+    TXOP_nil, /* 8 */
+    TXOP_literal, /* 9 */
+    TXOP_literal_i, /* 10 */
+    TXOP_fetch_s, /* 11 */
+    TXOP_fetch_lvar, /* 12 */
+    TXOP_fetch_field, /* 13 */
+    TXOP_fetch_field_s, /* 14 */
+    TXOP_print, /* 15 */
+    TXOP_print_raw, /* 16 */
+    TXOP_print_raw_s, /* 17 */
+    TXOP_include, /* 18 */
+    TXOP_for_start, /* 19 */
+    TXOP_for_iter, /* 20 */
+    TXOP_add, /* 21 */
+    TXOP_sub, /* 22 */
+    TXOP_mul, /* 23 */
+    TXOP_div, /* 24 */
+    TXOP_mod, /* 25 */
+    TXOP_concat, /* 26 */
+    TXOP_filt, /* 27 */
+    TXOP_and, /* 28 */
+    TXOP_or, /* 29 */
+    TXOP_dor, /* 30 */
+    TXOP_not, /* 31 */
+    TXOP_plus, /* 32 */
+    TXOP_minus, /* 33 */
+    TXOP_eq, /* 34 */
+    TXOP_ne, /* 35 */
+    TXOP_lt, /* 36 */
+    TXOP_le, /* 37 */
+    TXOP_gt, /* 38 */
+    TXOP_ge, /* 39 */
+    TXOP_macrocall, /* 40 */
+    TXOP_macro_begin, /* 41 */
+    TXOP_macro_end, /* 42 */
+    TXOP_macro, /* 43 */
+    TXOP_function, /* 44 */
+    TXOP_funcall, /* 45 */
+    TXOP_methodcall_s, /* 46 */
+    TXOP_goto, /* 47 */
+    TXOP_depend, /* 48 */
+    TXOP_end, /* 49 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
 static const tx_exec_t tx_opcode[] = {
     TXCODE_noop,
-    TXCODE_move_sa_to_sb,
-    TXCODE_store_to_lvar,
+    TXCODE_move_to_sb,
+    TXCODE_move_from_sb,
+    TXCODE_save_to_lvar,
     TXCODE_load_lvar_to_sb,
     TXCODE_push,
     TXCODE_pop,
@@ -149,6 +154,7 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_macro,
     TXCODE_function,
     TXCODE_funcall,
+    TXCODE_methodcall_s,
     TXCODE_goto,
     TXCODE_depend,
     TXCODE_end,
@@ -157,8 +163,9 @@ static const tx_exec_t tx_opcode[] = {
 
 static const U8 tx_oparg[] = {
     0U, /* noop */
-    0U, /* move_sa_to_sb */
-    TXCODE_W_VAR, /* store_to_lvar */
+    0U, /* move_to_sb */
+    0U, /* move_from_sb */
+    TXCODE_W_VAR, /* save_to_lvar */
     TXCODE_W_VAR, /* load_lvar_to_sb */
     0U, /* push */
     0U, /* pop */
@@ -201,6 +208,7 @@ static const U8 tx_oparg[] = {
     TXCODE_W_KEY, /* macro */
     TXCODE_W_KEY, /* function */
     0U, /* funcall */
+    TXCODE_W_KEY, /* methodcall_s */
     TXCODE_GOTO, /* goto */
     TXCODE_W_SV, /* depend */
     0U, /* end */
@@ -209,8 +217,9 @@ static const U8 tx_oparg[] = {
 static void
 tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(noop), newSViv(TXOP_noop));
-    (void)hv_stores(ops, STRINGIFY(move_sa_to_sb), newSViv(TXOP_move_sa_to_sb));
-    (void)hv_stores(ops, STRINGIFY(store_to_lvar), newSViv(TXOP_store_to_lvar));
+    (void)hv_stores(ops, STRINGIFY(move_to_sb), newSViv(TXOP_move_to_sb));
+    (void)hv_stores(ops, STRINGIFY(move_from_sb), newSViv(TXOP_move_from_sb));
+    (void)hv_stores(ops, STRINGIFY(save_to_lvar), newSViv(TXOP_save_to_lvar));
     (void)hv_stores(ops, STRINGIFY(load_lvar_to_sb), newSViv(TXOP_load_lvar_to_sb));
     (void)hv_stores(ops, STRINGIFY(push), newSViv(TXOP_push));
     (void)hv_stores(ops, STRINGIFY(pop), newSViv(TXOP_pop));
@@ -253,6 +262,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(macro), newSViv(TXOP_macro));
     (void)hv_stores(ops, STRINGIFY(function), newSViv(TXOP_function));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
+    (void)hv_stores(ops, STRINGIFY(methodcall_s), newSViv(TXOP_methodcall_s));
     (void)hv_stores(ops, STRINGIFY(goto), newSViv(TXOP_goto));
     (void)hv_stores(ops, STRINGIFY(depend), newSViv(TXOP_depend));
     (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
