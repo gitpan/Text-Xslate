@@ -314,6 +314,12 @@ tx_str_is_escaped(pTHX_ SV* const sv) {
     return FALSE;
 }
 
+/*********************
+
+ Xslate opcodes TXC(xxx)
+
+ *********************/
+
 TXC(noop) {
     TX_st->pc++;
 }
@@ -422,10 +428,7 @@ TXC(print) {
     SV* const sv          = TX_st_sa;
     SV* const output      = TX_st->output;
 
-    if(SvNIOK(sv) && !SvPOK(sv)){
-        sv_catsv_nomg(output, sv);
-    }
-    else if(tx_str_is_escaped(aTHX_ sv)) {
+    if(tx_str_is_escaped(aTHX_ sv)) {
         sv_catsv_nomg(output, SvRV(sv));
     }
     else {
@@ -877,6 +880,9 @@ XS(XS_Text__Xslate__error) {
     XSRETURN_EMPTY; /* not reached */
 }
 
+/* End of opcodes */
+
+/* The virtual machine code interpreter */
 static void
 tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     dMY_CXT;
@@ -1375,17 +1381,19 @@ CODE:
     HV* vars;
     tx_state_t* st;
 
-    if(items < 2) {
-        croak_xs_usage(cv,  "self, name, vars");
-    }
-
-    if(items == 2) {
+    if(items == 2) { /* render(\%vars) }*/
         name     = newSVpvs_flags("<input>", SVs_TEMP);
         vars_ref = ST(1);
     }
-    else {
+    else if(items == 3) { /* render($file, \%vars) */
         name     = ST(1);
+        if(!SvOK(name)) {
+            name = newSVpvs_flags("<input>", SVs_TEMP);
+        }
         vars_ref = ST(2);
+    }
+    else {
+        croak_xs_usage(cv,  "self, name, vars");
     }
 
     if(!(SvROK(vars_ref) && SvTYPE(SvRV(vars_ref)) == SVt_PVHV)) {

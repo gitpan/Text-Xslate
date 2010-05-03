@@ -1,12 +1,10 @@
 package Text::Xslate;
-
 # The Xslate engine class
-
 use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1007';
+our $VERSION = '0.1008';
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string);
@@ -19,7 +17,7 @@ use Text::Xslate::Util qw(
     literal_to_value
 );
 
-use constant _DUMP_LOAD_FILE => ($DEBUG =~ /\b dump=load_file \b/xms);
+use constant _DUMP_LOAD_FILE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
 
 use File::Spec;
 
@@ -42,9 +40,8 @@ sub new {
 
     $args{template}       = {};
 
-    my $self = bless \%args, $class;
-
     if(exists $args{file}) {
+        require Carp;
         Carp::carp('"file" option makes no sense. Use render($file, \%vars) directly');
     }
 
@@ -52,8 +49,8 @@ sub new {
         $args{path} = [$args{path}];
     }
 
+    my $self = bless \%args, $class;
     $self->_load_input();
-
     return $self;
 }
 
@@ -68,13 +65,10 @@ sub _load_input { # for <input>
     my $protocode;
 
     if($self->{string}) {
+        require Carp;
+        Carp::carp('"string" option has been deprecated. Use render_string() instead');
         $source++;
         $protocode = $self->_compiler->compile($self->{string});
-    }
-
-    if($self->{assembly}) {
-        $source++;
-        $protocode = $self->_load_assembly($self->{assembly});
     }
 
     if($self->{protocode}) {
@@ -90,9 +84,18 @@ sub _load_input { # for <input>
         $self->_initialize($protocode, undef, undef, undef, undef);
     }
 
-    #use Data::Dumper;$Data::Dumper::Indent=1;print Dumper $protocode;
-
     return $protocode;
+}
+
+sub render_string {
+    my($self, $str, $vars) = @_;
+
+    # because render_string() is provided for testing,
+    # it does not cache compiled code.
+    local $self->{cache} = 0;
+    my $protocode = $self->_compiler->compile($str);
+    $self->_initialize($protocode, undef, undef, undef, undef);
+    return $self->render(undef, $vars);
 }
 
 sub find_file {
@@ -115,13 +118,9 @@ sub find_file {
         if(-f $cachepath) {
             $cache_mtime = (stat(_))[9]; # compiled
 
-            # see tx_load_template() in xs/Text-Xslate.xs
-            if(($mtime // $cache_mtime) >= $orig_mtime) {
-                $is_compiled   = 1;
-            }
-            else {
-                $is_compiled = 0;
-            }
+            # mtime indicates the threshold time.
+            # see also tx_load_template() in xs/Text-Xslate.xs
+            $is_compiled = (($mtime // $cache_mtime) >= $orig_mtime);
             last;
         }
         else {
@@ -240,12 +239,8 @@ sub _compiler {
     my $compiler = $self->{compiler};
 
     if(!ref $compiler){
-        if(!$compiler->can('new')) {
-            require Mouse::Util;
-            Mouse::Util::load_class($compiler);
-        }
-
-        $compiler = $compiler->new(
+        require Mouse::Util;
+        $compiler = Mouse::Util::load_class($compiler)->new(
             engine => $self,
             syntax => $self->{syntax},
         );
@@ -308,12 +303,19 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1007.
+This document describes Text::Xslate version 0.1008.
 
 =head1 SYNOPSIS
 
     use Text::Xslate;
     use FindBin qw($Bin);
+
+    my $tx = Text::Xslate->new(
+        # the fillowing options are optional.
+        path       => ['.'],
+        cache_path => File::Spec->tmpdir,
+        cache      => 1,
+    );
 
     my %vars = (
         title => 'A list of books',
@@ -326,7 +328,6 @@ This document describes Text::Xslate version 0.1007.
     );
 
     # for files
-    my $tx = Text::Xslate->new();
     print $tx->render('hello.tx', \%vars);
 
     # for strings
@@ -339,11 +340,7 @@ This document describes Text::Xslate version 0.1007.
         </ul>
     };
 
-    $tx = Text::Xslate->new(
-        string => $template,
-    );
-
-    print $tx->render(\%vars);
+    print $tx->render_string($template, \%vars);
 
     # you can tell the engine that some strings are already escaped.
     use Text::Xslate qw(escaped_string);
@@ -405,13 +402,9 @@ Possible options ares:
 
 =over
 
-=item C<< string => $template_string >>
-
-Specifies the template string, which is called C<< <input> >> internally.
-
 =item C<< path => \@path // ["."] >>
 
-Specifies the include paths. Default to C<<["."]>>.
+Specifies the include paths.
 
 =item C<< function => \%functions >>
 
@@ -429,7 +422,11 @@ checks the freshness of the original templates every time.
 If I<$level> E<gt>= 2, caches will be created but the freshness
 will not be checked.
 
-I<$level> == 0 creates no caches. It's only for testing.
+I<$level> == 0 creates no caches. It's provided for testing.
+
+=item C<< cache_dir => $dir // File::Spec->tmpdir >>
+
+Specifies the directry used for caches.
 
 =item C<< input_layer => $perliolayers // ":utf8" >>
 
@@ -445,11 +442,15 @@ If I<$moniker> is undefined, the default parser will be used.
 
 =head3 B<< $tx->render($file, \%vars) :Str >>
 
-Renders a template with variables, and returns the result.
-
-If I<$file> is omitted, C<< <input> >> is used. See the C<string> option for C<new>.
+Renders a template file with variables, and returns the result.
 
 Note that I<$file> may be cached according to the cache level.
+
+=head3 B<< $tx->render_string($string, \%vars) :Str >>
+
+Renders a template string with variables, and returns the result.
+
+Note that I<$string> is never cached so that this method is suitable for testing.
 
 =head3 B<< $tx->load_file($file) :Void >>
 
@@ -467,13 +468,12 @@ so you have to escape these strings.
 
 For example:
 
-    my $tx = Text::Xslate->new(
-        string => 'Mailaddress: <: $email :>',
-    );
+    my $tx   = Text::Xslate->new();
+    my $tmpl = 'Mailaddress: <: $email :>';
     my %vars = (
         email => "Foo &lt;foo@example.com&gt;",
     );
-    print $tx->render(\%email);
+    print $tx->render_string($tmpl, \%email);
     # => Mailaddress: Foo &lt;foo@example.com&gt;
 
 =head1 TEMPLATE SYNTAX

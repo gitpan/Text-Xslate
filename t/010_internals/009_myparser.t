@@ -6,6 +6,11 @@ use Test::More;
 use Text::Xslate;
 use lib "t/lib";
 
+# moniker
+my $tx1 = Text::Xslate->new(syntax => 'Foo');
+# fq name
+my $tx2 = Text::Xslate->new(syntax => 'Text::Xslate::Syntax::Foo');
+
 my @data = (
     ['Hello, <%= $lang %> world!' => 'Hello, Xslate world!'],
     ['Hello, <%= $foo %> world!' => 'Hello, &lt;bar&gt; world!'],
@@ -24,19 +29,8 @@ foreach my $pair(@data) {
     my($in, $out) = @$pair;
     my %vars = (lang => 'Xslate', foo => "<bar>");
 
-    my $x = Text::Xslate->new(
-        syntax => 'Foo',
-        string => $in,
-    );
-
-    is $x->render(\%vars), $out, $in;
-
-    $x = Text::Xslate->new(
-        syntax => 'Text::Xslate::Syntax::Foo', # fullname is ok
-        string => $in,
-    );
-
-    is $x->render(\%vars), $out, $in;
+    is $tx1->render_string($in, \%vars), $out, $in;
+    is $tx2->render_string($in, \%vars), $out, $in;
 }
 
 done_testing;

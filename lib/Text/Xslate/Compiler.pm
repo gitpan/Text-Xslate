@@ -10,8 +10,8 @@ use Text::Xslate::Util qw(
 
 use Scalar::Util ();
 
-use constant _DUMP_ASM => ($DEBUG =~ /\b dump=asm \b/xms);
-use constant _OPTIMIZE => ($DEBUG =~ /\b optimize=(\d+) \b/xms);
+use constant _DUMP_ASM => scalar($DEBUG =~ /\b dump=asm \b/xms);
+use constant _OPTIMIZE => scalar(($DEBUG =~ /\b optimize=(\d+) \b/xms)[0]);
 
 our @CARP_NOT = qw(Text::Xslate Text::Xslate::Parser);
 
@@ -79,10 +79,6 @@ has macro_table => (
     is  => 'rw',
     isa => 'HashRef',
 
-    clearer => 'clear_macro_table',
-
-    lazy     => 1,
-    default  => sub{ {} },
     init_arg => undef,
 );
 
@@ -146,6 +142,9 @@ sub compile_str {
 sub compile {
     my($self, $str, %args) = @_;
 
+    local $self->{macro_table} = {};
+    my $mtable = $self->macro_table;
+
     my $parser = $self->parser;
 
     my $ast = $parser->parse($str, %args);
@@ -153,7 +152,6 @@ sub compile {
     # main
     my @code = $self->_compile_ast($ast);
 
-    my $mtable = $self->macro_table;
     my $main = delete $mtable->{'@main'}; # cascade
 
     if(defined $main) {
@@ -184,9 +182,8 @@ sub compile {
             push @code, [ 'macro_end' ];
         }
     }
-    $self->clear_macro_table();
 
-    $self->_optimize(\@code) for 1 .. $args{optimize} // _OPTIMIZE // 2;
+    $self->_optimize(\@code) for 1 .. _OPTIMIZE // 2;
 
     print "// ", $self->file, "\n",
         $self->as_assembly(\@code, scalar($DEBUG =~ /\b addix \b/xms))
