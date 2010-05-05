@@ -4,10 +4,10 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1008';
+our $VERSION = '0.1009';
 
 use parent qw(Exporter);
-our @EXPORT_OK = qw(escaped_string);
+our @EXPORT_OK = qw(escaped_string html_escape);
 
 use XSLoader;
 XSLoader::load(__PACKAGE__, $VERSION);
@@ -15,6 +15,7 @@ XSLoader::load(__PACKAGE__, $VERSION);
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
     literal_to_value
+    import_from
 );
 
 use constant _DUMP_LOAD_FILE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
@@ -29,6 +30,8 @@ sub new {
     my $class = shift;
     my %args  = (@_ == 1 ? %{$_[0]} : @_);
 
+    # options
+
     $args{suffix}       //= '.tx';
     $args{path}         //= [ '.' ];
     $args{cache_dir}    //= File::Spec->tmpdir;
@@ -36,21 +39,38 @@ sub new {
     $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
     $args{syntax}       //= 'Kolon'; # passed directly to the compiler
-   #$args{function}     //= {};      # see _compiler()
 
-    $args{template}       = {};
-
-    if(exists $args{file}) {
-        require Carp;
-        Carp::carp('"file" option makes no sense. Use render($file, \%vars) directly');
+    my %funcs;
+    if(defined $args{import}) {
+        %funcs = import_from(@{$args{import}});
     }
+    # function => { ... } overrides imported functions
+    if(my $funcs_ref = $args{function}) {
+        while(my($name, $body) = each %{$funcs_ref}) {
+            $funcs{$name} = $body;
+        }
+    }
+    $args{function} = \%funcs;
 
     if(!ref $args{path}) {
         $args{path} = [$args{path}];
     }
 
+    # internal data
+    $args{template}       = {};
+
     my $self = bless \%args, $class;
-    $self->_load_input();
+
+    if(defined $args{file}) {
+        require Carp;
+        Carp::carp('"file" option has been deprecated. Use render($file, \%vars) instead');
+    }
+    if(defined $args{string}) {
+        require Carp;
+        Carp::carp('"string" option has been deprecated. Use render_string($string, \%vars) instead');
+        $self->load_string($args{string});
+    }
+
     return $self;
 }
 
@@ -58,43 +78,19 @@ sub render;
 
 sub _initialize;
 
-sub _load_input { # for <input>
-    my($self) = @_;
+sub load_string { # for <input>
+    my($self, $string) = @_;
 
-    my $source = 0;
-    my $protocode;
-
-    if($self->{string}) {
-        require Carp;
-        Carp::carp('"string" option has been deprecated. Use render_string() instead');
-        $source++;
-        $protocode = $self->_compiler->compile($self->{string});
-    }
-
-    if($self->{protocode}) {
-        $source++;
-        $protocode = $self->{protocode};
-    }
-
-    if($source > 1) {
-        $self->throw_error("Multiple template sources are specified");
-    }
-
-    if(defined $protocode) {
-        $self->_initialize($protocode, undef, undef, undef, undef);
-    }
-
+    my $protocode = $self->_compiler->compile($string);
+    $self->_initialize($protocode, undef, undef, undef, undef);
     return $protocode;
 }
 
 sub render_string {
-    my($self, $str, $vars) = @_;
+    my($self, $string, $vars) = @_;
 
-    # because render_string() is provided for testing,
-    # it does not cache compiled code.
     local $self->{cache} = 0;
-    my $protocode = $self->_compiler->compile($str);
-    $self->_initialize($protocode, undef, undef, undef, undef);
+    $self->load_string($string);
     return $self->render(undef, $vars);
 }
 
@@ -128,20 +124,19 @@ sub find_file {
         }
     }
 
-    if(defined $orig_mtime) {
-        return {
-            fullpath    => $fullpath,
-            cachepath   => $cachepath,
-
-            orig_mtime  => $orig_mtime,
-            cache_mtime => $cache_mtime,
-
-            is_compiled => $is_compiled,
-        };
+    if(not defined $orig_mtime) {
+        $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
-    else {
-        return undef;
-    }
+
+    return {
+        fullpath    => $fullpath,
+        cachepath   => $cachepath,
+
+        orig_mtime  => $orig_mtime,
+        cache_mtime => $cache_mtime,
+
+        is_compiled => $is_compiled,
+    };
 }
 
 
@@ -156,10 +151,6 @@ sub load_file {
     }
 
     my $f = $self->find_file($file, $mtime);
-
-    if(not defined $f) {
-        $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
-    }
 
     my $fullpath    = $f->{fullpath};
     my $cachepath   = $f->{cachepath};
@@ -194,7 +185,10 @@ sub load_file {
         $protocode = $self->_load_assembly($string);
     }
     else {
-        $protocode = $self->_compiler->compile($string, file => $file);
+        $protocode = $self->_compiler->compile($string,
+            file     => $file,
+            fullpath => $fullpath,
+        );
 
         if($self->{cache}) {
             require File::Basename;
@@ -294,6 +288,23 @@ sub dump :method {
     return $dd->Dump();
 }
 
+# utility functions
+sub escaped_string;
+
+# TODO: make it into XS
+sub html_escape {
+    my($s) = @_;
+    return $s if ref($s) eq 'Text::Xslate::EscapedString';
+
+    $s =~ s/&/&amp;/g;
+    $s =~ s/</&lt;/g;
+    $s =~ s/>/&gt;/g;
+    $s =~ s/"/&quot;/g;
+    $s =~ s/'/&#39;/g;
+
+    return escaped_string($s);
+}
+
 1;
 __END__
 
@@ -303,7 +314,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1008.
+This document describes Text::Xslate version 0.1009.
 
 =head1 SYNOPSIS
 
@@ -313,7 +324,7 @@ This document describes Text::Xslate version 0.1008.
     my $tx = Text::Xslate->new(
         # the fillowing options are optional.
         path       => ['.'],
-        cache_path => File::Spec->tmpdir,
+        cache_dir  => File::Spec->tmpdir,
         cache      => 1,
     );
 
@@ -377,8 +388,9 @@ engines (Template-Toolkit, HTML::Template::Pro, Text::MicroTemplate, etc).
 
 =head3 Template cascading
 
-Xslate supports template cascading, which allows one to extend
-templates with block modifiers.
+Xslate supports template cascading, which allows you to extend
+templates with block modifiers. It is like traditional template inclusion,
+but is more powerful.
 
 This mechanism is also called as template inheritance.
 
@@ -398,19 +410,13 @@ alternative.
 
 Creates a new xslate template engine.
 
-Possible options ares:
+Possible options are:
 
 =over
 
 =item C<< path => \@path // ["."] >>
 
 Specifies the include paths.
-
-=item C<< function => \%functions >>
-
-Specifies functions.
-
-Functions may be called as C<f($arg)> or C<$arg | f>.
 
 =item C<< cache => $level // 1 >>
 
@@ -428,13 +434,37 @@ I<$level> == 0 creates no caches. It's provided for testing.
 
 Specifies the directry used for caches.
 
+=item C<< function => \%functions >>
+
+Specifies functions.
+
+Functions may be called as C<f($arg)> or C<$arg | f>.
+
+=item C<< import => [$module => ?\@import_args, ...] >>
+
+Imports functions from I<$module>. I<@import_args> is optional.
+
+For example:
+
+    my $tx = Text::Xslate->new(
+        import => ['Data::Dumper'], # use Data::Dumper
+    );
+    print $tx->render_string(
+        '<: Dumper($x) :>',
+        { x => [42] },
+    );
+    # => $VAR = [42]
+
+You can use function based modules with the C<import> option and invoke
+object methods in templates. Thus, Xslate doesn't require namespaces for plugins.
+
 =item C<< input_layer => $perliolayers // ":utf8" >>
 
 Specifies PerlIO layers for reading templates.
 
 =item C<< syntax => $moniker >>
 
-Specifies the template syntax.
+Specifies the template syntax you use.
 
 If I<$moniker> is undefined, the default parser will be used.
 
@@ -463,8 +493,8 @@ This method may be used for pre-compiling template files.
 
 =head3 C<< escaped_string($str :Str) -> EscapedString >>
 
-Marks I<$str> as escaped. Escaped strings will not be escaped by the engine,
-so you have to escape these strings.
+Marks I<$str> as escaped. Escaped strings will not be escaped by the template 
+engine, so you have to escape these strings by yourself.
 
 For example:
 
@@ -475,6 +505,10 @@ For example:
     );
     print $tx->render_string($tmpl, \%email);
     # => Mailaddress: Foo &lt;foo@example.com&gt;
+
+=head3 C<< html_escape($str :Str) -> EscapedString >>
+
+Escapes html special characters in I<$str>, and returns a escaped string (see above).
 
 =head1 TEMPLATE SYNTAX
 
@@ -501,7 +535,11 @@ which is explained in L<Text::Xslate::Syntax::TTerse>.
 
 =head1 NOTES
 
-In Xslate templates, you cannot use C<undef> as a valid value.
+There are common notes in the Xslate virtual machine.
+
+=head2 Nil handling
+
+You cannot use C<undef> as a valid value.
 The use of C<undef> will cause fatal errors as if
 C<use warnings FALTAL => "all"> was specified.
 However, unlike Perl, you can use equal operators to check whether
@@ -522,7 +560,6 @@ Or, you can also use defined-or operator (//):
     [% # on TTerse syntax %]
     Hello, [% $value // "Xslate" %] world!
 
-
 =head1 DEPENDENCIES
 
 Perl 5.10.0 or later, and a C compiler.
@@ -531,7 +568,7 @@ Perl 5.10.0 or later, and a C compiler.
 
 All complex software has bugs lurking in it, and this module is no
 exception. If you find a bug please either email me, or add the bug
-to cpan-RT.  Patches are welcome :)
+to cpan-RT. Patches are welcome :)
 
 =head1 SEE ALSO
 
@@ -556,6 +593,8 @@ L<Template-Toolkit>
 L<HTML::Template>
 
 L<HTML::Template::Pro>
+
+L<Template::Alloy>
 
 Benchmarks:
 

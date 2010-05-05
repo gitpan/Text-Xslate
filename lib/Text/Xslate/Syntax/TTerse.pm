@@ -18,15 +18,15 @@ sub define_symbols {
 
     $parser->symbol('IN');
 
-    $parser->symbol('IF')      ->set_std(\&_std_if);
-    $parser->symbol('FOREACH') ->set_std(\&_std_foreach);
+    $parser->symbol('IF')      ->set_std(\&std_if);
+    $parser->symbol('UNLESS')  ->set_std(\&std_if);
+    $parser->symbol('FOREACH') ->set_std(\&std_foreach);
 
-    $parser->symbol('INCLUDE') ->set_std(\&_std_command);
+    $parser->symbol('INCLUDE') ->set_std(\&std_command);
 
-    # operators
-    $parser->infix('.', 100, \&_led_dot);
     $parser->define_basic_operators();
 
+    return;
 }
 
 sub undefined_name {
@@ -35,31 +35,28 @@ sub undefined_name {
     return $parser->symbol_table->{'(variable)'};
 }
 
-sub _led_dot {
-    my($parser, $symbol, $left) = @_;
-
-    my $t = $parser->token;
-    if($t->arity ne "variable") {
-        if(!($t->arity eq "literal"
-                && Mouse::Util::TypeConstraints::Int($t->id))) {
-            $parser->_error("Expected a field name but $t");
-        }
+sub is_valid_field {
+    my($parser, $token) = @_;
+    if(!$parser->SUPER::is_valid_field($token)) {
+        return $token->arity eq "variable"
+            && scalar($token->id !~ /^\$/);
     }
-
-    my $dot = $symbol->clone(arity => 'binary');
-
-    $dot->first($left);
-    $dot->second($t->clone(arity => 'literal'));
-
-    $parser->advance();
-    return $dot;
+    return 1;
 }
 
-sub _std_if {
+sub std_if {
     my($parser, $symbol) = @_;
     my $if = $symbol->clone(arity => "if");
 
     $if->first(  $parser->expression(0) );
+    if($symbol->id eq 'UNLESS') {
+        my $not_expr = $parser->symbol_class->new(
+            arity  => 'unary',
+            id     => 'not',
+            first  => $if->first,
+        );
+        $if->first($not_expr);;
+    }
     $if->second( $parser->statements() );
 
     my $t = $parser->token;
@@ -68,7 +65,7 @@ sub _std_if {
 
     while($t->id eq "ELSIF") {
         $parser->reserve($t);
-        $parser->advance("ELSIF");
+        $parser->advance(); # "ELSIF"
 
         my $elsif = $t->clone(arity => "if");
         $elsif->first(  $parser->expression(0) );
@@ -83,9 +80,9 @@ sub _std_if {
 
     if($t->id eq "ELSE") {
         $parser->reserve($t);
-        $parser->advance("ELSE");
+        $t = $parser->advance(); # "ELSE"
 
-        $if->third( $parser->token->id eq "IF"
+        $if->third( $t->id eq "IF"
             ? $parser->statement()
             : $parser->statements());
     }
@@ -94,7 +91,7 @@ sub _std_if {
     return $top_if;
 }
 
-sub _std_foreach {
+sub std_foreach {
     my($parser, $symbol) = @_;
 
     my $proc = $symbol->clone(arity => "for");
@@ -116,9 +113,9 @@ sub _std_foreach {
     return $proc;
 }
 
-sub _std_command {
+sub std_command {
     my($parser, $symbol) = @_;
-    my $command = $parser->SUPER::_std_command($symbol);
+    my $command = $parser->SUPER::std_command($symbol);
     $command->id( lc( $command->id ) );
     return $command;
 }
@@ -149,7 +146,7 @@ Text::Xslate::Syntax::TTerse - An alternative syntax like Template-Toolkit 2
 TTerse is a subset of the Template-Toolkit 2 syntax,
 using C<< [% ... %] >> tags.
 
-=head1 EXAMPLES
+=head1 SYNTAX
 
 =head2 Variable access
 
@@ -165,6 +162,11 @@ Field acces:
     [% var.accessor %]
 
 Variables may be HASH references, ARRAY references, or objects.
+
+If I<$var> is an object instance, you can call its methods.
+
+    [% $var.method() %]
+    [% $var.method(1, 2, 3) %]
 
 =head2 Loops
 
@@ -190,11 +192,12 @@ Variables may be HASH references, ARRAY references, or objects.
 
 =head2 Expressions
 
-(TODO)
+Almost the same as L<Text::Xslate::Syntax::Kolon>.
 
 =head2 Functions and filters
 
-Not supported.
+    [% var | f %]
+    [% f(var)  %]
 
 =head2 Template inclusion
 

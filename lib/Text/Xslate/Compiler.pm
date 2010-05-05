@@ -93,7 +93,7 @@ has engine => (
 
 has syntax => (
     is  => 'rw',
-    isa => 'Str',
+    isa => 'Str|Object',
 
     default  => 'Kolon',
     required => 0,
@@ -108,80 +108,122 @@ has parser => (
     lazy    => 1,
     default => sub {
         my($self) = @_;
-        my $parser_class = Mouse::Util::load_first_existing_class(
-            "Text::Xslate::Syntax::" . $self->syntax,
-            $self->syntax,
-        );
-        return $parser_class->new();
+        my $syntax = $self->syntax;
+        if(ref $syntax) {
+            return $syntax;
+        }
+        else {
+            my $parser_class = Mouse::Util::load_first_existing_class(
+                "Text::Xslate::Syntax::" . $syntax,
+                $syntax,
+            );
+            return $parser_class->new();
+        }
     },
 
     required => 0,
 );
 
-has cascading => (
+has cascade => (
     is  => 'rw',
-    isa => 'Maybe[Str]',
-
-    required => 0,
+    isa => 'Object',
 );
-
-sub compile_str {
-    my($self, $str) = @_;
-
-    require Text::Xslate;
-
-    return Text::Xslate->new(
-        protocode    => $self->compile($str),
-
-        # "in-place" mode
-        path  => [],
-        cache => 0,
-    );
-}
 
 sub compile {
     my($self, $str, %args) = @_;
 
-    local $self->{macro_table} = {};
-    my $mtable = $self->macro_table;
+    my %mtable;
+    local $self->{macro_table} = \%mtable;
+    local $self->{cascade};
 
-    my $parser = $self->parser;
+    my $parser   = $self->parser;
+    my $old_file = $parser->file;
 
-    my $ast = $parser->parse($str, %args);
+    my @code; # main protocode
+    {
+        my $ast = $parser->parse($str, %args);
 
-    # main
-    my @code = $self->_compile_ast($ast);
-
-    my $main = delete $mtable->{'@main'}; # cascade
-
-    if(defined $main) {
-        my @new_code = $self->_compile_cascade($main);
-
-        # all the main code will be discarded
-        foreach my $c(@code) {
-            if(!($c->[0] eq 'print_raw_s' && $c->[1] =~ m{\A [ \t\r\n]* \z}xms)) {
-                if($c->[0] eq 'print_raw_s') {
-                    Carp::carp("Xslate: Uselses use of text '$c->[1]'");
-                }
-                else {
-                    Carp::carp("Xslate: Useless use of $c->[0] " . ($c->[1] // ""));
-                }
-            }
-        }
-        @code = @new_code;
-    }
-    else {
+        @code = $self->_compile_ast($ast);
         push @code, ['end'];
     }
 
-    # macros
-    foreach my $macros(values %{ $mtable }) {
-        foreach my $macro(ref($macros) eq 'ARRAY' ? @{$macros} : $macros) {
-            push @code, [ 'macro_begin', $macro->{name}, $macro->{line} ];
-            push @code, @{ $macro->{body} };
-            push @code, [ 'macro_end' ];
+    my $cascade = $self->cascade;
+    if(defined $cascade) {
+        my $engine = $self->engine
+            // $self->_error($cascade, "Cannot cascade templates without Xslate engine");
+
+        my @components = map{ $self->_bare_to_file($_) } @{$cascade->second};
+
+        my($base_file, $base_code);
+        my $base = $cascade->first;
+
+        if(defined $base) {
+            $base_file = $self->_bare_to_file($base);
+            $base_code = $base_code = $engine->load_file($base_file);
+            unshift @{$base_code},
+                [ depend => $engine->find_file($base_file)->{fullpath} ];
+        }
+        else { # only "with"
+            $base_file = $args{file} // '<input>'; # only for error messages
+            $base_code = \@code;
+
+            if(defined $args{fullpath}) {
+                unshift @{$base_code},
+                    [ depend => $args{fullpath} ];
+            }
+
+            push @code, $self->_flush_macro_table(\%mtable);
+        }
+
+        # overlay:
+        foreach my $cfile(@components) {
+            my $body;
+            my $code     = $engine->load_file($cfile);
+            my $fullpath = $engine->find_file($cfile)->{fullpath};
+
+            foreach my $c(@{$code}) {
+                if($c->[0] eq 'macro_begin' .. $c->[0] eq 'macro_end') {
+                    if($c->[0] eq 'macro_begin') {
+                        $body = [];
+                        push @{ $mtable{$c->[1]} //= [] }, {
+                            name  => $c->[1],
+                            line  => $c->[2],
+                            body  => $body,
+                        };
+                    }
+                    elsif($c->[0] ne 'macro_end') {
+                        push @{$body}, $c;
+                    }
+                }
+            }
+
+            unshift @{$base_code},
+                [ depend => $fullpath ];
+            @{$base_code} = $self->_process_cascade($cfile, $base_code);
+            ### after: $base_code
+        }
+
+        # cascade:
+        @{$base_code} = $self->_process_cascade($base_file, $base_code)
+            if defined $base;
+
+        # all the main code will be discarded
+        if($base_code != \@code) {
+            foreach my $c(@code) {
+                if(!($c->[0] eq 'print_raw_s' && $c->[1] =~ m{\A [ \t\r\n]* \z}xms)) {
+                    if($c->[0] eq 'print_raw_s') {
+                        Carp::carp("Xslate: Uselses use of text '$c->[1]'");
+                    }
+                    else {
+                        #Carp::carp("Xslate: Useless use of $c->[0] " . ($c->[1] // ""));
+                    }
+                }
+            }
+            @code = @{$base_code};
         }
     }
+
+    push @code, $self->_flush_macro_table(\%mtable) if %mtable;
 
     $self->_optimize(\@code) for 1 .. _OPTIMIZE // 2;
 
@@ -189,9 +231,23 @@ sub compile {
         $self->as_assembly(\@code, scalar($DEBUG =~ /\b addix \b/xms))
             if _DUMP_ASM;
 
-    $self->file("<input>"); # reset
+    $parser->file($old_file // '<input>'); # reset
 
     return \@code;
+}
+
+sub _flush_macro_table {
+    my($self, $mtable) = @_;
+    my @code;
+    foreach my $macros(values %{$mtable}) {
+        foreach my $macro(ref($macros) eq 'ARRAY' ? @{$macros} : $macros) {
+            push @code, [ 'macro_begin', $macro->{name}, $macro->{line} ];
+            push @code, @{ $macro->{body} };
+            push @code, [ 'macro_end' ];
+        }
+    }
+    %{$mtable} = ();
+    return @code;
 }
 
 sub _compile_ast {
@@ -212,11 +268,11 @@ sub _compile_ast {
     return @code;
 }
 
-sub _compile_cascade {
-    my($self, $main) = @_;
+sub _process_cascade {
+    my($self, $base_file, $base_code) = @_;
     my $mtable = $self->macro_table;
 
-    my @code = @{$main};
+    my @code = @{$base_code};
     for(my $i = 0; $i < @code; $i++) {
         my $c = $code[$i];
         if($c->[0] ne 'macro_begin') {
@@ -229,7 +285,7 @@ sub _compile_cascade {
 
         if(exists $mtable->{$name}) {
             $self->_error($mtable->{$name}{line},
-                "Redefinition of macro/block $name in " . $self->cascading
+                "Redefinition of macro/block $name in " . $base_file
                 . " (you must use before/around/after to override macros/blocks)",
             );
         }
@@ -273,7 +329,6 @@ sub _compile_cascade {
             }
         }
     }
-    $self->cascading(undef);
     return @code;
 }
 
@@ -303,34 +358,26 @@ sub _generate_command {
     }
     return @code;
 }
-sub _generate_bare_command {
+
+sub _bare_to_file {
+    my($self, $file) = @_;
+    if(ref($file) eq 'ARRAY') { # myapp::foo
+        $file  = join '/', @{$file};
+        $file .= $self->engine->{suffix};
+    }
+    else { # "myapp/foo.tx"
+        $file = literal_to_value($file);
+    }
+    return $file;
+}
+
+sub _generate_cascade {
     my($self, $node) = @_;
-
-    my @code;
-
-    if($node->id eq 'cascade') {
-        my $engine = $self->engine
-            // $self->_error($node, "Cannot cascade without an Xslate engine");
-        my $file   = $node->first;
-        #my $components_ref = $node->second;
-
-        if(ref($file) eq 'ARRAY') {
-            $file  = join '/', @{$file};
-            $file .= $engine->{suffix};
-        }
-        else {
-            $file = literal_to_value($file);
-        }
-
-        my $c = $self->macro_table->{'@main'} = $engine->load_file($file);
-        $self->cascading($file);
-
-        unshift @{$c}, [depend => $engine->find_file($file)->{fullpath}];
+    if(defined $self->cascade) {
+        $self->_error($node, "Cannot cascade twice in a template");
     }
-    else {
-        $self->_error($node, "Unknown command $node");
-    }
-    return @code;
+    $self->cascade( $node );
+    return ();
 }
 
 sub _generate_for {
@@ -422,11 +469,11 @@ sub _generate_proc { # block, before, around, after
     $self->_lvar_use($arg_ix);
 
     my %macro = (
-        type   => $type,
         name   => $name,
         nargs  => $arg_ix,
         body   => [ $self->_compile_ast($block) ],
         line   => $node->line,
+        file   => $self->file,
     );
 
     if($type ~~ [qw(macro block)]) {
@@ -467,7 +514,7 @@ sub _generate_if {
 
     return(
         @expr,
-        [ and  => scalar(@then) + 2, undef, 'if' ],
+        [ and  => scalar(@then) + 2, undef, $node->id ],
         @then,
         [ goto => scalar(@else) + 1 ],
         @else,

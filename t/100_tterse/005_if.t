@@ -76,6 +76,61 @@ T
     baz
 X
 
+    [<<'T', <<'X', "unless-end (true)"],
+[% UNLESS lang == "Xslate" -%]
+    ok
+[% END -%]
+T
+X
+
+    [<<'T', <<'X', "unless-end (false)"],
+[% UNLESS lang != "Xslate" -%]
+    ok
+[% END -%]
+T
+    ok
+X
+
+    [<<'T', <<'X', "nesting if"],
+[% IF true %]
+  one
+[% END %]
+[% IF false %]
+  two
+[% END %]
+[% IF true %]
+  [% IF true %]
+    three
+  [% END %]
+  [% IF false %]
+    four
+  [% END %]
+[% END %]
+[% IF true %]
+  five
+[% END %]
+[% IF false %]
+  six
+[% END %]
+T
+
+  one
+
+
+
+  
+    three
+  
+  
+
+
+  five
+
+
+X
+
+
+
 );
 
 foreach my $d(@data) {
@@ -86,6 +141,9 @@ foreach my $d(@data) {
         void => '',
 
         value => 10,
+
+        true  => 1,
+        false => 0,
     );
     is render_str($in, \%vars), $out, $msg or diag($in);
 }

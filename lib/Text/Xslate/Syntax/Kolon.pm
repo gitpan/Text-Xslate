@@ -17,11 +17,11 @@ Text::Xslate::Syntax::Kolon - The default template syntax
 
     use Text::Xslate;
     my $tx = Text::Xslate->new(
-        syntax => 'Kolon',
+        syntax => 'Kolon', # optional
     );
 
     print $tx->render_string(
-        'Hello, [% dialect %] world!',
+        'Hello, <: $dialect :> world!',
         { dialect => 'Kolon' }
     );
 
@@ -29,11 +29,16 @@ Text::Xslate::Syntax::Kolon - The default template syntax
 
 Kolon is the default syntax, using C<< <: ... :> >> tags and C<< : ... >> line code.
 
-=head1 EXAMPLES
+=head1 SYNTAX
 
 =head2 Variable access
 
+Variable access:
+
     <: $var :>
+
+Field access:
+
     <: $var.0 :>
     <: $var.field :>
     <: $var.accessor :>
@@ -42,11 +47,13 @@ Kolon is the default syntax, using C<< <: ... :> >> tags and C<< : ... >> line c
     <: $var[0] :>
 
 Variables may be HASH references, ARRAY references, or objects.
+Because C<$var.field> and C<$var["field"]> are the same semantics,
+C<< $obj["accessor"] >> syntax may be call object methods.
 
 If I<$var> is an object instance, you can call its methods.
 
-    <: $var.foo() :>
-    <: $var.foo(1, 2, 3) :>
+    <: $var.method() :>
+    <: $var.method(1, 2, 3) :>
 
 =head2 Loops
 
@@ -81,6 +88,8 @@ if-then-else statement:
     : }
 
     : $var.value == nil ? "nil" : $var.value
+
+Note that C<elsif> for C<else if> is also okey.
 
 switch statement (B<not yet implemented>):
 
@@ -169,6 +178,8 @@ Dynamic functions/filters:
 
 =head2 Template inclusion
 
+Template inclusion is a traditional way to extend templates.
+
     : include "foo.tx"
 
 Xslate templates may be recursively included, but including depth is
@@ -176,9 +187,15 @@ limited to 100.
 
 =head2 Template cascading
 
+Template cascading is another way to extend templates other than C<include>.
+
+    : cascade myapp::base
+    : cascade myapp::base with myapp::role1, myapp::role2
+    : cascade with myapp::role1, myapp::role2
+
 You can extend templates with block modifiers.
 
-Base templates F<mytmpl/base.tx>:
+Base templates F<myapp/base.tx>:
 
     : block title -> { # with default
         [My Template!]
@@ -186,18 +203,18 @@ Base templates F<mytmpl/base.tx>:
 
     : block body -> {;} # without default
 
-Another derived template F<mytmpl/foo.tx>:
+Another derived template F<myapp/foo.tx>:
 
-    : # cascade "mytmpl/base.tx" is also okey
-    : cascade mytmpl::base
+    : # cascade "myapp/base.tx" is also okey
+    : cascade myapp::base
     : # use default title
     : around body -> {
         My template body!
     : }
 
-Yet another derived template F<mytmpl/bar.tx>:
+Yet another derived template F<myapp/bar.tx>:
 
-    : cascade mytmpl::foo
+    : cascade myapp::foo
     : around title -> {
         --------------
         : super
@@ -212,7 +229,7 @@ Yet another derived template F<mytmpl/bar.tx>:
 
 Then, Perl code:
 
-    my $tx = Text::Xslate->new( file => 'mytmpl/bar.tx' );
+    my $tx = Text::Xslate->new( file => 'myapp/bar.tx' );
     $tx->render({});
 
 Output:
@@ -225,7 +242,33 @@ Output:
         My template tody!
         After body!
 
-This is also called as B<template inheritance>.
+You can also cascade templates just like Moose's roles:
+
+    : cascade myapp::base with myapp::role1, myapp::role2
+
+You can omit the base template.
+
+Given a file F<myapp/hello.tx>:
+
+    : around hello -> {
+        --------------
+        : super
+        --------------
+    : }
+
+Then the main template:
+
+    : cascade with myapp::hello
+
+    : block hello -> {
+        Hello, world!
+    : }
+
+Output:
+
+        --------------
+        Hello, world!
+        --------------
 
 =head2 Macro blocks
 
@@ -238,6 +281,10 @@ This is also called as B<template inheritance>.
         This is foo version <: $VERSION :>
     : }
     : signeture()
+
+    : macro factorial -> $x {
+    :   $x == 0 ? 1 : $x * factorial($x-1)
+    : }
 
 Note that return values of macros are values that their routines renders.
 That is, macros themselves output nothing.
