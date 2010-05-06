@@ -50,9 +50,8 @@ sub std_if {
 
     $if->first(  $parser->expression(0) );
     if($symbol->id eq 'UNLESS') {
-        my $not_expr = $parser->symbol_class->new(
+        my $not_expr = $parser->symbol('not')->clone(
             arity  => 'unary',
-            id     => 'not',
             first  => $if->first,
         );
         $if->first($not_expr);;
@@ -155,7 +154,7 @@ Scalar access:
     [%  var %]
     [% $var %]
 
-Field acces:
+Field access:
 
     [% var.0 %]
     [% var.field %]

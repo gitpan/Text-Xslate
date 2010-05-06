@@ -34,7 +34,7 @@ tx_line(pTHX_ const tx_state_t* const st) {
 static const char*
 tx_neat(pTHX_ SV* const sv) {
     if(SvOK(sv)) {
-        if(SvROK(sv) || looks_like_number(sv)) {
+        if(SvROK(sv) || looks_like_number(sv) || isGV(sv)) {
             return form("%"SVf, sv);
         }
         else {
@@ -624,7 +624,7 @@ TXC_w_key(macro_begin) {
 TXC(macro_end) {
     AV* const oldframe  = TX_current_frame();
     AV* const cframe    = (AV*)AvARRAY(TX_st->frame)[--TX_st->current_frame];
-    SV* const retaddr = AvARRAY(oldframe)[TXframe_RETADDR];
+    SV* const retaddr   = AvARRAY(oldframe)[TXframe_RETADDR];
     SV* tmp;
 
     TX_st->pad = AvARRAY(cframe) + TXframe_START_LVAR; /* switch the pad */
@@ -898,6 +898,9 @@ tx_invoke_load_file(pTHX_ SV* const self, SV* const name, SV* const mtime) {
     PUTBACK;
 
     call_method("load_file", G_EVAL | G_VOID);
+    if(sv_true(ERRSV)){
+        croak("%"SVf" ...", ERRSV);
+    }
 
     FREETMPS;
     LEAVE;
@@ -985,11 +988,6 @@ tx_load_template(pTHX_ SV* const self, SV* const name) {
     he = hv_fetch_ent(ttable, name, FALSE, 0U);
     if(!he) {
         tx_invoke_load_file(aTHX_ self, name, NULL);
-        if(sv_true(ERRSV)){
-            why = SvPVx_nolen_const(ERRSV);
-            goto err;
-        }
-
         retried++;
         goto retry;
     }

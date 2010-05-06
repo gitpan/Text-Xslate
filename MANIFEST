@@ -93,6 +93,8 @@ t/020_features/018_dynamic_filters.t
 t/020_features/019_explicit_interpolate.t
 t/020_features/020_chomp.t
 t/020_features/021_overlay.t
+t/020_features/022_given.t
+t/020_features/100_program.t
 t/100_tterse/001_parse.t
 t/100_tterse/002_interpolate.t
 t/100_tterse/003_field.t

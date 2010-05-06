@@ -6,6 +6,7 @@ use Text::Xslate::Parser;
 use Text::Xslate::Util qw(
     $DEBUG
     literal_to_value
+    p
 );
 
 use Scalar::Util ();
@@ -51,6 +52,13 @@ my %unary = (
     'not' => 'not',
     '+'   => 'plus',
     '-'   => 'minus',
+);
+
+has optimize => (
+    is  => 'rw',
+    isa => 'Int',
+
+    default => _OPTIMIZE // 2,
 );
 
 has lvar_id => ( # local varialbe id
@@ -150,7 +158,7 @@ sub compile {
     my $cascade = $self->cascade;
     if(defined $cascade) {
         my $engine = $self->engine
-            // $self->_error($cascade, "Cannot cascade templates without Xslate engine");
+            // $self->_error("Cannot cascade templates without Xslate engine", $cascade);
 
         my @components = map{ $self->_bare_to_file($_) } @{$cascade->second};
 
@@ -225,7 +233,7 @@ sub compile {
 
     push @code, $self->_flush_macro_table(\%mtable) if %mtable;
 
-    $self->_optimize(\@code) for 1 .. _OPTIMIZE // 2;
+    $self->_optimize_vmcode(\@code) for 1 .. $self->optimize;
 
     print "// ", $self->file, "\n",
         $self->as_assembly(\@code, scalar($DEBUG =~ /\b addix \b/xms))
@@ -252,15 +260,18 @@ sub _flush_macro_table {
 
 sub _compile_ast {
     my($self, $ast) = @_;
-    my @code;
-
     return unless defined $ast;
 
-    confess("Not an ARRAY reference: $ast") if ref($ast) ne 'ARRAY';
+    Carp::croak("Oops: Not an ARRAY reference: " . p($ast)) if ref($ast) ne 'ARRAY';
+
+    # TODO
+    # $self->_optimize_ast($ast) if $self->optimize;
+
+    my @code;
     foreach my $node(@{$ast}) {
-        blessed($node) or Carp::confess("Not a node object: $node");
+        blessed($node) or Carp::croak("Oops: Not a node object: " . p($node));
         my $generator = $self->can('_generate_' . $node->arity)
-            || Carp::croak("Cannot generate codes for " . $node->arity . ": " . $node->dump);
+            || Carp::croak("Oops: Unexpected node:  " . p($node));
 
         push @code, $self->$generator($node);
     }
@@ -284,9 +295,10 @@ sub _process_cascade {
         #warn "macro ", $name, "\n";
 
         if(exists $mtable->{$name}) {
-            $self->_error($mtable->{$name}{line},
+            $self->_error(
                 "Redefinition of macro/block $name in " . $base_file
                 . " (you must use before/around/after to override macros/blocks)",
+                $mtable->{$name}{line}
             );
         }
 
@@ -354,7 +366,7 @@ sub _generate_command {
         }
     }
     if(!@code) {
-        $self->_error($node, "$node requires at least one argument");
+        $self->_error("$node requires at least one argument", $node);
     }
     return @code;
 }
@@ -374,7 +386,7 @@ sub _bare_to_file {
 sub _generate_cascade {
     my($self, $node) = @_;
     if(defined $self->cascade) {
-        $self->_error($node, "Cannot cascade twice in a template");
+        $self->_error("Cannot cascade twice in a template", $node);
     }
     $self->cascade( $node );
     return ();
@@ -387,7 +399,7 @@ sub _generate_for {
     my $block = $node->third;
 
     if(@{$vars} != 1) {
-        $self->_error($node, "A for-loop requires single variable for each items");
+        $self->_error("A for-loop requires single variable for each items", $node);
     }
     my @code = $self->_generate_expr($expr);
 
@@ -420,7 +432,7 @@ sub _generate_while {
     my $block = $node->third;
 
     if(@{$vars} > 1) {
-        $self->_error($node, "A while-loop requires one or zero variable for each items");
+        $self->_error("A while-loop requires one or zero variable for each items", $node);
     }
     my @code = $self->_generate_expr($expr);
 
@@ -478,7 +490,7 @@ sub _generate_proc { # block, before, around, after
 
     if($type ~~ [qw(macro block)]) {
         if(exists $self->macro_table->{$name}) {
-            $self->_error($node, "Redefinition of $type $name is found");
+            $self->_error("Redefinition of $type $name is found", $node);
         }
         $self->macro_table->{$name} = \%macro;
         if($type eq 'block') {
@@ -519,6 +531,32 @@ sub _generate_if {
         [ goto => scalar(@else) + 1 ],
         @else,
     );
+}
+
+sub _generate_given {
+    my($self, $node) = @_;
+    my $expr  = $node->first;
+    my $vars  = $node->second;
+    my $block = $node->third;
+
+    if(@{$vars} > 1) {
+        $self->_error("A given block requires one or zero variables", $node);
+    }
+    my @code = $self->_generate_expr($expr);
+
+    my($lvar) = @{$vars};
+    my $lvar_id   = $self->lvar_id;
+    my $lvar_name = $lvar->id;
+
+    local $self->lvar->{$lvar_name} = [ fetch_lvar => $lvar_id, undef, $lvar_name ];
+
+    # a for statement uses three local variables (container, iterator, and item)
+    $self->_lvar_use(1);
+    my @block_code = $self->_compile_ast($block);
+    $self->_lvar_release(1);
+
+    push @code, [ save_to_lvar => $lvar_id, undef, "given $lvar_name" ], @block_code;
+    return @code;
 }
 
 sub _generate_expr {
@@ -570,7 +608,7 @@ sub _generate_unary {
                 [ $unary{$_} => () ];
         }
         default {
-            $self->_error($node, "Unary operator $_ is not implemented");
+            $self->_error("Unary operator $_ is not implemented", $node);
         }
     }
 }
@@ -597,7 +635,6 @@ sub _generate_binary {
                 [ $bin{$_}   => undef ];
 
             if($_ ~~ [qw(min max)]) {
-                # swap operands before comparison
                 splice @code, -1, 0,
                     [save_to_lvar => $self->lvar_id ]; # save lhs
                 push @code,
@@ -616,7 +653,7 @@ sub _generate_binary {
                 @right;
         }
         default {
-            $self->_error($node, "Binary operator $_ is not yet implemented");
+            $self->_error("Binary operator $_ is not implemented", $node);
         }
     }
     return;
@@ -704,7 +741,7 @@ sub _noop {
     return;
 }
 
-sub _optimize {
+sub _optimize_vmcode {
     my($self, $c) = @_;
 
     # calculate goto addresses
@@ -740,7 +777,7 @@ sub _optimize {
     for(my $i = 0; $i < @{$c}; $i++) {
         given($c->[$i][0]) {
             when('print_raw_s') {
-                # merge a set of print_raw_s into single command
+                # merge a chain of print_raw_s into single command
                 my $j = $i + 1; # from the next op
                 while($j < @{$c}
                         && $c->[$j][0] eq 'print_raw_s'
@@ -814,8 +851,9 @@ sub as_assembly {
     my $as = "";
     foreach my $ix(0 .. (@{$code_ref}-1)) {
         my($opname, $arg, $line, $comment) = @{$code_ref->[$ix]};
-        $as .= "$ix:" if $addix;
+        $as .= "$ix:" if $addix; # for debugging
 
+        # "$opname $arg #$line // $comment"
         $as .= $opname;
         if(defined $arg) {
             $as .= " ";
@@ -843,7 +881,7 @@ sub as_assembly {
 }
 
 sub _error {
-    my($self, $node, $message) = @_;
+    my($self, $message, $node) = @_;
 
     my $line = ref($node) ? $node->line : $node;
     Carp::croak(sprintf 'Xslate::Compiler(%s:%d): %s', $self->file, $line, $message);
@@ -851,9 +889,18 @@ sub _error {
 
 no Mouse;
 __PACKAGE__->meta->make_immutable;
+__END__
 
 =head1 NAME
 
-Text::Xslate::Compiler - An Xslate compiler
+Text::Xslate::Compiler - The Xslate compiler
+
+=head1 DESCRIPTION
+
+This is the Xslate compiler to generate the virtual machine code from the abstract syntax tree.
+
+=head1 SEE ALSO
+
+L<Text::Xslate>
 
 =cut

@@ -3,7 +3,7 @@ use 5.010;
 use strict;
 
 use Text::Xslate;
-use Text::ClearSilver;
+use Text::ClearSilver 0.10.5.4;
 use Text::MicroTemplate::File;
 use Template;
 
@@ -72,7 +72,7 @@ cmpthese -1 => {
         my $body = [$tx->render("$tmpl.tx", $vars)];
         return;
     },
-    clearsilver => sub{
+    cs => sub{
         my $body = [];
         $tcs->process("$tmpl.cs", $vars, \$body->[0]);
         return;

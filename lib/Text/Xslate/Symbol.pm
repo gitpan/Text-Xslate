@@ -34,10 +34,25 @@ has value => (
     is      => 'rw',
 
     lazy    => 1,
-    default => sub{ $_[0]->id },
+    builder => 'id',
+#    default => sub{
+#        if(!defined $_[0]) { #XXX: Mouse::XS's bug
+#            my(undef, $file, $line) = caller;
+#            warn "[bug] no invocant at $file line $line.\n";
+#            return '(null)';
+#        }
+#        return $_[0]->id
+#   },
 );
 
 has is_end => (
+    is  => 'rw',
+    isa => 'Bool',
+
+    required => 0,
+);
+
+has is_logical => (
     is  => 'rw',
     isa => 'Bool',
 

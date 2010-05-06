@@ -5,6 +5,7 @@ use Mouse;
 use Text::Xslate::Symbol;
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
+    p
 );
 
 use constant _DUMP_PROTO => scalar($DEBUG =~ /\b dump=proto \b/xmsi);
@@ -52,6 +53,8 @@ my $COMMENT = qr/\# [^\n;]* (?=[;\n])?/xms;
 
 my $CODE    = qr/ (?: (?: $STRING | [^'"] )*? ) /xms; # ' for poor editors
 
+our $in_given;
+
 has symbol_table => ( # the global symbol table
     is  => 'ro',
     isa => 'HashRef',
@@ -75,7 +78,7 @@ has scope => (
 
 has token => (
     is  => 'rw',
-    isa => 'Object',
+    isa => 'Maybe[Object]',
 
     init_arg => undef,
 );
@@ -251,7 +254,6 @@ sub preprocess {
                 $s =~ s/$shortcut_rx/$shortcut_table->{$1}/xms
                     if $shortcut;
 
-                #if($s =~ /[\{\}\[\]]\n?\z/xms){ # ???
                 if($s =~ /[\}]\n?\z/xms){
                     $code .= $s;
                 }
@@ -269,7 +271,7 @@ sub preprocess {
                 # noop, just a marker
             }
             default {
-                $self->_error("Unknown token: $_");
+                $self->_error("Oops: Unknown token: $_");
             }
         }
     }
@@ -302,7 +304,7 @@ sub lex {
         return [ string => $1 ];
     }
     elsif(s/\A (\S+)//xms) {
-        $self->_error("Unexpected lex symbol '$1'");
+        $self->_error("Oops: Unexpected lex symbol '$1'");
     }
     else { # empty
         return undef;
@@ -315,16 +317,20 @@ sub parse {
     $parser->file( $args{file} // '<input>' );
     $parser->line( $args{line} // 0 );
     $parser->near_token('(start)');
+    $parser->token(undef);
     $parser->init_scope();
+
+    local $in_given = 0;
 
     local $parser->{symbol_table} = { %{ $parser->symbol_table } };
 
     $parser->input( $parser->preprocess($input) );
 
+    $parser->advance();
     my $ast = $parser->statements();
+
     if($parser->input ne '') {
-        $parser->near_token($parser->token);
-        $parser->_error("Syntax error");
+        $parser->_error("Syntax error", $parser->token);
     }
     $parser->near_token(undef);
 
@@ -377,7 +383,7 @@ sub define_basic_operators {
 
     $parser->prefix('(', 200, \&nud_paren);
 
-    $parser->prefix('!', 200);
+    $parser->prefix('!', 200)->is_logical(1);
     $parser->prefix('+', 200);
     $parser->prefix('-', 200);
 
@@ -389,20 +395,20 @@ sub define_basic_operators {
     $parser->infix('-', 170);
     $parser->infix('~', 170); # connect
 
-    $parser->infix('<',  160);
-    $parser->infix('<=', 160);
-    $parser->infix('>',  160);
-    $parser->infix('>=', 160);
+    $parser->infix('<',  160)->is_logical(1);
+    $parser->infix('<=', 160)->is_logical(1);
+    $parser->infix('>',  160)->is_logical(1);
+    $parser->infix('>=', 160)->is_logical(1);
 
-    $parser->infix('==', 150);
-    $parser->infix('!=', 150);
+    $parser->infix('==', 150)->is_logical(1);
+    $parser->infix('!=', 150)->is_logical(1);
 
     $parser->infix('|',  140); # filter
 
-    $parser->infixr('&&', 130);
+    $parser->infixr('&&', 130)->is_logical(1);
 
-    $parser->infixr('||', 120);
-    $parser->infixr('//', 120);
+    $parser->infixr('||', 120)->is_logical(1);
+    $parser->infixr('//', 120)->is_logical(1);
     $parser->infix('min', 120);
     $parser->infix('max', 120);
 
@@ -420,7 +426,7 @@ sub define_basic_operators {
     $parser->assignment('||=', 100);
     $parser->assignment('//=', 100);
 
-    $parser->prefix('not', 70);
+    $parser->prefix('not', 70)->is_logical(1);
     $parser->infix('and',  60);
     $parser->infix('or',   50);
 
@@ -437,6 +443,7 @@ sub define_symbols {
     $parser->symbol('else');
     $parser->symbol('with');
     $parser->symbol('::');
+    $parser->symbol('($_)'); # default topic variable
 
     # operators
     $parser->define_basic_operators();
@@ -446,6 +453,9 @@ sub define_symbols {
     $parser->symbol('if')       ->set_std(\&std_if);
     $parser->symbol('for')      ->set_std(\&std_for);
     $parser->symbol('while' )   ->set_std(\&std_while);
+    $parser->symbol('given')    ->set_std(\&std_given);
+    $parser->symbol('when')     ->set_std(\&std_when);
+    $parser->symbol('default')  ->set_std(\&std_when);
 
     $parser->symbol('include')  ->set_std(\&std_command);
 
@@ -579,8 +589,9 @@ sub led_infix {
 sub infix {
     my($parser, $id, $bp, $led) = @_;
 
-    $parser->symbol($id, $bp)->set_led($led || \&led_infix);
-    return;
+    my $symbol = $parser->symbol($id, $bp);
+    $symbol->set_led($led || \&led_infix);
+    return $symbol;
 }
 
 sub led_infixr {
@@ -594,15 +605,15 @@ sub led_infixr {
 sub infixr {
     my($parser, $id, $bp, $led) = @_;
 
-    $parser->symbol($id, $bp)->set_led($led || \&led_infixr);
-    return;
+    my $symbol = $parser->symbol($id, $bp);
+    $symbol->set_led($led || \&led_infixr);
+    return $symbol;
 }
 
 sub led_assignment {
     my($parser, $symbol, $left) = @_;
 
-    $parser->near_token($left);
-    $parser->_error("Assignment ($symbol) is forbidden");
+    $parser->_error("Assignment ($symbol) is forbidden", $left);
 }
 
 sub assignment {
@@ -700,7 +711,7 @@ sub prefix {
     my $symbol = $parser->symbol($id);
     $symbol->ubp($bp);
     $symbol->set_nud($nud || \&nud_prefix);
-    return;
+    return $symbol;
 }
 
 sub nud_constant {
@@ -761,7 +772,7 @@ sub reserve { # reserve a name to the scope
             return $symbol;
         }
         if($t->arity eq "name") {
-           confess("Already defined: $symbol");
+           $parser->_error("Already defined: $symbol");
         }
     }
     $top->{$symbol->id} = $symbol;
@@ -775,7 +786,7 @@ sub define { # define a name to the scope
 
     my $t = $top->{$symbol->id};
     if(defined $t) {
-        confess($t->reserved ? "Already reserved: $t" : "Already defined: $t");
+        $parser->_error($t->reserved ? "Already reserved: $t" : "Already defined: $t");
     }
 
     $top->{$symbol->id} = $symbol;
@@ -834,7 +845,6 @@ sub pop_scope {
 sub statement { # process one or more statements
     my($parser) = @_;
     my $t = $parser->token;
-
     if($t->id eq ";"){
         $parser->advance(); # ";"
         return;
@@ -843,17 +853,15 @@ sub statement { # process one or more statements
     if($t->has_std) { # is $t a statement?
         $parser->reserve($t);
         $parser->advance();
+
+        # std() returns a list of nodes
         return $t->std($parser);
     }
 
     my $expr = $parser->expression(0);
-#    if($expr->assignment && $expr->id ne "(") {
-#        confess("Bad expression statement");
-#    }
     $parser->advance(";");
-    return $parser->symbol_class->new(
+    return $parser->symbol('print')->clone(
         arity  => 'command',
-        id     => 'print',
         first  => [$expr],
         line   => $expr->line,
     );
@@ -864,27 +872,22 @@ sub statements { # process statements
     my($parser) = @_;
     my @a;
 
-    $parser->advance();
-    while(1) {
-        my $t = $parser->token;
-        if($t->is_end) {
-            last;
-        }
-
+    my $t = $parser->token;
+    while(!$t->is_end) {
         push @a, $parser->statement();
+        $t = $parser->token;
     }
 
     return \@a;
-    #return @a == 1 ? $a[0] : \@a;
 }
 
 sub block {
     my($parser) = @_;
     my $t = $parser->token;
     $parser->advance("{");
-    return $t->std($parser);
+    # std() returns a list of nodes
+    return [$t->std($parser)];
 }
-
 
 sub nud_literal {
     my($parser, $symbol) = @_;
@@ -904,7 +907,7 @@ sub std_block {
     my $a = $parser->statements();
     $parser->advance('}');
     $parser->pop_scope();
-    return $a;
+    return @{$a};
 }
 
 #sub std_var {
@@ -939,33 +942,36 @@ sub std_block {
 
 # -> VARS { STATEMENTS }
 # ->      { STATEMENTS }
+#         { STATEMENTS }
 sub pointy {
     my($parser, $node) = @_;
 
-    $parser->advance("->");
+    my @vars;
 
     $parser->new_scope();
-    my @vars;
-    if($parser->token->id ne "{") {
-        my $paren = ($parser->token->id eq "(");
+    if($parser->token->id eq "->") {
+        $parser->advance("->");
+        if($parser->token->id ne "{") {
+            my $paren = ($parser->token->id eq "(");
 
-        $parser->advance("(") if $paren;
+            $parser->advance("(") if $paren;
 
-        my $t = $parser->token;
-        while($t->arity eq "variable") {
-            push @vars, $t;
-            $parser->define($t);
-            $t = $parser->advance();
+            my $t = $parser->token;
+            while($t->arity eq "variable") {
+                push @vars, $t;
+                $parser->define($t);
+                $t = $parser->advance();
 
-            if($t->id eq ",") {
-                $t = $parser->advance(); # ","
+                if($t->id eq ",") {
+                    $t = $parser->advance(); # ","
+                }
+                else {
+                    last;
+                }
             }
-            else {
-                last;
-            }
+
+            $parser->advance(")") if $paren;
         }
-
-        $parser->advance(")") if $paren;
     }
     $node->second( \@vars );
 
@@ -1043,6 +1049,89 @@ sub std_if {
             : $parser->block());
     }
     return $top_if;
+}
+
+sub std_given {
+    my($parser, $symbol) = @_;
+
+    my $proc = $symbol->clone(arity => 'given');
+    $proc->first( $parser->expression(0) );
+
+    local $in_given = 1;
+    $parser->pointy($proc);
+
+    if(!(defined $proc->second && @{$proc->second})) { # if no vars given
+        $proc->second([
+            $parser->symbol('($_)')->clone(arity => 'variable' )
+        ]);
+    }
+    my($topic) = @{$proc->second};
+
+    # make if-elsif-else from given-when
+    my $if;
+    my $elsif;
+    my $else;
+    foreach my $when(@{$proc->third}) {
+        if($when->arity ne "when") {
+            $parser->_error("Expected when blocks", $when);
+        }
+        $when->arity("if");
+
+        if(defined $when->first) { # given
+            if(!$when->first->is_logical) {
+                my $eq = $parser->symbol('==')->clone(
+                    arity  => 'binary',
+                    first  => $topic,
+                    second => $when->first,
+                );
+                $when->first($eq);
+            }
+        }
+        else { # default
+            my $true = $parser->symbol('(literal)')->clone(
+                id         => 1,
+                arity      => 'literal',
+                is_logical => 1,
+            );
+            $when->first($true);
+            $else = $when;
+            next;
+        }
+
+        if(!defined $if) {
+            $if    = $when;
+            $elsif = $when;
+        }
+        else {
+            $elsif->third([$when]);
+            $elsif = $when;
+        }
+    }
+    if(defined $else) {
+        if(defined $elsif) {
+            $elsif->third([$else]);
+        }
+        else {
+            $if = $else; # only default
+        }
+    }
+    $proc->third([$if]);
+    return $proc;
+}
+
+# when/default
+sub std_when {
+    my($parser, $symbol) = @_;
+
+    if(!$in_given) {
+        $parser->_error("You cannot use $symbol blocks outside given blocks");
+    }
+    my $proc = $symbol->clone(arity => 'when');
+    if($symbol->id eq "when") {
+        $proc->first( $parser->expression(0) );
+    }
+    $proc->second( $parser->block() );
+    return $proc;
 }
 
 sub std_command {
@@ -1128,11 +1217,12 @@ sub std_marker {
 }
 
 sub _error {
-    my($self, $message) = @_;
+    my($self, $message, $near) = @_;
 
+    $near //= $self->near_token;
     Carp::croak(sprintf 'Xslate::Parser(%s:%d): %s%s while parsing templates',
         $self->file, $self->line+1, $message,
-        $self->near_token ne ';' ? ", near '" . $self->near_token . "'" : '');
+        $near ne ';' ? ", near '$near'" : '');
 }
 
 no Mouse;
@@ -1142,5 +1232,13 @@ __END__
 =head1 NAME
 
 Text::Xslate::Parser - The base class of template parsers
+
+=head1 DESCRIPTION
+
+This is a parser to make the abstract syntax tree from templates.
+
+=head1 SEE ALSO
+
+L<Text::Xslate>
 
 =cut
