@@ -32,6 +32,7 @@ acknowledgement
 iff
 okey
 EscapedString
+sandboxing
 
 # name
 lestrrat
@@ -40,4 +41,4 @@ gardejo
 jjn
 Goro Fuji
 gfx
-
+Douglas Crockford

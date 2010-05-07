@@ -16,7 +16,7 @@ use constant _OPTIMIZE => scalar(($DEBUG =~ /\b optimize=(\d+) \b/xms)[0]);
 
 our @CARP_NOT = qw(Text::Xslate Text::Xslate::Parser);
 
-my %bin = (
+my %binary = (
     '==' => 'eq',
     '!=' => 'ne',
     '<'  => 'lt',
@@ -39,7 +39,7 @@ my %bin = (
 
     '['  => 'fetch_field',
 );
-my %logical_bin = (
+my %logical_binary = (
     '&&'  => 'and',
     'and' => 'and',
     '||'  => 'or',
@@ -67,8 +67,8 @@ has lvar_id => ( # local varialbe id
 
     traits  => [qw(Counter)],
     handles => {
-        _lvar_use     => 'inc',
-        _lvar_release => 'dec',
+        lvar_use     => 'inc',
+        lvar_release => 'dec',
     },
 
     default  => 0,
@@ -105,6 +105,13 @@ has syntax => (
 
     default  => 'Kolon',
     required => 0,
+);
+
+has escape_mode => (
+    is  => 'rw',
+    isa => Mouse::Util::TypeConstraints::enum([qw(html none)]),
+
+    default => 'html',
 );
 
 has parser => (
@@ -355,6 +362,10 @@ sub _generate_command {
     my @code;
 
     my $proc = $node->id;
+    if($proc eq 'print' and $self->escape_mode ne 'html') {
+        $proc = 'print_raw';
+    }
+
     foreach my $arg(@{ $node->first }){
         if(exists $Text::Xslate::OPS{$proc . '_s'} && $arg->arity eq 'literal'){
             push @code, [ $proc . '_s' => literal_to_value($arg->value), $node->line ];
@@ -412,9 +423,9 @@ sub _generate_for {
     push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
 
     # a for statement uses three local variables (container, iterator, and item)
-    $self->_lvar_use(3);
+    $self->lvar_use(3);
     my @block_code = $self->_compile_ast($block);
-    $self->_lvar_release(3);
+    $self->lvar_release(3);
 
     push @code,
         [ literal_i => $lvar_id, $expr->line, $lvar_name ],
@@ -448,15 +459,15 @@ sub _generate_while {
         if @{$vars};
 
     # a for statement uses three local variables (container, iterator, and item)
-    $self->_lvar_use(scalar @{$vars});
+    $self->lvar_use(scalar @{$vars});
     my @block_code = $self->_compile_ast($block);
-    $self->_lvar_release(scalar @{$vars});
+    $self->lvar_release(scalar @{$vars});
 
     push @code, [ save_to_lvar => $lvar_id, $expr->line, $lvar_name ]
         if @{$vars};
 
     push @code,
-        [ and  => scalar(@block_code) + 2, undef, "while" ],
+        [ dand  => scalar(@block_code) + 2, undef, "while" ],
         @block_code,
         [ goto => -(scalar(@block_code) + scalar(@code) + 1), undef, "end while" ];
 
@@ -478,7 +489,7 @@ sub _generate_proc { # block, before, around, after
         $self->lvar->{$arg} = [ fetch_lvar => $arg_ix++, $node->line, $arg ];
     }
 
-    $self->_lvar_use($arg_ix);
+    $self->lvar_use($arg_ix);
 
     my %macro = (
         name   => $name,
@@ -508,7 +519,7 @@ sub _generate_proc { # block, before, around, after
         push @{ $self->macro_table->{ $fq_name } //= [] }, \%macro;
     }
 
-    $self->_lvar_release($arg_ix);
+    $self->lvar_release($arg_ix);
 
     return; # no code, only definition
 }
@@ -551,9 +562,9 @@ sub _generate_given {
     local $self->lvar->{$lvar_name} = [ fetch_lvar => $lvar_id, undef, $lvar_name ];
 
     # a for statement uses three local variables (container, iterator, and item)
-    $self->_lvar_use(1);
+    $self->lvar_use(1);
     my @block_code = $self->_compile_ast($block);
-    $self->_lvar_release(1);
+    $self->lvar_release(1);
 
     push @code, [ save_to_lvar => $lvar_id, undef, "given $lvar_name" ], @block_code;
     return @code;
@@ -622,17 +633,17 @@ sub _generate_binary {
                 $self->_generate_expr($node->first),
                 [ fetch_field_s => $node->second->id ];
         }
-        when(%bin) {
+        when(%binary) {
             my @code = $self->_generate_expr($node->first);
             push @code, [ save_to_lvar => $self->lvar_id ];
-            $self->_lvar_use(1);
 
+            $self->lvar_use(1);
             push @code, $self->_generate_expr($node->second);
-            $self->_lvar_release(1);
+            $self->lvar_release(1);
 
             push @code,
                 [ load_lvar_to_sb => $self->lvar_id ],
-                [ $bin{$_}   => undef ];
+                [ $binary{$_}   => undef ];
 
             if($_ ~~ [qw(min max)]) {
                 splice @code, -1, 0,
@@ -645,11 +656,11 @@ sub _generate_binary {
             }
             return @code;
         }
-        when(%logical_bin) {
+        when(%logical_binary) {
             my @right = $self->_generate_expr($node->second);
             return
                 $self->_generate_expr($node->first),
-                [ $logical_bin{$_} => scalar(@right) + 1 ],
+                [ $logical_binary{$_} => scalar(@right) + 1 ],
                 @right;
         }
         default {

@@ -4,7 +4,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1010';
+our $VERSION = '0.1011';
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string html_escape);
@@ -24,7 +24,7 @@ use File::Spec;
 
 my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
-my $XSLATE_MAGIC = ".xslate $VERSION\n";
+my $XSLATE_MAGIC = qq{.xslate "%s-%s-%s"\n}; # version-syntax-escape
 
 sub new {
     my $class = shift;
@@ -34,11 +34,12 @@ sub new {
 
     $args{suffix}       //= '.tx';
     $args{path}         //= [ '.' ];
-    $args{cache_dir}    //= File::Spec->tmpdir;
     $args{input_layer}  //= ':utf8';
-    $args{cache}        //= 1;
     $args{compiler}     //= 'Text::Xslate::Compiler';
     $args{syntax}       //= 'Kolon'; # passed directly to the compiler
+    $args{escape}       //= 'html';
+    $args{cache}        //= 1;
+    $args{cache_dir}    //= File::Spec->tmpdir;
 
     my %funcs;
     if(defined $args{import}) {
@@ -81,7 +82,7 @@ sub _initialize;
 sub load_string { # for <input>
     my($self, $string) = @_;
     if(not defined $string) {
-        $self->throw_error("LoadError: Template string is not given");
+        $self->_error("LoadError: Template string is not given");
     }
     $self->{string} = $string;
     my $protocode = $self->_compiler->compile($string);
@@ -129,7 +130,7 @@ sub find_file {
     }
 
     if(not defined $orig_mtime) {
-        $self->throw_error("LoadError: Cannot find $file (path: @{$self->{path}})");
+        $self->_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
 
     return {
@@ -169,13 +170,13 @@ sub load_file {
     {
         my $to_read = $is_compiled ? $cachepath : $fullpath;
         open my($in), '<' . $self->{input_layer}, $to_read
-            or $self->throw_error("LoadError: Cannot open $to_read for reading: $!");
+            or $self->_error("LoadError: Cannot open $to_read for reading: $!");
 
-        if($is_compiled && scalar(<$in>) ne $XSLATE_MAGIC) {
+        if($is_compiled && scalar(<$in>) ne $self->_magic) {
             # magic token is not matched
             close $in;
             unlink $cachepath
-                or $self->throw_error("LoadError: Cannot unlink $cachepath: $!");
+                or $self->_error("LoadError: Cannot unlink $cachepath: $!");
             goto &load_file; # retry
         }
 
@@ -202,9 +203,9 @@ sub load_file {
                 File::Path::mkpath($cachedir);
             }
             open my($out), '>:raw:utf8', $cachepath
-                or $self->throw_error("LoadError: Cannot open $cachepath for writing: $!");
+                or $self->_error("LoadError: Cannot open $cachepath for writing: $!");
 
-            print $out $XSLATE_MAGIC;
+            print $out $self->_magic;
             print $out $self->_compiler->as_assembly($protocode);
 
             if(!close $out) {
@@ -231,6 +232,15 @@ sub load_file {
     return $protocode;
 }
 
+sub _magic {
+    my($self) = @_;
+    return sprintf $XSLATE_MAGIC,
+        $VERSION,
+        $self->{syntax},
+        $self->{escape},
+    ;
+}
+
 sub _compiler {
     my($self) = @_;
     my $compiler = $self->{compiler};
@@ -238,8 +248,9 @@ sub _compiler {
     if(!ref $compiler){
         require Mouse::Util;
         $compiler = Mouse::Util::load_class($compiler)->new(
-            engine => $self,
-            syntax => $self->{syntax},
+            engine       => $self,
+            syntax      => $self->{syntax},
+            escape_mode => $self->{escape},
         );
 
         if(my $funcs = $self->{function}) {
@@ -274,7 +285,7 @@ sub _load_assembly {
     return \@protocode;
 }
 
-sub throw_error {
+sub _error {
     shift;
     unshift @_, 'Xslate: ';
     require Carp;
@@ -311,7 +322,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1010.
+This document describes Text::Xslate version 0.1011.
 
 =head1 SYNOPSIS
 
@@ -368,8 +379,10 @@ This document describes Text::Xslate version 0.1010.
 
 B<Text::Xslate> is a template engine tuned for persistent applications.
 This engine introduces the virtual machine paradigm. That is, templates are
-compiled into xslate opcodes, and then executed by the xslate virtual machine
-just like as Perl does.
+compiled into xslate opcodes, and then executed by the xslate virtual machine.
+
+The philosophy for Xslate is B<sandboxing> that the template logic should
+not have no access outside the template beyond your permission.
 
 B<This software is under development>.
 Version 0.1xxx is a developing stage, which may include radical changes.
@@ -379,13 +392,13 @@ Version 0.2xxx and more will be somewhat stable.
 
 =head3 High performance
 
-Xslate has an virtual machine written in XS, which is highly optimized.
-According to benchmarks, Xslate is B<2-10> times faster than other template
-engines (Template-Toolkit, HTML::Template::Pro, Text::MicroTemplate, etc).
+Xslate has a virtual machine written in XS, which is highly optimized.
+According to benchmarks, Xslate is B<2-10 times faster> than other template
+engines (Template-Toolkit, HTML::Template::Pro, Text::MicroTemplate, etc.).
 
 =head3 Template cascading
 
-Xslate supports template cascading, which allows you to extend
+Xslate supports B<template cascading>, which allows you to extend
 templates with block modifiers. It is like traditional template inclusion,
 but is more powerful.
 
@@ -396,8 +409,8 @@ This mechanism is also called as template inheritance.
 The Xslate engine and parser/compiler are completely separated so that
 one can use alternative parsers.
 
-Currently, C<TTerse>, a Template-Toolkit-like parser, is supported as an
-alternative.
+For example, C<TTerse>, a Template-Toolkit-like parser, is supported as a
+completely different syntax.
 
 =head1 INTERFACE
 
@@ -411,7 +424,7 @@ Possible options are:
 
 =over
 
-=item C<< path => \@path // ["."] >>
+=item C<< path => \@path // ['.'] >>
 
 Specifies the include paths.
 
@@ -455,15 +468,21 @@ For example:
 You can use function based modules with the C<import> option and invoke
 object methods in templates. Thus, Xslate doesn't require namespaces for plugins.
 
-=item C<< input_layer => $perliolayers // ":utf8" >>
+=item C<< input_layer => $perliolayers // ':utf8' >>
 
 Specifies PerlIO layers for reading templates.
 
-=item C<< syntax => $moniker >>
+=item C<< syntax => $name // 'Kolon' >>
 
 Specifies the template syntax you use.
 
-If I<$moniker> is undefined, the default parser will be used.
+I<$name> may be a short name (moniker), or a fully qualified name.
+
+=item C<< escape => $mode // 'html' >>
+
+Specifies the escape mode.
+
+Possible escape modes are B<html> and B<none>.
 
 =back
 
@@ -481,10 +500,10 @@ Note that I<$string> is never cached so that this method is suitable for testing
 
 =head3 B<< $tx->load_file($file) :Void >>
 
-Loads I<$file> for following C<render($file, \%vars)>. Compiles and caches it
-if needed.
+Loads I<$file> for following C<render($file, \%vars)>. Compiles and saves it
+as caches if needed.
 
-This method may be used for pre-compiling template files.
+This method can be used for pre-compiling template files.
 
 =head3 Exportable functions
 
@@ -498,7 +517,7 @@ For example:
     my $tx   = Text::Xslate->new();
     my $tmpl = 'Mailaddress: <: $email :>';
     my %vars = (
-        email => "Foo &lt;foo@example.com&gt;",
+        email => 'Foo &lt;foo@example.com&gt;',
     );
     print $tx->render_string($tmpl, \%email);
     # => Mailaddress: Foo &lt;foo@example.com&gt;
@@ -509,7 +528,7 @@ Escapes html special characters in I<$str>, and returns a escaped string (see ab
 
 =head1 TEMPLATE SYNTAX
 
-There are syntaxes you can use:
+There are several syntaxes you can use:
 
 =over
 
@@ -538,7 +557,7 @@ There are common notes in the Xslate virtual machine.
 
 You cannot use C<undef> as a valid value.
 The use of C<undef> will cause fatal errors as if
-C<use warnings FALTAL => "all"> was specified.
+C<use warnings FALTAL => 'all'> was specified.
 However, unlike Perl, you can use equal operators to check whether
 the value is defined or not:
 
@@ -552,10 +571,10 @@ the value is defined or not:
 Or, you can also use defined-or operator (//):
 
     : # on Kolon syntax
-    Hello, <: $value // "Xslate" :> world!
+    Hello, <: $value // 'Xslate' :> world!
 
     [% # on TTerse syntax %]
-    Hello, [% $value // "Xslate" %] world!
+    Hello, [% $value // 'Xslate' %] world!
 
 =head1 DEPENDENCIES
 
@@ -593,6 +612,8 @@ L<HTML::Template::Pro>
 
 L<Template::Alloy>
 
+L<Template::Sandbox>
+
 Benchmarks:
 
 L<Template::Benchmark>
@@ -603,7 +624,7 @@ Thanks to lestrrat for the suggestion to the interface of C<render()>.
 
 Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug-finding.
 
-Thanks to gardejo for the proposal to the name "template cascading".
+Thanks to gardejo for the proposal to the name B<template cascading>.
 
 Thanks to jjn1056 to the concept of template overlay (now implemented as C<cascade with ...>).
 
