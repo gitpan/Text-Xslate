@@ -3,7 +3,7 @@ package Module::Install::XSUtil;
 
 use 5.005_03;
 
-$VERSION = '0.22';
+$VERSION = '0.23_01';
 
 use Module::Install::Base;
 @ISA     = qw(Module::Install::Base);
@@ -56,6 +56,7 @@ sub _xs_initialize{
 
         $self->makemaker_args->{OBJECT} = '$(O_FILES)';
         $self->clean_files('$(O_FILES)');
+        $self->clean_files('*.stackdump') if $^O eq 'cygwin';
 
         if($self->_xs_debugging()){
             # override $Config{optimize}
@@ -85,18 +86,26 @@ sub _is_msvc{
     my $cc_available;
 
     sub cc_available {
-        return $cc_available if defined $cc_available;
+        return defined $cc_available ?
+            $cc_available :
+            ($cc_available = shift->can_cc())
+        ;
+    }
+
+    my $want_xs;
+    sub want_xs {
+        my $default = @_ ? shift : 1; # you're using this module, you /must/ want XS by default
+        return $want_xs if defined $want_xs;
 
         foreach my $arg(@ARGV){
             if($arg eq '--pp'){
-                return $cc_available = 0;
+                return $want_xs = 0;
             }
             elsif($arg eq '--xs'){
-                return $cc_available = 1;
+                return $want_xs = 1;
             }
         }
-
-        return $cc_available = shift->can_cc();
+        return $want_xs = $default;
     }
 }
 
@@ -163,7 +172,6 @@ sub cc_warnings{
     return;
 }
 
-
 sub cc_append_to_inc{
     my($self, @dirs) = @_;
 
@@ -190,6 +198,11 @@ sub cc_append_to_inc{
     return;
 }
 
+
+sub cc_libs {
+    goto &cc_append_to_libs;
+}
+
 sub cc_append_to_libs{
     my($self, @libs) = @_;
 
@@ -199,10 +212,16 @@ sub cc_append_to_libs{
 
     my $libs = join q{ }, map{
         my($name, $dir) = ref($_) eq 'ARRAY' ? @{$_} : ($_, undef);
-
-        $dir = qq{-L$dir } if defined $dir;
-        _verbose "libs: $dir-l$name" if _VERBOSE;
-        $dir . qq{-l$name};
+        my $lib;
+        if(defined $dir) {
+            $lib = ($dir =~ /^-/ ? qq{$dir } : qq{-L$dir });
+        }
+        else {
+            $lib = '';
+        }
+        $lib .= ($name =~ /^-/ ? qq{$name } : qq{-l$name});
+        _verbose "libs: $lib" if _VERBOSE;
+        $lib;
     } @libs;
 
     if($mm->{LIBS}){
@@ -211,8 +230,7 @@ sub cc_append_to_libs{
     else{
         $mm->{LIBS} = $libs;
     }
-
-    return;
+    return $libs;
 }
 
 sub cc_append_to_ccflags{
@@ -331,6 +349,11 @@ sub cc_src_paths{
         push @{$C_ref}, $c unless grep{ $_ eq $c } @{$C_ref};
     }
 
+    $self->clean_files(map{
+        File::Spec->catfile($_, '*.gcov'),
+        File::Spec->catfile($_, '*.gcda'),
+        File::Spec->catfile($_, '*.gcno'),
+    } @dirs);
     $self->cc_append_to_inc('.');
 
     return;
@@ -390,7 +413,10 @@ sub install_headers{
         $ToInstall{$path} = File::Spec->join('$(INST_ARCHAUTODIR)', $ident);
 
         _verbose "install: $path as $ident" if _VERBOSE;
-        $self->_extract_functions_from_header_file($path);
+        my @funcs = $self->_extract_functions_from_header_file($path);
+        if(@funcs){
+            $self->cc_append_to_funclist(@funcs);
+        }
     }
 
     if(@not_found){
@@ -473,11 +499,7 @@ sub _extract_functions_from_header_file{
             }
     }
 
-    if(@functions){
-        $self->cc_append_to_funclist(@functions);
-    }
-
-    return;
+    return @functions;
 }
 
 
@@ -530,4 +552,4 @@ sub const_cccmd {
 1;
 __END__
 
-#line 689
+#line 738
