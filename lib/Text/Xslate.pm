@@ -4,7 +4,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1012';
+our $VERSION = '0.1013';
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string html_escape);
@@ -321,8 +321,8 @@ sub html_escape {
     $s =~ s/&/&amp;/g;
     $s =~ s/</&lt;/g;
     $s =~ s/>/&gt;/g;
-    $s =~ s/"/&quot;/g;
-    $s =~ s/'/&#39;/g;
+    $s =~ s/"/&quot;/g; # " for poor editors
+    $s =~ s/'/&#39;/g;  # ' for poor editors
 
     return escaped_string($s);
 }
@@ -340,7 +340,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1012.
+This document describes Text::Xslate version 0.1013.
 
 =head1 SYNOPSIS
 
@@ -502,6 +502,17 @@ Specifies the escape mode.
 
 Possible escape modes are B<html> and B<none>.
 
+=item C<< verbose => $level // 1 >>
+
+Specifies the verbose level.
+
+If C<< $level == 0 >>, all the possible errors will be ignored.
+
+If C<< $level> >= 1 >> (default), trivial errors (e.g. to print nil) will be ignored,
+but severe errors (e.g. to invoke missing methods) will be warned.
+
+If C<< $level >= 2 >>, all the possible errors will be warned.
+
 =back
 
 =head3 B<< $tx->render($file, \%vars) :Str >>
@@ -573,20 +584,31 @@ There are common notes in the Xslate virtual machine.
 
 =head2 Nil handling
 
-You cannot use C<undef> as a valid value.
-The use of C<undef> will cause fatal errors as if
-C<use warnings FALTAL => 'all'> was specified.
-However, unlike Perl, you can use equal operators to check whether
-the value is defined or not:
+Note that nil handling is different from Perl's.
 
-    : if $value == nil { ; }
-    : if $value != nil { ; }
+=over
 
-Or, you can also use defined-or operator (//):
+=item to print
 
-    Hello, <: $value // 'Xslate' :> world!
+Prints nothing.
 
-In TTerse, however, you can print nil as an empty string.
+=item to access fields.
+
+Returns nil. That is, C<< nil.foo.bar.baz >> produces nil.
+
+=item to invoke methods
+
+Returns nil. That is, C<< nil.foo().bar().baz() >> produces nil.
+
+=item to iterate
+
+Dealt as an empty array.
+
+=item equality
+
+C<< $var == nil >> returns true if and only if I<$var> is nil.
+
+=back
 
 =head1 DEPENDENCIES
 

@@ -35,4 +35,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.1012
+version: 0.1013
