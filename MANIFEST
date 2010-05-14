@@ -36,12 +36,19 @@ inc/Module/Install/Can.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/Metadata.pm
 inc/Module/Install/Repository.pm
+inc/Module/Install/Scripts.pm
+inc/Module/Install/With.pm
 inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Compiler.pm
 lib/Text/Xslate/EscapedString.pm
 lib/Text/Xslate/Parser.pm
+lib/Text/Xslate/PP.pm
+lib/Text/Xslate/PP/Const.pm
+lib/Text/Xslate/PP/EscapedString.pm
+lib/Text/Xslate/PP/Opcode.pm
+lib/Text/Xslate/PP/State.pm
 lib/Text/Xslate/Symbol.pm
 lib/Text/Xslate/Syntax/Kolon.pm
 lib/Text/Xslate/Syntax/Metakolon.pm
@@ -52,6 +59,7 @@ MANIFEST			This list of files
 MANIFEST.SKIP
 META.yml
 README
+script/xslate
 t/000_load.t
 t/010_internals/001_parse.t
 t/010_internals/002_compile.t
@@ -74,6 +82,7 @@ t/010_internals/018_deps_file2.t
 t/010_internals/019_no_vars.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
+t/010_internals/300_explicit_pp.t
 t/020_features/001_interpolate.t
 t/020_features/002_field.t
 t/020_features/003_for.t
@@ -113,6 +122,10 @@ t/500_examples/001_basic.t
 t/500_examples/002_cascade.t
 t/500_examples/003_metakolon.t
 t/500_examples/004_tterse.t
+t/600_app/001_hello.t
+t/600_app/002_tree.t
+t/600_app/simple/goodbye.tx
+t/600_app/simple/hello.tx
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
 t/lib/Util.pm
@@ -133,7 +146,9 @@ t/template/myapp/base.tx.mod
 t/template/myapp/cbar.tx
 t/template/myapp/cfoo.tx
 t/template/myapp/derived.tx
+tool/force-pp.pl
 tool/opcode.pl
+tool/opcode_for_pp.pl
 xs/Text-Xslate.xs
 xslate.h
 xslate_ops.h
