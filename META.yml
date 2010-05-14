@@ -28,6 +28,7 @@ no_index:
     - xt
 requires:
   Mouse: 0.55
+  MouseX::Getopt: 0.2601
   MouseX::NativeTraits: 0.002
   XSLoader: 0.1
   parent: 0.221
@@ -35,4 +36,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.1014
+version: 0.1015
