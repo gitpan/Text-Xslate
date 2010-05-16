@@ -6,7 +6,6 @@ build_requires:
   Devel::PPPort: 3.19
   ExtUtils::MakeMaker: 6.42
   ExtUtils::ParseXS: 2.21
-  Test::LeakTrace: 0
   Test::More: 0.88
   Test::Requires: 0
 configure_requires:
@@ -36,4 +35,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.1015
+version: 0.1016

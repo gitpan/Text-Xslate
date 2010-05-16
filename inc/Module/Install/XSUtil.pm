@@ -3,7 +3,7 @@ package Module::Install::XSUtil;
 
 use 5.005_03;
 
-$VERSION = '0.23_02';
+$VERSION = '0.24';
 
 use Module::Install::Base;
 @ISA     = qw(Module::Install::Base);

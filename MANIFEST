@@ -6,6 +6,7 @@ benchmark/for.pl
 benchmark/function.pl
 benchmark/include.pl
 benchmark/interpolate.pl
+benchmark/keys.pl
 benchmark/mobasif.pl
 benchmark/others.pl
 benchmark/template/base.mt
@@ -22,6 +23,7 @@ benchmark/template/list.tt
 benchmark/template/list.tx
 benchmark/template/simple.mst
 benchmark/template/simple.tx
+benchmark/values.pl
 Changes
 example/base.tx
 example/cascade.pl
@@ -37,7 +39,6 @@ inc/Module/Install/Makefile.pm
 inc/Module/Install/Metadata.pm
 inc/Module/Install/Repository.pm
 inc/Module/Install/Scripts.pm
-inc/Module/Install/With.pm
 inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
@@ -47,8 +48,12 @@ lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
 lib/Text/Xslate/PP/Const.pm
 lib/Text/Xslate/PP/EscapedString.pm
+lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
+lib/Text/Xslate/PP/Type/Array.pm
+lib/Text/Xslate/PP/Type/Hash.pm
+lib/Text/Xslate/PP/Type/Pair.pm
 lib/Text/Xslate/Symbol.pm
 lib/Text/Xslate/Syntax/Kolon.pm
 lib/Text/Xslate/Syntax/Metakolon.pm
@@ -107,6 +112,7 @@ t/020_features/020_chomp.t
 t/020_features/021_overlay.t
 t/020_features/022_given.t
 t/020_features/023_escape.t
+t/020_features/024_builtins.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t
@@ -151,6 +157,7 @@ tool/force-pp.pl
 tool/opcode.pl
 tool/opcode_for_pp.pl
 xs/Text-Xslate.xs
+xs/xslate_methods.xs
 xslate.h
 xslate_ops.h
 xt/01_podspell.t
