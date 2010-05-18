@@ -26,10 +26,13 @@ benchmark/template/simple.tx
 benchmark/values.pl
 Changes
 example/base.tx
+example/cascade.gold
 example/cascade.pl
 example/cascade.tx
+example/hello.gold
 example/hello.pl
 example/hello.tx
+example/list.gold
 example/list.pl
 example/list.tx
 inc/Module/Install.pm
@@ -86,6 +89,7 @@ t/010_internals/017_deps_file.t
 t/010_internals/018_deps_file2.t
 t/010_internals/019_no_vars.t
 t/010_internals/020_util.t
+t/010_internals/021_cached.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -129,6 +133,7 @@ t/500_examples/001_basic.t
 t/500_examples/002_cascade.t
 t/500_examples/003_metakolon.t
 t/500_examples/004_tterse.t
+t/500_examples/100_example.t
 t/600_app/001_hello.t
 t/600_app/002_tree.t
 t/600_app/simple/goodbye.tx

@@ -3,7 +3,7 @@
 #include <perl.h>
 #include <XSUB.h>
 
-#define NEED_newSVpvn_flags
+#define NEED_newSVpvn_flags_GLOBAL
 #include "ppport.h"
 
 #include "xslate.h"
@@ -1388,6 +1388,7 @@ CODE:
     SV* self;
     AV* cframe;
     SV* name;
+    const char* prefix;
     SV* full_message;
     SV** svp;
     CV*  handler;
@@ -1421,10 +1422,17 @@ CODE:
         handler = NULL;
     }
 
-    full_message = newSVpvf("Xslate(%s:%d &%"SVf"[%d]): %"SVf,
+    prefix = form("Xslate(%s:%d &%"SVf"[%d]): ",
             tx_file(aTHX_ st), tx_line(aTHX_ st),
-            name, (int)st->pc, msg);
-    sv_2mortal(full_message);
+            name, (int)st->pc);
+
+    if(instr(SvPV_nolen_const(msg), prefix)) {
+        full_message = msg; /* msg has the prefix */
+    }
+    else {
+        full_message = newSVpvf("%s%"SVf, prefix, msg);
+        sv_2mortal(full_message);
+    }
 
     /* warnhook/diehook = NULL is to avoid recursion */
     ENTER;
@@ -1432,6 +1440,7 @@ CODE:
         SAVESPTR(PL_warnhook);
         PL_warnhook = NULL;
 
+        /* handler can ignore warnings */
         if(handler) {
             PUSHMARK(SP);
             XPUSHs(full_message);
@@ -1460,6 +1469,7 @@ CODE:
             st->output                     = tmp;
         }
 
+        /* handler cannot ignore errors */
         if(handler) {
             PUSHMARK(SP);
             XPUSHs(full_message);
@@ -1470,7 +1480,6 @@ CODE:
         /* not reached */
     }
     LEAVE;
-    XSRETURN_EMPTY;
 }
 
 MODULE = Text::Xslate    PACKAGE = Text::Xslate::EscapedString

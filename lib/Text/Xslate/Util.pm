@@ -10,10 +10,23 @@ our @EXPORT_OK = qw(
     $STRING $NUMBER $DEBUG
 );
 
+use Carp ();
+
 my $dquoted = qr/" (?: \\. | [^"\\] )* "/xms; # " for poor editors
 my $squoted = qr/' (?: \\. | [^'\\] )* '/xms; # ' for poor editors
 our $STRING  = qr/(?: $dquoted | $squoted )/xms;
-our $NUMBER  = qr/(?: [+-]? [0-9][0-9_]* (?: \. [0-9_]+)? )/xms;
+
+our $NUMBER  = qr/ [+-]? (?:
+        (?: [0-9][0-9_]* (?: \. [0-9_]+)? \b) # decimal
+        |
+        (?: 0 (?:
+            (?: [0-7_]+ )        # octal
+            |
+            (?: x [0-9a-fA-F_]+) # hex
+            |
+            (?: b [01_]+ )       # binary
+        )?)
+    )/xms;
 
 our $DEBUG;
 $DEBUG //= $ENV{XSLATE} // '';
@@ -28,11 +41,20 @@ sub literal_to_value {
     my($value) = @_;
     return undef if not defined $value;
 
-    if($value =~ s/"(.*)"/$1/){
+    if($value =~ s/"(.*)"/$1/xms){
         $value =~ s/\\(.)/$esc2char{$1} || $1/xmseg;
     }
-    elsif($value =~ s/'(.*)'/$1/) {
-        $value =~ s/\\(['\\])/$1/g; # ' for poor editors
+    elsif($value =~ s/'(.*)'/$1/xms) {
+        $value =~ s/\\(['\\])/$1/xmsg; # ' for poor editors
+    }
+    else { # number
+        if($value =~ s/\A ([+-]?) (?= 0[0-7xb])//xms) {
+            $value = ($1 eq '-' ? -1 : +1)
+                * oct($value); # also grok hex and binary
+        }
+        else {
+            $value =~ s/_//xmsg;
+        }
     }
 
     return $value;
