@@ -34,8 +34,6 @@ my %binary = (
 
     '~'  => 'concat',
 
-    '|'  => 'filt',
-
     'min' => 'lt', # a < b ? a : b
     'max' => 'gt', # a > b ? a : b
 
@@ -171,7 +169,9 @@ sub compile {
 
         my($base_file, $base_code);
         my $base       = $cascade->first;
-        my @components = map{ $self->_bare_to_file($_) } @{$cascade->second};
+        my @components = $cascade->second
+            ? (map{ $self->_bare_to_file($_) } @{$cascade->second})
+            : ();
         my $vars       = $cascade->third;
 
         if(defined $base) {
@@ -225,15 +225,7 @@ sub compile {
             if defined $base;
 
         if(defined $vars) {
-            my @local_vars;
-            foreach my $pair(@{$vars}) {
-                my($key, $expr) = @{$pair};
-                push @local_vars,
-                    $self->_generate_expr($expr),
-                    [ local_s => $key ];
-                ;
-            }
-            unshift @{$base_code}, @local_vars;
+            unshift @{$base_code}, $self->_localize_vars($vars);
         }
 
         # discards all the main code (if should so)
@@ -250,7 +242,7 @@ sub compile {
             }
             @code = @{$base_code};
         }
-    }
+    } # if defined $cascade
 
     push @code, $self->_flush_macro_table(\%mtable) if %mtable;
 
@@ -390,6 +382,10 @@ sub _generate_command {
                 [ $proc => undef, $node->line ];
         }
     }
+    if(defined(my $vars = $node->second)) {
+        unshift @code, $self->_localize_vars($vars);
+    }
+
     if(!@code) {
         $self->_error("$node requires at least one argument", $node);
     }
@@ -649,14 +645,24 @@ sub _generate_binary {
                 $self->_generate_expr($node->first),
                 [ fetch_field_s => $node->second->id ];
         }
+        when('|') {
+            # a | b -> b(a)
+            return $self->_generate_call($node->clone(
+                first  =>  $node->second,
+                second => [$node->first],
+            ));
+        }
         when(%binary) {
+            # eval lhs
             my @code = $self->_generate_expr($node->first);
             push @code, [ save_to_lvar => $self->lvar_id ];
 
+            # eval rhs
             $self->lvar_use(1);
             push @code, $self->_generate_expr($node->second);
             $self->lvar_release(1);
 
+            # execute op
             push @code,
                 [ load_lvar_to_sb => $self->lvar_id ],
                 [ $binary{$_}   => undef ];
@@ -743,6 +749,19 @@ sub _generate_macro {
     my($self, $node) = @_;
 
     return [ macro => $node->value ];
+}
+
+sub _localize_vars {
+    my($self, $vars) = @_;
+    my @local_vars;
+    foreach my $pair(@{$vars}) {
+        my($key, $expr) = @{$pair};
+        push @local_vars,
+            $self->_generate_expr($expr),
+            [ local_s => $key ];
+        ;
+    }
+    return @local_vars;
 }
 
 sub _variable_to_value {

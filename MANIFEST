@@ -117,7 +117,7 @@ t/020_features/021_overlay.t
 t/020_features/022_given.t
 t/020_features/023_escape.t
 t/020_features/024_builtins.t
-t/020_features/025_cascade_vars.t
+t/020_features/025_localize_vars.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t
