@@ -4,7 +4,7 @@ use 5.010_000;
 use strict;
 use warnings;
 
-our $VERSION = '0.1023';
+our $VERSION = '0.1024';
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(escaped_string html_escape);
@@ -16,7 +16,10 @@ use Text::Xslate::Util qw(
     p
 );
 
-use constant _DUMP_LOAD_FILE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
+BEGIN {
+    my $dump_load_file = scalar($DEBUG =~ /\b dump=load_file \b/xms);
+    *_DUMP_LOAD_FILE = sub(){ $dump_load_file };
+}
 
 if(!__PACKAGE__->can('render')) { # The backend (which is maybe PP.pm) has been loaded
     if($DEBUG !~ /\b pp \b/xms) {
@@ -67,10 +70,10 @@ sub new {
         Carp::carp("'import' option has been renamed to 'module'"
             . " because of the confliction with Perl's import() method."
             . " Use 'module' instead");
-        %funcs = import_from(@{$args{import}});
+        %funcs = (%funcs, import_from(@{$args{import}}));
     }
     if(defined $args{module}) {
-        %funcs = import_from(@{$args{module}});
+        %funcs = (%funcs, import_from(@{$args{module}}));
     }
 
     # function => { ... } overrides imported functions
@@ -359,7 +362,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1023.
+This document describes Text::Xslate version 0.1024.
 
 =head1 SYNOPSIS
 

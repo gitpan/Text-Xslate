@@ -7,7 +7,7 @@ use Module::Install::Base ();
 
 use vars qw{$VERSION @ISA $ISCORE};
 BEGIN {
-	$VERSION = '0.97';
+	$VERSION = '0.98';
 	@ISA     = 'Module::Install::Base';
 	$ISCORE  = 1;
 }
@@ -184,18 +184,34 @@ sub _wanted_t {
 }
 
 sub tests_recursive {
-	my $self = shift;
-	my $dir = shift || 't';
-	unless ( -d $dir ) {
-		die "tests_recursive dir '$dir' does not exist";
-	}
-	my %tests = map { $_ => 1 } split / /, ($self->tests || '');
-	require File::Find;
-	File::Find::find(
+    my($self, @dirs) = @_;
+
+    @dirs = ('t') if !@dirs && -d 't';
+
+    if ( !$Module::Install::ExtraTests::use_extratests ) {
+        # Module::Install::ExtraTests doesn't set $self->tests and does its own tests via harness.
+        # So, just ignore our xt tests here.
+        if ( -d 'xt' and ($Module::Install::AUTHOR or $ENV{RELEASE_TESTING}) ) {
+            push @dirs, 'xt';
+        }
+    }
+
+    foreach my $dir(@dirs) {
+        unless ( -d $dir ) {
+            die "tests_recursive dir '$dir' does not exist";
+        }
+    }
+
+    return unless @dirs;
+
+    my %tests = map { $_ => 1 } split / /, ($self->tests || '');
+
+    require File::Find;
+    File::Find::find(
         sub { /\.t$/ and -f $_ and $tests{"$File::Find::dir/*.t"} = 1 },
-        $dir
+        @dirs
     );
-	$self->tests( join ' ', sort keys %tests );
+    $self->tests( join ' ', sort keys %tests );
 }
 
 sub write {
@@ -246,13 +262,6 @@ EOT
 		my %seen;
 		$args->{test} = {
 			TESTS => (join ' ', grep {!$seen{$_}++} @tests),
-		};
-    } elsif ( $Module::Install::ExtraTests::use_extratests ) {
-        # Module::Install::ExtraTests doesn't set $self->tests and does its own tests via harness.
-        # So, just ignore our xt tests here.
-	} elsif ( -d 'xt' and ($Module::Install::AUTHOR or $ENV{RELEASE_TESTING}) ) {
-		$args->{test} = {
-			TESTS => join( ' ', map { "$_/*.t" } grep { -d $_ } qw{ t xt } ),
 		};
 	}
 	if ( $] >= 5.005 ) {
@@ -410,4 +419,4 @@ sub postamble {
 
 __END__
 
-#line 539
+#line 548

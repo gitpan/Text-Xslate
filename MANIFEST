@@ -49,10 +49,9 @@ lib/Text/Xslate/Compiler.pm
 lib/Text/Xslate/EscapedString.pm
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
+lib/Text/Xslate/PP/Booster.pm
 lib/Text/Xslate/PP/Const.pm
 lib/Text/Xslate/PP/EscapedString.pm
-lib/Text/Xslate/PP/Method.pm
-lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
 lib/Text/Xslate/PP/Type/Array.pm
 lib/Text/Xslate/PP/Type/Hash.pm
@@ -131,6 +130,7 @@ t/100_tterse/007_funcs.t
 t/100_tterse/008_methods.t
 t/100_tterse/009_comments.t
 t/100_tterse/010_expr.t
+t/100_tterse/011_objectliterals.t
 t/400_plugin/001_import_from.t
 t/400_plugin/002_import.t
 t/500_examples/001_basic.t
