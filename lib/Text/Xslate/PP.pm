@@ -1,10 +1,9 @@
 package Text::Xslate::PP;
 # Text::Xslate in pure Perl
-
-use 5.008;
+use 5.008_001;
 use strict;
 
-our $VERSION = '0.1024';
+our $VERSION = '0.1025';
 
 use Carp ();
 
@@ -64,7 +63,7 @@ sub render {
     local $SIG{__DIE__}  = \&_die;
     local $SIG{__WARN__} = \&_warn;
 
-    tx_execute( $st, undef, $vars );
+    tx_execute( $st, $vars );
 
     $st->{ output };
 }
@@ -294,14 +293,13 @@ sub tx_all_deps_are_fresh {
 our $_depth = 0;
 our $_current_st;
 
-sub tx_execute { no warnings 'recursion';
-    my ( $st, $output, $vars ) = @_;
+sub tx_execute { 
+    my ( $st, $vars ) = @_;
+    no warnings 'recursion';
 
     if ( $_depth > 100 ) {
         Carp::croak("Execution is too deep (> 100)");
     }
-
-    my $len = $st->code_len;
 
     $st->{output} = '';
     $st->{pc}     = 0;
@@ -380,7 +378,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1024.
+This document describes Text::Xslate::PP version 0.1025.
 
 =head1 DESCRIPTION
 

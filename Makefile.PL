@@ -3,6 +3,7 @@ use warnings;
 BEGIN{ $INC{'Module/Install/ExtraTests.pm'} = 1 } # M::I::ExtraTests considered harmful!
 use inc::Module::Install;
 use Module::Install::XSUtil 0.24;
+use Module::Install::AuthorTests;
 
 all_from 'lib/Text/Xslate.pm';
 
@@ -13,6 +14,7 @@ requires 'Mouse'                => '0.55';
 requires 'MouseX::NativeTraits' => '0.002';
 requires 'MouseX::Getopt'       => '0.2601';
 requires 'parent'               => '0.221';
+requires 'Scalar::Util'         => '1.23';
 
 test_requires 'Test::More' => 0.88; # done_testing()
 test_requires 'Test::Requires';
@@ -21,11 +23,14 @@ test_requires 'Test::Requires';
 install_script 'xslate';
 
 tests_recursive;
+author_tests 'xt';
 
 my $want_xs = want_xs();
 if($want_xs) {
     use_ppport 3.19;
     cc_warnings;
+
+    build_requires 'ExtUtils::ParseXS' => 2.2205;
 
     cc_src_paths qw(xs);
 }

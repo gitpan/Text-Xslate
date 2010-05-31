@@ -4,6 +4,7 @@ package Module::Install::Makefile;
 use strict 'vars';
 use ExtUtils::MakeMaker   ();
 use Module::Install::Base ();
+use Fcntl qw/:flock :seek/;
 
 use vars qw{$VERSION @ISA $ISCORE};
 BEGIN {
@@ -184,34 +185,18 @@ sub _wanted_t {
 }
 
 sub tests_recursive {
-    my($self, @dirs) = @_;
-
-    @dirs = ('t') if !@dirs && -d 't';
-
-    if ( !$Module::Install::ExtraTests::use_extratests ) {
-        # Module::Install::ExtraTests doesn't set $self->tests and does its own tests via harness.
-        # So, just ignore our xt tests here.
-        if ( -d 'xt' and ($Module::Install::AUTHOR or $ENV{RELEASE_TESTING}) ) {
-            push @dirs, 'xt';
-        }
-    }
-
-    foreach my $dir(@dirs) {
-        unless ( -d $dir ) {
-            die "tests_recursive dir '$dir' does not exist";
-        }
-    }
-
-    return unless @dirs;
-
-    my %tests = map { $_ => 1 } split / /, ($self->tests || '');
-
-    require File::Find;
-    File::Find::find(
+	my $self = shift;
+	my $dir = shift || 't';
+	unless ( -d $dir ) {
+		die "tests_recursive dir '$dir' does not exist";
+	}
+	my %tests = map { $_ => 1 } split / /, ($self->tests || '');
+	require File::Find;
+	File::Find::find(
         sub { /\.t$/ and -f $_ and $tests{"$File::Find::dir/*.t"} = 1 },
-        @dirs
+        $dir
     );
-    $self->tests( join ' ', sort keys %tests );
+	$self->tests( join ' ', sort keys %tests );
 }
 
 sub write {
@@ -262,6 +247,13 @@ EOT
 		my %seen;
 		$args->{test} = {
 			TESTS => (join ' ', grep {!$seen{$_}++} @tests),
+		};
+    } elsif ( $Module::Install::ExtraTests::use_extratests ) {
+        # Module::Install::ExtraTests doesn't set $self->tests and does its own tests via harness.
+        # So, just ignore our xt tests here.
+	} elsif ( -d 'xt' and ($Module::Install::AUTHOR or $ENV{RELEASE_TESTING}) ) {
+		$args->{test} = {
+			TESTS => join( ' ', map { "$_/*.t" } grep { -d $_ } qw{ t xt } ),
 		};
 	}
 	if ( $] >= 5.005 ) {
@@ -373,9 +365,9 @@ sub fix_up_makefile {
 		. ($self->postamble || '');
 
 	local *MAKEFILE;
-	open MAKEFILE, "< $makefile_name" or die "fix_up_makefile: Couldn't open $makefile_name: $!";
+	open MAKEFILE, "+< $makefile_name" or die "fix_up_makefile: Couldn't open $makefile_name: $!";
+	eval { flock MAKEFILE, LOCK_EX };
 	my $makefile = do { local $/; <MAKEFILE> };
-	close MAKEFILE or die $!;
 
 	$makefile =~ s/\b(test_harness\(\$\(TEST_VERBOSE\), )/$1'inc', /;
 	$makefile =~ s/( -I\$\(INST_ARCHLIB\))/ -Iinc$1/g;
@@ -395,7 +387,8 @@ sub fix_up_makefile {
 	# XXX - This is currently unused; not sure if it breaks other MM-users
 	# $makefile =~ s/^pm_to_blib\s+:\s+/pm_to_blib :: /mg;
 
-	open  MAKEFILE, "> $makefile_name" or die "fix_up_makefile: Couldn't open $makefile_name: $!";
+	seek MAKEFILE, 0, SEEK_SET;
+	truncate MAKEFILE, 0;
 	print MAKEFILE  "$preamble$makefile$postamble" or die $!;
 	close MAKEFILE  or die $!;
 
@@ -419,4 +412,4 @@ sub postamble {
 
 __END__
 
-#line 548
+#line 541

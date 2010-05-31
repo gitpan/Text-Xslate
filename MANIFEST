@@ -36,6 +36,7 @@ example/list.gold
 example/list.pl
 example/list.tx
 inc/Module/Install.pm
+inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
 inc/Module/Install/Makefile.pm
