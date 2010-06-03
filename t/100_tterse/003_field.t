@@ -14,6 +14,10 @@ my @data = (
     ['[% ary.0 %]', 10],
     ['[% ary.1 %]', 20],
     ['[% ary.2 %]', 30],
+
+    ['[% var.$xyz %]', 'value'],
+
+    ['[% g["f"]["x"] %]', 'gfx', 'var["field"]']
 );
 
 {
@@ -26,7 +30,9 @@ my @data = (
 }
 
 foreach my $pair(@data) {
-    my($in, $out) = @$pair;
+    my($in, $out, $msg) = @$pair;
+
+    last if $ENV{USE_TT} && defined($msg) && $msg eq 'var["field"]';
 
     my %vars = (
         var => { attr => 'value' },
@@ -38,9 +44,11 @@ foreach my $pair(@data) {
         ary => [10, 20, 30],
 
         foo => 'foo',
+
+        xyz => 'attr',
     );
 
-    is render_str($in, \%vars), $out;
+    is render_str($in, \%vars), $out, $msg;
 }
 
 done_testing;

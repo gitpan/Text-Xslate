@@ -35,8 +35,8 @@ TXC_goto(dand);
 TXC_goto(or);
 TXC_goto(dor);
 TXC(not);
-TXC(plus); /* unary plus */
 TXC(minus); /* unary minus */
+TXC(size);
 TXC(eq);
 TXC(ne);
 TXC(lt);
@@ -91,8 +91,8 @@ enum tx_opcode_t {
     TXOP_or, /* 29 */
     TXOP_dor, /* 30 */
     TXOP_not, /* 31 */
-    TXOP_plus, /* 32 */
-    TXOP_minus, /* 33 */
+    TXOP_minus, /* 32 */
+    TXOP_size, /* 33 */
     TXOP_eq, /* 34 */
     TXOP_ne, /* 35 */
     TXOP_lt, /* 36 */
@@ -149,8 +149,8 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_or,
     TXCODE_dor,
     TXCODE_not,
-    TXCODE_plus,
     TXCODE_minus,
+    TXCODE_size,
     TXCODE_eq,
     TXCODE_ne,
     TXCODE_lt,
@@ -207,8 +207,8 @@ static const U8 tx_oparg[] = {
     TXCODE_GOTO, /* or */
     TXCODE_GOTO, /* dor */
     0U, /* not */
-    0U, /* plus */
     0U, /* minus */
+    0U, /* size */
     0U, /* eq */
     0U, /* ne */
     0U, /* lt */
@@ -265,8 +265,8 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(or), newSViv(TXOP_or));
     (void)hv_stores(ops, STRINGIFY(dor), newSViv(TXOP_dor));
     (void)hv_stores(ops, STRINGIFY(not), newSViv(TXOP_not));
-    (void)hv_stores(ops, STRINGIFY(plus), newSViv(TXOP_plus));
     (void)hv_stores(ops, STRINGIFY(minus), newSViv(TXOP_minus));
+    (void)hv_stores(ops, STRINGIFY(size), newSViv(TXOP_size));
     (void)hv_stores(ops, STRINGIFY(eq), newSViv(TXOP_eq));
     (void)hv_stores(ops, STRINGIFY(ne), newSViv(TXOP_ne));
     (void)hv_stores(ops, STRINGIFY(lt), newSViv(TXOP_lt));

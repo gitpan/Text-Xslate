@@ -1,10 +1,11 @@
 package Text::Xslate::Syntax::TTerse;
 use Any::Moose;
-use Text::Xslate::Util qw(p);
+use Text::Xslate::Util qw(p any_in);
+use Scalar::Util ();
 
 extends qw(Text::Xslate::Parser);
 
-# [% ... %]
+# [% ... %] and %% ...
 sub _build_line_start { qr/%%/xms   }
 sub _build_tag_start  { qr/\Q[%/xms }
 sub _build_tag_end    { qr/\Q%]/xms }
@@ -16,7 +17,7 @@ around split => sub {
 
     foreach my $t(@{$tokens_ref}) {
         my($type, $value) = @{$t};
-        if($type eq 'code' && $value =~ /^#/) {
+        if($type eq 'code' && $value =~ /^#/) { # multiline comments
             $t->[1] = '';
         }
     }
@@ -24,14 +25,15 @@ around split => sub {
     return $tokens_ref;
 };
 
-sub define_symbols {
+sub init_symbols {
     my($parser) = @_;
 
     $parser->symbol(']');
     $parser->symbol('}');
 
-    $parser->define_basic_operators();
+    $parser->init_basic_operators();
     $parser->infix('_', $parser->symbol('~')->lbp, \&led_concat);
+    $parser->symbol('.')->set_led(\&led_dot); # redefine
 
     # defines both upper cased and lower cased
 
@@ -59,8 +61,41 @@ sub define_symbols {
     $parser->symbol('WITH');
     $parser->symbol('with');
 
+    # macros
+
+    $parser->symbol('MACRO') ->set_std(\&std_macro);
+    $parser->symbol('macro') ->set_std(\&std_macro);
+    $parser->symbol('BLOCK');
+    $parser->symbol('block');
+
+    $parser->symbol('WRAPPER')->set_std(\&std_wrapper);
+    $parser->symbol('wrapper')->set_std(\&std_wrapper);
+    $parser->symbol('INTO');
+    $parser->symbol('into');
+
     return;
 }
+
+after init_iterator_elements => sub {
+    my($parser) = @_;
+
+    my $tab = $parser->iterator_element;
+
+    $tab->{first} = $tab->{is_first};
+    $tab->{last}  = $tab->{is_last};
+    $tab->{next}  = $tab->{peep_next};
+    $tab->{prev}  = $tab->{peep_prev};
+
+    return;
+};
+
+around advance => sub {
+    my($super, $parser, $id) = @_;
+    if(defined $id and $parser->token->id eq lc($id)) {
+        $id = lc($id);
+    }
+    return $super->($parser, $id);
+};
 
 sub undefined_name {
     my($parser) = @_;
@@ -70,11 +105,18 @@ sub undefined_name {
 
 sub is_valid_field {
     my($parser, $token) = @_;
-    if(!$parser->SUPER::is_valid_field($token)) {
-        return $token->arity eq "variable"
-            && scalar($token->id !~ /^\$/);
+    return $parser->SUPER::is_valid_field($token)
+        || $token->arity eq "variable";
+}
+
+sub led_dot {
+    my($parser, $symbol, $left) = @_;
+    my $dot = $parser->SUPER::led_dot($symbol, $left);
+    if($dot->second->id =~ /\A \$/xms) { # var.$field
+        $dot->id('['); # var[ $field ]
+        $dot->second->arity("variable");
     }
-    return 1;
+    return $dot;
 }
 
 sub led_concat {
@@ -125,10 +167,13 @@ sub std_if {
             : $parser->statements());
     }
 
-    $parser->token->id eq "end"
-        ? $parser->advance("end")
-        : $parser->advance("END");
+
+    $parser->advance("END");
     return $top_if;
+}
+
+sub iterator_name {
+    return 'loop'; # always 'loop'
 }
 
 sub std_foreach {
@@ -136,24 +181,24 @@ sub std_foreach {
 
     my $proc = $symbol->clone(arity => "for");
 
-    my $t = $parser->token;
-    if($t->arity ne "variable") {
-        $parser->_error("Expected a variable name but $t");
+    my $var = $parser->token;
+    if($var->arity ne "variable") {
+        $parser->_unexpected("a variable name", $var);
     }
-
-    my $var = $t;
     $parser->advance();
-    $parser->token->id eq "in"
-        ? $parser->advance("in")
-        : $parser->advance("IN");
+    $parser->advance("IN");
 
     $proc->first( $parser->expression(0) );
     $proc->second([$var]);
-    $proc->third( $parser->statements() );
 
-    $parser->token->id eq "end"
-        ? $parser->advance("end")
-        : $parser->advance("END");
+    $parser->new_scope();
+
+    $parser->define_iterator($var);
+
+    $proc->third( $parser->statements() );
+    $parser->pop_scope();
+
+    $parser->advance("END");
 
     return $proc;
 }
@@ -169,9 +214,9 @@ sub std_include {
 sub localize_vars {
     my($parser, $symbol) = @_;
 
-    if($parser->token->id eq "with") {
+    if(uc($parser->token->id) eq "WITH") {
         $parser->advance();
-        return  $parser->set_list();
+        return $parser->set_list();
     }
     return undef;
 }
@@ -201,6 +246,165 @@ sub set_list {
     return \@args;
 }
 
+sub std_macro {
+    my($parser, $symbol) = @_;
+    my $proc = $symbol->clone(
+        arity => 'proc',
+        id    => 'macro',
+    );
+
+    my $name = $parser->token;
+    if($name->arity ne "variable") {
+        $parser->_error("a name", $name);
+    }
+
+    $parser->define_macro($name->id);
+
+    $proc->first($name);
+    $parser->advance();
+
+    my $paren = ($parser->token->id eq "(");
+
+    $parser->advance("(") if $paren;
+
+    my $t = $parser->token;
+    my @vars;
+    while($t->arity eq "variable") {
+        push @vars, $t;
+        $parser->define($t);
+
+        $t = $parser->advance();
+
+        if($t->id eq ",") {
+            $t = $parser->advance(); # ","
+        }
+        else {
+            last;
+        }
+    }
+    $parser->advance(")") if $paren;
+
+    $proc->second(\@vars);
+
+    $parser->advance("BLOCK");
+    $proc->third( $parser->statements() );
+    $parser->advance("END");
+    return $proc;
+}
+
+
+# WRAPPER "foo.tt" ...  END
+# is
+# cascade "foo.tt" { content => content@wrapper() }
+# macro content@wrapper -> { ... }
+sub std_wrapper {
+    my($parser, $symbol) = @_;
+
+    my $base  = $parser->barename();
+    my $into;
+    if(uc($parser->token->id) eq "INTO") {
+        my $t = $parser->advance();
+        if(!any_in($t->arity, qw(name variable))) {
+            $parser->_unexpected("a variable name", $t);
+        }
+        $parser->advance();
+        $into = $t->id;
+    }
+    else {
+        $into = 'content';
+    }
+    my $vars  = $parser->localize_vars() || [];
+    my $body  = $parser->statements();
+    $parser->advance("END");
+
+    my $cascade = $symbol->clone(
+        arity => 'cascade',
+        first => $base,
+    );
+
+    my $internal_name = $symbol->clone(
+        arity => 'macro',
+        id    => 'content@wrapper',
+    );
+
+    my $into_name = $symbol->clone(
+        arity => 'literal',
+        id    => $into,
+    );
+
+    my $content = $symbol->clone(
+        arity => 'proc',
+        id    => 'macro',
+
+        first  => $internal_name,
+        second => [],
+        third  => $body,
+    );
+
+    my $call_content = $symbol->clone(
+        arity  => 'call',
+        first  => $internal_name,
+        second => [],
+    );
+
+    push @{$vars}, $into_name => $call_content;
+    $cascade->third($vars);
+    return( $cascade, $content );
+}
+
+# [% FILTER html %]
+# ...
+# [% END %]
+# is
+# : macro filter_xxx -> {
+#   ...
+# : } filter_001() | html
+# in Kolon
+#
+#sub std_filter {
+#    my($parser, $symbol) = @_;
+#
+#    my $t = $parser->token;
+#    if($t->arity ne 'name') {
+#        $parser->_error("Expected filter name, not $t");
+#    }
+#    my $filter = $t->nud($parser);
+#    $parser->advance();
+#
+#    my $tmpname = $symbol->clone(
+#        arity => 'macro',
+#        id    => sprintf('%s@%d&0x%x', $symbol->id, $parser->line, Scalar::Util::refaddr($symbol)),
+#    );
+#
+#    my $proc = $symbol->clone(
+#        arity => 'proc',
+#        id    => 'macro',
+#    );
+#
+#    $proc->first($tmpname);
+#    $proc->second([]);
+#    $proc->third( $parser->statements() );
+#    $parser->advance("END");
+#
+#    my $callmacro = $symbol->clone(
+#        arity  => 'call',
+#        first  => $tmpname, # name
+#        second => [],       # args
+#    );
+#    my $callfilter  = $symbol->clone(
+#        arity  => 'call',
+#        first  => $filter,      # name
+#        second => [$callmacro], # args
+#    );
+#    my $print = $parser->symbol('print')->clone(
+#        arity => 'command',
+#        first => [$callfilter],
+#        line  => $symbol->line,
+#    );
+#
+#    return( $proc, $print );
+#}
+
 no Any::Moose;
 __PACKAGE__->meta->make_immutable();
 __END__
@@ -223,12 +427,15 @@ Text::Xslate::Syntax::TTerse - An alternative syntax like Template-Toolkit 2
 
 =head1 DESCRIPTION
 
-TTerse is a subset of the Template-Toolkit 2 syntax,
-using C<< [% ... %] >> tags.
+TTerse is a subset of the Template-Toolkit 2.0 (and partially  3.0) syntax,
+using C<< [% ... %] >> tags and C<< %% ... >> line code.
 
 =head1 SYNTAX
 
-Note that lower-cased keywords are also allowed.
+This support Template-Toolkit like syntax, but the details might be different.
+
+Note that lower-cased keywords, which are inspired in Template-Toolkit 3,
+are also allowed.
 
 =head2 Variable access
 
@@ -242,6 +449,8 @@ Field access:
     [% var.0 %]
     [% var.field %]
     [% var.accessor %]
+    [% var.$field ]%
+    [% var[$field] # TTerse specific %]
 
 Variables may be HASH references, ARRAY references, or objects.
 
@@ -249,16 +458,42 @@ If I<$var> is an object instance, you can call its methods.
 
     [% $var.method() %]
     [% $var.method(1, 2, 3) %]
+    [% $var.method(foo => [1, 2, 3]) %]
+    [% $var.method({ foo => 'bar' }) %]
 
 =head2 Expressions
 
-Almost the same as L<Text::Xslate::Syntax::Kolon>.
+Almost the same as L<Text::Xslate::Syntax::Kolon>, but the C<_> operator for
+concatenation is supported for compatibility.
 
 =head2 Loops
 
     [% FOREACH item IN arrayref %]
         * [% item %]
     [% END %]
+
+Loop iterators are partially supported.
+
+    [% FOREACH item IN arrayref %]
+        [%- IF loop.is_first -%]
+        <first>
+        [%- END -%]
+        * [% loop.index %]
+        * [% loop.count     # loop.index + 1 %]
+        * [% loop.body      # alias to arrayref %]
+        * [% loop.size      # loop.body.size %]
+        * [% loop.max       # loop.size - 1 %]
+        * [% loop.peep_next # loop.body[ loop.index - 1 ]
+        * [% loop.peep_prev # loop\body[ loop.index + 1 ]
+        [%- IF loop.is_last -%]
+        <last>
+        [%- END -%]
+    [% END %]
+
+For compatibility with Template-Toolkit, C<first> for C<is_first>, C<last>
+for C<is_last>, C<next> for C<peep_next>, C<prev> for C<peep_prev> are
+supported, but the use of them is discouraged because they are hard
+to understand.
 
 =head2 Conditional statements
 
@@ -283,10 +518,13 @@ Almost the same as L<Text::Xslate::Syntax::Kolon>.
 
 =head2 Template inclusion
 
+The C<INCLUDE> statement is supported.
+
     [% INCLUDE "file.tt" %]
     [% INCLUDE $var %]
 
-C<< WITH variablies >> syntax is also supported:
+C<< WITH variablies >> syntax is also supported, although
+the C<WITH> keyword is optional in Template-Toolkit:
 
     [% INCLUDE "file.tt" WITH foo = 42, bar = 3.14 %]
     [% INCLUDE "file.tt" WITH
@@ -294,11 +532,46 @@ C<< WITH variablies >> syntax is also supported:
         bar = 3.14
     %]
 
-=head2 Template cascading
+The C<WRAPPER> statement is also supported.
+The argument of C<WRAPPER>, however, must be string literals, because
+templates will be statically linked while compiling.
 
-Not supported.
+    [% WRAPPER "file.tt" %]
+    Hello, world!
+    [% END %]
+
+    %%# with variable
+    [% WRAPPER "file.tt" WITH title = "Foo!" %]
+    Hello, world!
+    [% END %]
+
+The content will be set into C<content>, but you can specify its name with
+the C<INTO> keyword.
+
+    [% WRAPPER "foo.tt" INTO wrapped_content WITH title = "Foo!" %]
+    ...
+    [% END %]
 
 =head2 Macro blocks
+
+Definition:
+
+    [% MACRO foo BLOCK -%]
+        This is a macro.
+    [% END -%]
+
+    [% MACRO add(a, b) BLOCK -%]
+    [%  a + b -%]
+    [% END -%]
+
+Call:
+
+    [% foo()     %]
+    [% add(1, 2) %]
+
+Unlike Template-Toolkit, calling macros requires parens (C<()>).
+
+=head2 Template cascading
 
 Not supported.
 

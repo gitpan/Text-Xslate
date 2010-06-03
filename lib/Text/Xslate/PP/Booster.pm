@@ -6,9 +6,13 @@ use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP::Const;
-use Text::Xslate::Util qw($DEBUG p);
+use Text::Xslate::Util qw($DEBUG p value_to_literal);
 
 use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
+
+use constant _FOR_ITEM  => 0;
+use constant _FOR_ITER  => 1;
+use constant _FOR_ARRAY => 2;
 
 my %CODE_MANIP = ();
 
@@ -75,8 +79,8 @@ sub opcode_to_perlcode_string {
 sub {
     no warnings 'recursion';
     my ( $st ) = @_;
-    my ( $sv, $st2, $pad, %macro, $depth );
-    my $output = '';
+    my ( $sv, $pad, %macro, $depth );
+    my $output = q{};
     my $vars   = $st->{ vars };
 
     $pad = [ [ ] ];
@@ -90,7 +94,7 @@ CODE
 
     $perlcode .= "    # process start\n\n";
     $perlcode .= join( '', grep { defined } @{ $self->{lines} } );
-    $perlcode .= "\n" . '    $st->{ output } = $output;' . "\n}";
+    $perlcode .= "\n" . '    return $output;' . "\n}";
 
     return $perlcode;
 }
@@ -124,6 +128,18 @@ $CODE_MANIP{ 'save_to_lvar' } = sub {
     my $op = $self->ops->[ $self->current_line + 1 ];
 
     unless ( $op and $op->[0] =~ /^(?:print|and|or|dand|dor|push)/ ) { # ...
+
+        my $i = $self->current_line + 1;
+
+        while ( my $op = $self->ops->[ ++$i ] ) {
+            if ( $op->[0] =~ /^(?:print|and|or|dand|dor|push|for|macrocall)/ ) {
+                last;
+            }
+            if ( $op->[0] eq 'load_lvar_to_sb' ) {
+                return;
+            }
+        }
+
         $self->write_lines( sprintf( '%s;', $v )  );
     }
 
@@ -166,7 +182,7 @@ $CODE_MANIP{ 'nil' } = sub {
 
 $CODE_MANIP{ 'literal' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( '"' . _escape( $arg ) . '"' );
+    $self->sa( value_to_literal( $arg ) );
 };
 
 
@@ -179,7 +195,7 @@ $CODE_MANIP{ 'literal_i' } = sub {
 
 $CODE_MANIP{ 'fetch_s' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '$vars->{ "%s" }', _escape( $arg ) ) );
+    $self->sa( sprintf( '$vars->{ %s }', value_to_literal( $arg ) ) );
 };
 
 
@@ -214,14 +230,14 @@ $CODE_MANIP{ 'fetch_field_s' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $sv = $self->sa();
 
-    $self->sa( sprintf( 'fetch( $st, %s, "%s", %s, %s )', $sv, _escape( $arg ), $self->frame_and_line ) );
+    $self->sa( sprintf( 'fetch( $st, %s, %s, %s, %s )', $sv, value_to_literal( $arg ), $self->frame_and_line ) );
 };
 
 
 $CODE_MANIP{ 'print_raw' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $sv = $self->sa();
-    my $err = sprintf( '_warn( $st, %s, %s, "Use of nil to be print" );', $self->frame_and_line );
+    my $err = sprintf( '_warn( $st, %s, %s, "Use of nil to print" );', $self->frame_and_line );
 
     $self->write_lines( sprintf( <<'CODE', $sv, $err ) );
 # print_raw
@@ -232,22 +248,25 @@ else {
    %s
 }
 CODE
-    $self->write_code( "\n" );
 };
 
 
 $CODE_MANIP{ 'ex_print_raw' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $sv = $self->sa();
-    $self->write_lines( sprintf('$output .= %s;', $sv) );
-    $self->write_code( "\n" );
+    $self->write_lines( sprintf(<<'CODE', $sv) );
+# ex_print_raw
+$output .= %s;
+CODE
 };
 
 
 $CODE_MANIP{ 'print_raw_s' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->write_lines( sprintf('$output .= "%s";', _escape( $arg ) ) );
-    $self->write_code( "\n" );
+    $self->write_lines( sprintf(<<'CODE', value_to_literal( $arg )) );
+# print_raw_s
+$output .= %s;
+CODE
 };
 
 
@@ -256,12 +275,11 @@ $CODE_MANIP{ 'print' } = sub {
     my $sv = $self->sa();
     my $err;
 
-    $err = sprintf( '_warn( $st, %s, %s, "Use of nil to be print" );', $self->frame_and_line );
+    $err = sprintf( '_warn( $st, %s, %s, "Use of nil to print" );', $self->frame_and_line );
 
     $self->write_lines( sprintf( <<'CODE', $sv, $err ) );
 # print
 $sv = %s;
-
 if ( ref($sv) eq 'Text::Xslate::EscapedString' ) {
     $output .= $sv;
 }
@@ -280,10 +298,11 @@ CODE
 $CODE_MANIP{ 'include' } = sub {
     my ( $self, $arg, $line ) = @_;
     $self->write_lines( sprintf( <<'CODE', $self->sa ) );
-$st2 = Text::Xslate::PP::tx_load_template( $st->self, %s );
-Text::Xslate::PP::tx_execute( $st2, $vars );
-
-$output .= $st2->{ output };
+# include
+{
+    my $st2 = Text::Xslate::PP::tx_load_template( $st->self, %s );
+    $output .= Text::Xslate::PP::tx_execute( $st2, $vars );
+}
 CODE
 
 };
@@ -313,18 +332,22 @@ $CODE_MANIP{ 'for_iter' } = sub {
         $self->stash->{ macro_args_num }->{ $self->framename }->{ $self->sa() } = 1;
     }
 
-    {
-        my ( $frame, $line ) = ( "'" . $self->framename . "'", $self->stash->{ for_start_line } );
-        $self->write_lines(
-            sprintf( 'for ( @{ check_itr_ar( $st, %s, %s, %s ) } ) {', $ar, $frame, $line )
-        );
-    }
+    my $item_var = sprintf '$pad->[-1][%s+_FOR_ITEM]',  $self->sa();
+    my $iterator = sprintf '$pad->[-1][%s+_FOR_ITER]',  $self->sa();
+    my $array    = sprintf '$pad->[-1][%s+_FOR_ARRAY]', $self->sa();
 
-    $self->write_code( "\n" );
+    $self->write_lines(
+        sprintf( '%s = check_itr_ar( $st, %s, %s, %s );',
+            $array, $ar,
+            value_to_literal($self->framename), $self->stash->{ for_start_line } )
+    );
+    $self->write_lines(sprintf <<'CODE', $iterator, $array);
+for(%1$s = 0; %1$s < @{%2$s}; %1$s++) {
+CODE
 
     $self->indent_depth( $self->indent_depth + 1 );
 
-    $self->write_lines( sprintf( '$pad->[ -1 ]->[ %s ] = $_;', $self->sa() ) );
+    $self->write_lines( sprintf( '%s = %s->[ %s ];', $item_var, $array, $iterator ) );
     $self->write_code( "\n" );
 };
 
@@ -372,25 +395,25 @@ $CODE_MANIP{ 'concat' } = sub {
 
 $CODE_MANIP{ 'and' } = sub {
     my ( $self, $arg, $line ) = @_;
-    return $self->_check_logic( $self->current_line, $arg, 'and' );
+    return $self->_check_logic( and => $arg, $line );
 };
 
 
 $CODE_MANIP{ 'dand' } = sub {
     my ( $self, $arg, $line ) = @_;
-    return $self->_check_logic( $self->current_line, $arg, 'dand' );
+    return $self->_check_logic( dand => $arg, $line );
 };
 
 
 $CODE_MANIP{ 'or' } = sub {
     my ( $self, $arg, $line ) = @_;
-    return $self->_check_logic( $self->current_line, $arg, 'or' );
+    return $self->_check_logic( or => $arg, $line );
 };
 
 
 $CODE_MANIP{ 'dor' } = sub {
     my ( $self, $arg, $line ) = @_;
-    return $self->_check_logic( $self->current_line, $arg, 'dor' );
+    return $self->_check_logic( dor => $arg, $line );
 };
 
 
@@ -400,53 +423,51 @@ $CODE_MANIP{ 'not' } = sub {
     $self->sa( sprintf( '( !%s )', $sv ) );
 };
 
-
-$CODE_MANIP{ 'plus' } = sub {
-    my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '+ %s', $self->sa ) );
-};
-
-
 $CODE_MANIP{ 'minus' } = sub {
     my ( $self, $arg, $line ) = @_;
     $self->sa( sprintf( '- %s', $self->sa ) );
 };
 
+$CODE_MANIP{ 'size' } = sub {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( 'scalar(@{%s})', $self->sa ) );
+};
+
 
 $CODE_MANIP{ 'eq' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'cond_eq( %s, %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( 'cond_eq( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'ne' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'cond_ne( %s, %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( 'cond_ne( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 
 $CODE_MANIP{ 'lt' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s < %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( '( %s < %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'le' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s <= %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( '( %s <= %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'gt' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s > %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( '( %s > %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'ge' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s >= %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( '( %s >= %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
@@ -461,8 +482,8 @@ $CODE_MANIP{ 'macrocall' } = sub {
         $self->stash->{ macro_args_num }->{ $self->sa }->{ $i } = 1;
     }
 
-    $self->sa( sprintf( '$macro{\'%s\'}->( $st, %s )',
-        $self->sa(),
+    $self->sa( sprintf( '$macro{ %s }->( $st, %s )',
+        value_to_literal($self->sa()),
         sprintf( 'push_pad( $pad, [ %s ] )', join( ', ', @{ pop @{ $self->SP } } )  )
     ) );
 };
@@ -472,19 +493,21 @@ $CODE_MANIP{ 'macro_begin' } = sub {
     my ( $self, $arg, $line ) = @_;
 
     $self->stash->{ macro_begin } = $self->current_line;
-    $self->stash->{ in_macro } = $arg;
+    $self->stash->{ in_macro }    = $arg;
     $self->framename( $arg );
 
-    $self->write_lines( sprintf( '$macro{\'%s\'} = $st->{ booster_macro }->{\'%s\'} ||= sub {', $arg, $arg ) );
+    my $name = value_to_literal($arg);
+    $self->write_lines( sprintf( '$macro{%s} = $st->{ booster_macro }->{%s} ||= sub {',
+        $name, $name ) );
     $self->indent_depth( $self->indent_depth + 1 );
 
     $self->write_lines( 'my ( $st, $pad ) = @_;' );
     $self->write_lines( 'my $vars = $st->{ vars };' );
-    $self->write_lines( sprintf( 'my $output = \'\';' ) );
+    $self->write_lines( sprintf( 'my $output = q{};' ) );
     $self->write_code( "\n" );
 
     $self->write_lines(
-        sprintf( q{Carp::croak('Macro call is too deep (> 100) at "%s"') if ++$depth > 100;}, $arg )
+        sprintf( q{Carp::croak('Macro call is too deep (> 100) on %s') if ++$depth > 100;}, $name )
     );
     $self->write_code( "\n" );
 };
@@ -519,7 +542,7 @@ $CODE_MANIP{ 'macro' } = sub {
 $CODE_MANIP{ 'function' } = sub {
     my ( $self, $arg, $line ) = @_;
     $self->sa(
-        sprintf('$st->function->{ %s }', $arg )
+        sprintf('$st->function->{ %s }', value_to_literal($arg) )
     );
 };
 
@@ -542,7 +565,8 @@ $CODE_MANIP{ 'methodcall_s' } = sub {
     my ( $self, $arg, $line ) = @_;
 
     $self->sa(
-        sprintf('methodcall( $st, %s, %s, "%s", %s )', $self->frame_and_line, $arg, join( ', ', @{ pop @{ $self->SP } } ) )
+        sprintf('methodcall( $st, %s, %s, %s, %s )', $self->frame_and_line,
+            value_to_literal($arg), join( ', ', @{ pop @{ $self->SP } } ) )
     );
 };
 
@@ -642,27 +666,24 @@ sub _convert_opcode {
     my $i = 0;
 
     while ( $self->current_line < $len ) {
-        my $pair = $ops->[ $i ];
+        my $op = $ops->[ $i ];
 
-        unless ( $pair and ref $pair eq 'ARRAY' ) {
+        if ( ref $op ne 'ARRAY' ) {
             Carp::croak( sprintf( "Oops: Broken code found on [%d]",  $i ) );
         }
 
-        my ( $opname, $arg, $line ) = @$pair;
+        my ( $opname, $arg, $line ) = @$op;
 
-        unless ( $CODE_MANIP{ $opname } ) {
+        my $manip  = $CODE_MANIP{ $opname };
+        unless ( $manip ) {
             Carp::croak( sprintf( "Oops: opcode '%s' is not yet implemented on Booster", $opname ) );
         }
 
-        my $manip  = $CODE_MANIP{ $opname };
-
         if ( my $proc = $self->stash->{ proc }->{ $i } ) {
-
             if ( $proc->{ skip } ) {
                 $self->current_line( ++$i );
                 next;
             }
-
         }
 
         $manip->( $self, $arg, defined $line ? $line : '' );
@@ -677,57 +698,81 @@ sub _convert_opcode {
 
 
 sub _check_logic {
-    my ( $self, $i, $arg, $type ) = @_;
-    my $ops = $self->ops;
-    my $type_store = $type;
+    my ( $self, $type, $addr ) = @_;
+    my $i = $self->current_line;
 
-    my $next_opname = $ops->[ $i + $arg ]->[ 0 ] || '';
+    $self->write_lines("# $type [$i]");
+
+    my $ops = $self->ops;
+
+    my $next_opname = $ops->[ $i + $addr ]->[ 0 ] || '';
 
     if ( $next_opname =~ /and|or/ ) { # &&, ||
-        $type = $type eq 'and'  ? ' && '
-              : $type eq 'dand' ? 'defined( %s )'
-              : $type eq 'or'   ? ' || '
-              : $type eq 'dor'  ? '!(defined( %s ))'
-              : die
-              ;
+        my $fmt = $type eq 'and'  ? ' && '
+                : $type eq 'dand' ? 'defined( %s )'
+                : $type eq 'or'   ? ' || '
+                : $type eq 'dor'  ? '!(defined( %s ))'
+                : die $type;
         my $pre_exprs = $self->exprs || '';
-        $self->exprs( $pre_exprs . $self->sa() . $type ); # store
+        $self->exprs( $pre_exprs . $self->sa() . $fmt ); # store
         return;
     }
 
-    my $opname = $ops->[ $i + $arg - 1 ]->[ 0 ]; # goto or ?
-    my $oparg  = $ops->[ $i + $arg - 1 ]->[ 1 ];
+    my $opname = $ops->[ $i + $addr - 1 ]->[ 0 ]; # goto or ?
+    my $oparg  = $ops->[ $i + $addr - 1 ]->[ 1 ];
 
-    $type = $type eq 'and'  ? '%s'
-          : $type eq 'dand' ? 'defined( %s )'
-          : $type eq 'or'   ? '!( %s )'
-          : $type eq 'dor'  ? '!(defined( %s ))'
-          : die
-          ;
+    my $fmt = $type eq 'and'  ? '%s'
+            : $type eq 'dand' ? 'defined( %s )'
+            : $type eq 'or'   ? '!( %s )'
+            : $type eq 'dor'  ? '!(defined( %s ))'
+            : die $type;
 
     if ( $opname eq 'goto' and $oparg > 0 ) { # if-else or ternary?
         my $if_block_start   = $i + 1;                  # open if block
-        my $if_block_end     = $i + $arg - 2;           # close if block - subtract goto line
-        my $else_block_start = $i + $arg;               # open else block
-        my $else_block_end   = $i + $arg + $oparg - 2;  # close else block - subtract goto line
+        my $if_block_end     = $i + $addr - 2;           # close if block - subtract goto line
+        my $else_block_start = $i + $addr;               # open else block
+        my $else_block_end   = $i + $addr + $oparg - 2;  # close else block - subtract goto line
 
         my ( $sa_1st, $sa_2nd );
 
-        $self->stash->{ proc }->{ $i + $arg - 1 }->{ skip } = 1; # skip goto
+        $self->stash->{ proc }->{ $i + $addr - 1 }->{ skip } = 1; # skip goto
 
         for ( $if_block_start .. $if_block_end ) {
             $self->stash->{ proc }->{ $_ }->{ skip } = 1; # mark skip
         }
 
+        my $has_else_block = ($else_block_end >= $else_block_start);
+
+        my $last_opname = $ops->[ $i + $addr + $oparg - 1 ]->[0]; # check print or move_to_sb
+
         my $st_1st = $self->_spawn_child->_convert_opcode(
             [ @{ $ops }[ $if_block_start .. $if_block_end ] ]
         );
 
+        # treat as ternary
+        if ( $has_else_block and $last_opname and ( $last_opname eq 'print' or $last_opname eq 'move_to_sb' ) ) {
+
+            for (  $else_block_start .. $else_block_end ) { # 2
+                $self->stash->{ proc }->{ $_ }->{ skip } = 1; # skip
+            }
+
+            my $st_2nd = $self->_spawn_child->_convert_opcode( # add $last_code for nested ternary
+                [ @{ $ops }[ $else_block_start .. $else_block_end ], [ $last_opname ] ]
+            );
+
+        $self->sa( sprintf(  <<'CODE', $self->sa, _rm_tailed_lf( $st_1st->sa ), _rm_tailed_lf( $st_2nd->sa ) ) );
+cond_ternary( %s, sub { %s; }, sub { %s; } )
+CODE
+
+            return;
+        }
+
         my $code = $st_1st->code;
+
         if ( $code and $code !~ /^\n+$/ ) {
             my $expr = $self->sa;
             $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
-            $self->write_lines( sprintf( 'if ( %s ) {' , sprintf( $type, $expr ) ) );
+            $self->write_lines( sprintf( 'if ( %s ) {' , sprintf( $fmt, $expr ) ) );
             $self->exprs( '' );
             $self->write_lines( $code );
             $self->write_lines( sprintf( '}' ) );
@@ -736,18 +781,18 @@ sub _check_logic {
             $sa_1st = $st_1st->sa;
         }
 
-        if ( $else_block_end >= $else_block_start ) {
+        if ( $has_else_block ) {
 
             for (  $else_block_start .. $else_block_end ) { # 2
                 $self->stash->{ proc }->{ $_ }->{ skip } = 1; # skip
             }
 
+            # else block
             my $st_2nd = $self->_spawn_child->_convert_opcode(
                 [ @{ $ops }[ $else_block_start .. $else_block_end ] ]
             );
 
             my $code = $st_2nd->code;
-
             if ( $code and $code !~ /^\n+$/ ) {
                 $self->write_lines( sprintf( 'else {' ) );
                 $self->write_lines( $code );
@@ -762,7 +807,7 @@ sub _check_logic {
         if ( defined $sa_1st and defined $sa_2nd ) {
             my $expr = $self->sa;
             $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
-            $self->sa( sprintf( '(%s ? %s : %s)', sprintf( $type, $expr ), $sa_1st, $sa_2nd ) );
+            $self->sa( sprintf( '(%s ? %s : %s)', sprintf( $fmt, $expr ), $sa_1st, $sa_2nd ) );
         }
         else {
             $self->write_code( "\n" );
@@ -771,13 +816,13 @@ sub _check_logic {
     }
     elsif ( $opname eq 'goto' and $oparg < 0 ) { # while
         my $while_block_start   = $i + 1;                  # open while block
-        my $while_block_end     = $i + $arg - 2;           # close while block - subtract goto line
+        my $while_block_end     = $i + $addr - 2;           # close while block - subtract goto line
 
         for ( $while_block_start .. $while_block_end ) {
             $self->stash->{ proc }->{ $_ }->{ skip } = 1; # skip
         }
 
-        $self->stash->{ proc }->{ $i + $arg - 1 }->{ skip } = 1; # skip goto
+        $self->stash->{ proc }->{ $i + $addr - 1 }->{ skip } = 1; # skip goto
 
         my $st_wh = $self->_spawn_child->_convert_opcode(
             [ @{ $ops }[ $while_block_start .. $while_block_end ] ]
@@ -785,14 +830,14 @@ sub _check_logic {
 
         my $expr = $self->sa;
         $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
-        $self->write_lines( sprintf( 'while ( %s ) {' , sprintf( $type, $expr ) ) );
+        $self->write_lines( sprintf( 'while ( %s ) {' , sprintf( $fmt, $expr ) ) );
         $self->exprs( '' );
         $self->write_lines( $st_wh->code );
         $self->write_lines( sprintf( '}' ) );
 
         $self->write_code( "\n" );
     }
-    elsif ( _logic_is_max_min( $ops, $i, $arg ) ) { # min, max
+    elsif ( _logic_is_max_min( $ops, $i, $addr ) ) { # min, max
 
         for ( $i + 1 .. $i + 2 ) {
             $self->stash->{ proc }->{ $_ }->{ skip } = 1; # skip
@@ -803,7 +848,7 @@ sub _check_logic {
     else {
 
         my $true_start = $i + 1;
-        my $true_end   = $i + $arg - 1; # add 1 for complete process line is next.
+        my $true_end   = $i + $addr - 1; # add 1 for complete process line is next.
 
         for ( $true_start .. $true_end ) {
             $self->stash->{ proc }->{ $_ }->{ skip } = 1; # skip
@@ -817,21 +862,13 @@ sub _check_logic {
         my $expr = $self->sa;
         $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
 
-            $type = $type_store eq 'and'  ? 'cond_and'
-                  : $type_store eq 'or'   ? 'cond_or'
-                  : $type_store eq 'dand' ? 'cond_dand'
-                  : $type_store eq 'dor'  ? 'cond_dor'
-                  : die
-                  ;
-
-$self->sa( sprintf( <<'CODE', $type, $expr, $st_true->sa ) );
-%s( %s, sub {
-%s
-}, )
+        $self->sa( sprintf( <<'CODE', $type, $expr, _rm_tailed_lf( $st_true->sa ) ) );
+cond_%s( %s, sub { %s } )
 CODE
 
     }
 
+    $self->write_lines("# end $type [$i]");
 }
 
 
@@ -844,13 +881,10 @@ sub _logic_is_max_min {
 }
 
 
-sub _escape {
-    my $str = $_[0];
-    $str =~ s{\\}{\\\\}g;
-    $str =~ s{\n}{\\n}g;
-    $str =~ s{\t}{\\t}g;
-    $str =~ s{"}{\\"}g;
-    $str =~ s{\$}{\\\$}g;
+sub _rm_tailed_lf {
+    my ( $str ) = @_;
+    return unless defined $str;
+    $str =~ s/\n+//;
     return $str;
 }
 
@@ -871,7 +905,7 @@ sub code {
 
 sub frame_and_line {
     my ( $self ) = @_;
-    ( "'" . $self->framename . "'", $self->current_line );
+    ( value_to_literal($self->framename), $self->current_line );
 }
 
 
@@ -883,7 +917,10 @@ sub write_lines {
 
     my $indent = $self->indent;
     for my $line ( split/\n/, $lines, -1 ) {
-        $code .= $indent . $line . "\n";
+        if($line ne '') {
+            $code .= $indent . $line;
+        }
+        $code .= "\n";
     }
 
     $self->lines->[ $idx ] .= $code;
@@ -987,6 +1024,7 @@ my %builtin_method = (
     size    => [0, TX_ENUMERABLE],
     join    => [1, TX_ENUMERABLE],
     reverse => [0, TX_ENUMERABLE],
+    sort    => [0, TX_ENUMERABLE],
 
     keys    => [0, TX_KV],
     values  => [0, TX_KV],
@@ -1017,7 +1055,7 @@ sub methodcall {
         my($nargs, $klass) = @{$bm};
         if(@args != $nargs) {
             _error($st, $frame, $line,
-                "Builtin method %s requres exactly %d argument(s), "
+                "Builtin method %s requires exactly %d argument(s), "
                 . "but supplied %d",
                 $method, $nargs, scalar @args);
             return undef;
@@ -1079,6 +1117,12 @@ sub check_itr_ar {
     }
 
     return $ar;
+}
+
+
+sub cond_ternary {
+    my ( $value, $subref1, $subref2 ) = @_;
+    $value ? $subref1->() : $subref2->();
 }
 
 
@@ -1212,35 +1256,45 @@ Text::Xslate::PP::Booster - Text::Xslate code generator to build Perl code
 
 =head1 DESCRIPTION
 
-This module is a new L<Text::Xslate::PP> runtime engine.
+This module is a pure Perl engine, which is much faster than
+Text::Xslate::PP::Opcode, but might be less stable.
 
-The old Text::Xslate::PP is very very slow, you know. Example:
+The motivation to implement this engine is the performance.
+You know the default pure Perl engine was really slow. For example:
 
-    > XSLATE=pp perl benchmark/others.pl
-    Text::Xslate/0.1019
+    $ XSLATE=pp=opcode perl -Mblib benchmark/others.pl
+    Perl/5.10.1 i686-linux
+    Text::Xslate/0.1025
     Text::MicroTemplate/0.11
-    Text::ClearSilver/0.10.5.4
     Template/2.22
+    Text::ClearSilver/0.10.5.4
+    HTML::Template::Pro/0.94
     ...
-             Rate xslate     tt     mt     cs
-    xslate  119/s     --   -58%   -84%   -95%
-    tt      285/s   139%     --   -61%   -88%
-    mt      725/s   507%   154%     --   -69%
-    cs     2311/s  1835%   711%   219%     --
+    Benchmarks with 'list' (datasize=100)
+             Rate Xslate     TT     MT    TCS     HT
+    Xslate  155/s     --   -52%   -83%   -94%   -95%
+    TT      324/s   109%     --   -64%   -88%   -90%
+    MT      906/s   486%   180%     --   -66%   -73%
+    TCS    2634/s  1604%   713%   191%     --   -21%
+    HT     3326/s  2051%   927%   267%    26%     --
 
-All right, slower than template-toolkit!
-But now you get Text::Xslate::PP::Booster, which is as fast as Text::MicroTemplate:
 
-    > XSLATE=pp perl benchmark/others.pl
-    Text::Xslate/0.1024
+All right, it is slower than Template-Toolkit!
+But now Text::Xslate::PP::Booster is available, and is as fast as Text::MicroTemplate:
+
+    $ XSLATE=pp perl -Mblib benchmark/others.pl
     ...
-             Rate     tt     mt xslate     cs
-    tt      288/s     --   -60%   -62%   -86%
-    mt      710/s   147%     --    -5%   -66%
-    xslate  749/s   160%     5%     --   -65%
-    cs     2112/s   634%   197%   182%     --
+    Benchmarks with 'list' (datasize=100)
+             Rate     TT Xslate     MT    TCS     HT
+    TT      330/s     --   -63%   -65%   -87%   -90%
+    Xslate  896/s   172%     --    -5%   -65%   -73%
+    MT      941/s   185%     5%     --   -63%   -72%
+    TCS    2543/s   671%   184%   170%     --   -24%
+    HT     3338/s   912%   272%   255%    31%     --
 
-Text::Xslate::PP becomes to be faster!
+Text::Xslate::PP becomes much faster than the default pure Perl engine!
+
+The engine is enabled by default, and disabled by C<< $ENV{ENV}='pp=opcode' >>.
 
 =head1 APIs
 
@@ -1294,30 +1348,34 @@ Firstly the template data is converted to opcodes:
     print_raw_s "!\n"
     macro_end
 
-And the booster converted them into a perl subroutine code.
+And the booster converted them into a perl subroutine code (you can get that
+code by C<< XSLATE=dump=pp >>).
 
-    sub { no warnings 'recursion';
-        my ( $st ) = $_[0];
-        my ( $sv, $st2, $pad, %macro, $depth );
-        my $output = '';
+    sub {
+        no warnings 'recursion';
+        my ( $st ) = @_;
+        my ( $sv, $pad, %macro, $depth );
+        my $output = q{};
         my $vars   = $st->{ vars };
 
         $pad = [ [ ] ];
 
         # macro
 
-        $macro{'foo'} = $st->{ booster_macro }->{'foo'} ||= sub {
+        $macro{"foo"} = $st->{ booster_macro }->{"foo"} ||= sub {
             my ( $st, $pad ) = @_;
             my $vars = $st->{ vars };
-            my $output = '';
+            my $output = q{};
 
-            Carp::croak('Macro call is too deep (> 100) at "foo"') if ++$depth > 100;
+            Carp::croak('Macro call is too deep (> 100) on "foo"') if ++$depth > 100;
 
+            # print_raw_s
             $output .= "        Hello ";
 
-            $sv = $pad->[ -1 ]->[ 0 ];
 
-            if ( Scalar::Util::blessed( $sv ) and $sv->isa('Text::Xslate::EscapedString') ) {
+            # print
+            $sv = $pad->[ -1 ]->[ 0 ];
+            if ( ref($sv) eq 'Text::Xslate::EscapedString' ) {
                 $output .= $sv;
             }
             elsif ( defined $sv ) {
@@ -1325,10 +1383,12 @@ And the booster converted them into a perl subroutine code.
                 $output .= $sv;
             }
             else {
-                _warn( $st, 'foo', 10, "Use of nil to be printed" );
+                _warn( $st, "foo", 10, "Use of nil to print" );
             }
 
+            # print_raw_s
             $output .= "!\n";
+
 
             $depth--;
             pop( @$pad );
@@ -1339,15 +1399,17 @@ And the booster converted them into a perl subroutine code.
 
         # process start
 
-        $output .= $macro{'foo'}->( $st, push_pad( $pad, [ $vars->{ "value" } ] ) );
+        # ex_print_raw
+        $output .= $macro{ "foo" }->( $st, push_pad( $pad, [ $vars->{ "value" } ] ) );
+
 
         # process end
 
-        $st->{ output } = $output;
+        return $output;
     }
 
 So it makes the runtime speed much faster.
-Of course, its initial converting process takes a little cost of CPU and time.
+Of course, its initial converting process costs time and memory.
 
 =head1 SEE ALSO
 

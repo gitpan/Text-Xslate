@@ -2,14 +2,13 @@
 
 use strict;
 
-#use if $] == 5.010_000, 'Test::More', 'skip_all' => '5.10.0 has a bug about weak refs';
-#use if $] != 5.010_001, 'Test::More', 'skip_all' => '(something is wrong; todo)';
-
 use Test::Requires qw(Test::LeakTrace);
 use Test::More;
 use Text::Xslate;
 use t::lib::Util;
 
+use if Text::Xslate->isa('Text::Xslate::PP'),
+    'Test::More' => skip_all => 'PP will be safe';
 
 my %vars = (
     lang  => 'Perl',
@@ -72,6 +71,18 @@ T
         larger than 10
 X
 
+    [<<'T', <<'X', 'chained max'],
+        <:= $value max 100 max 200 :>
+T
+        200
+X
+
+    [<<'T', <<'X', 'chainded min'],
+        <:= $value min 100 min 200 :>
+T
+        32
+X
+
     [<<'T', <<'X', 'filter'],
         <:= $my.lang | uc :>
 T
@@ -92,6 +103,45 @@ T
         Hello, Xslate world!
 X
 
+    [<<'T', <<'X', 'array literal'],
+    : for ["Xslate", "Perl"] -> $i {
+        Hello, <: $i :> world!
+    : }
+T
+        Hello, Xslate world!
+        Hello, Perl world!
+X
+
+    [<<'T', <<'X', 'hash literal'],
+    Hello, <: ({ lang => "Xslate" }).lang :> world!
+T
+    Hello, Xslate world!
+X
+
+    [<<'T', <<'X', 'builtin method for array'],
+    Hello, <: ['C', 'B', 'A'].reverse().join(" ") :> world!
+T
+    Hello, A B C world!
+X
+
+    [<<'T', <<'X', 'builtin method for array'],
+    Hello, <: ['C', 'B', 'A'].sort().join(" ") :> world!
+T
+    Hello, A B C world!
+X
+
+    [<<'T', <<'X', 'builtin method for hash'],
+    Hello, <: ({ lang => "Xslate" }).values().join(",") :> world!
+T
+    Hello, Xslate world!
+X
+
+    [<<'T', <<'X', 'builtin method for hash'],
+    Hello, <: ({ "Xslate" => 42 }).keys().join(",") :> world!
+T
+    Hello, Xslate world!
+X
+
 );
 
 my $tx = Text::Xslate->new(
@@ -107,9 +157,13 @@ foreach my $d(@set) {
     $tx->load_string($in);
 
     no_leaks_ok {
-        my $o = $tx->render(undef, \%vars);
+        my $result = $tx->render(undef, \%vars);
 
-        $o eq $out or die "Error:\n[$o]\n[$out]";
+        $result eq $out or die <<"MSG"
+Error
+Expected: [$out]
+Got:      [$result]
+MSG
     } $msg;
 }
 

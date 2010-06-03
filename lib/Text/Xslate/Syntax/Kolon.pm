@@ -51,8 +51,11 @@ C<< $obj["accessor"] >> syntax may be call object methods.
 
 =head2 Literals
 
-Nil:
-    : nil
+Special:
+
+    : nil   # indicates "nothing"
+    : true  # as the integer 1
+    : false # as the integer 0
 
 String:
 
@@ -122,22 +125,54 @@ Operator precedence is the same as Perl's:
 
 =head2 Loops
 
-There are C<for> and C<while> loops.
+There is C<for> loops that are like Perl's C<foreach>.
 
     : # $data must be an ARRAY reference
     : for $data -> $item {
         [<: $item.field :>]
     : }
 
+You can get the iterator index in C<for> statements as C<$~ITERATOR_VAR>:
+
+    : for $data -> $item {
+        : if ($~item % 2) == 0 {
+            Even (0, 2, 4, ...)
+        : }
+        : else {
+            Odd (1, 3, 5, ...)
+        : }
+    : }
+
+C<$~item> is a pseudo object, so you can access its elements
+via the dot-name syntax.
+
+    : for $data -> $i {
+        : $~i.index # the same as $~i
+        : $~i.count # the same as $~i + 1
+
+        : if ($~i.index % 2) == 0 {
+            Even
+        : }
+        : else {
+            Odd
+        : }
+    : }
+
+Supported iterator elements are C<index :Int>, C<count :Int>,
+C<body : ArrayRef>, C<size : Int>, C<max :Int>, C<is_first :Bool>,
+and C<is_last :Bool>, C<peep_next :Any>, C<peep_prev :Any>.
+
+C<while> loops are also supported to iterate database-handle-like objects.
+
     : # $obj must be an iteratable object
-    : while $obj.fetch -> $item {
+    : while $dbh.fetch() -> $item {
         [<: $item.field :>]
     : }
 
-C<while> statements are not the same as Perl's. In fact, the above Xslate
-while code is the same as the following Perl while code:
+Note that C<while> is B<not the same as Perl's>. In fact, the above Xslate
+C<while> code is the same as the following Perl C<while> code:
 
-    while(defined(my $item = $obj->fetch)) {
+    while(defined(my $item = $dbh->fetch())) {
         ...
     }
 
@@ -150,7 +185,7 @@ C<if-else>:
     : if $var == nil {
         $var is nil.
     : }
-    : else if $var != "foo" { # elsif ... is okey
+    : else if $var != "foo" { # elsif is okay
         $var is not nil nor "foo".
     : }
     : else {
@@ -161,11 +196,11 @@ C<if-else>:
         $var is 1 .. 10
     : }
 
-Note that C<if> doesn't require parens:
+Note that C<if> doesn't require parens, so the above code is okay:
 
     : if ($var + 10) == 20 { } # OK
 
-C<given-when>:
+C<given-when>(also known as B<switch statement>):
 
     : given $var {
     :   when "foo" {
@@ -179,7 +214,7 @@ C<given-when>:
         }
     : }
 
-Note that you can use the topic variable.
+You can specify the topic variable.
 
     : given $var -> $it {
     :   when "foo" {
@@ -192,13 +227,17 @@ Note that you can use the topic variable.
 
 =head2 Functions and filters
 
-Once you have registered functions, you can call them with C<()> or C<|>.
+You can register functions via C<function> or C<module> options for
+C<< Text::Xslate->new() >>.
+
+Once you have registered functions, you can call them with the C<()> operator.
+The C<|> operator is supported as a syntactic sugar to C<()>.
 
     : f()        # without args
     : f(1, 2, 3) # with args
     : 42 | f     # the same as f(42)
 
-Dynamic functions/filters:
+Functions are Perl's subroutines, so you can define dynamic functions:
 
     # code
     sub mk_indent {
@@ -219,18 +258,29 @@ Dynamic functions/filters:
     : $value | indent("> ")
     : indent("> ")($value)
 
+There are several builtin functions, which you cannot redefine:
+
+    : $var | raw  # not to html-escape it
+    : $var | html # explicitly html-escape it (default)
+    : $var | dump # dump it with Data::Dumper
+
+NOTE: C<raw> and C<html> might be optimized away by the compiler.
+
 =head2 Methods
 
 When I<$var> is an object instance, you can call its methods.
 
     <: $var.method() :>
     <: $var.method(1, 2, 3) :>
+    <: $var.method( foo => [ 1, 2, 3 ] ) :>
 
-There are the autoboxing mechanism:
+For arrays and hashes, there are builtin methods (i.e. there
+is an autoboxing mechanism):
 
     <: $array.size() :>
     <: $array.join(",") :>
     <: $array.reverse() :>
+
     <: $hash.keys().join(", ") :>
     <: $hash.values().join(", ") :>
     <: for $hash.kv() -> $pair { :>
@@ -254,31 +304,32 @@ limited to 100.
 
 Template cascading is another way to extend templates other than C<include>.
 
-    : cascade myapp::base
-    : cascade myapp::base { var1 => value1, var2 => value2, ...}
-    : cascade myapp::base with myapp::role1, myapp::role2
-    : cascade with myapp::role1, myapp::role2
-
-You can extend templates with block modifiers.
-
-Base templates F<myapp/base.tx>:
+First, make base templates F<myapp/base.tx>:
 
     : block title -> { # with default
         [My Template!]
     : }
 
-    : block body -> {;} # without default
+    : block body -> { } # without default
 
-Another derived template F<myapp/foo.tx>:
+Then extend from base templates with the C<cascade> keyword:
 
-    : # cascade "myapp/base.tx" is also okey
+    : cascade myapp::base
+    : cascade myapp::base { var1 => value1, var2 => value2, ...}
+    : cascade myapp::base with myapp::role1, myapp::role2
+    : cascade with myapp::role1, myapp::role2
+
+In derived templates, you may extend templates (e.g. F<myapp/foo.tx>)
+with block modifiers C<before>, C<around> (or C<override>) and C<after>.
+
+    : # cascade "myapp/base.tx" is also okay
     : cascade myapp::base
     : # use default title
     : around body -> {
         My template body!
     : }
 
-Yet another derived template F<myapp/bar.tx>:
+And, make yet another derived template F<myapp/bar.tx>:
 
     : cascade myapp::foo
     : around title -> {
@@ -293,12 +344,12 @@ Yet another derived template F<myapp/bar.tx>:
         After body!
     : }
 
-Then, Perl code:
+Then render it as usual.
 
     my $tx = Text::Xslate->new( file => 'myapp/bar.tx' );
     $tx->render({});
 
-Output:
+The result is something like this:
 
         --------------
         [My Template!]
@@ -338,6 +389,9 @@ Output:
 
 =head2 Macro blocks
 
+Macros are supported, which are called in the same way as functions and
+return a string marked as escaped.
+
     : macro add ->($x, $y) {
     :   $x + $y;
     : }
@@ -351,8 +405,10 @@ Output:
     : macro factorial -> $x {
     :   $x == 0 ? 1 : $x * factorial($x-1)
     : }
+    : factorial(1)  # as a function
+    : 1 | factorial # as a filter
 
-Note that return values of macros are values that their routines renders.
+Note that return values of macros are what their routines render.
 That is, macros themselves output nothing.
 
 =head2 Comments
@@ -362,6 +418,8 @@ That is, macros themselves output nothing.
       # this is also a comment
       $var
     :>
+
+    <: $foo # this is ok :>
 
 =head1 SEE ALSO
 

@@ -414,7 +414,6 @@ TXC_w_var(fetch_lvar) {
     else {
         TX_st_sa = TX_lvar_get(id);
     }
-
     TX_st->pc++;
 }
 
@@ -546,9 +545,9 @@ TXC_w_var(for_start) {
         avref = sv_2mortal(newRV_noinc((SV*)newAV()));
     }
 
-    (void)   TX_lvar(id+0); /* for each item, ensure to allocate a sv */
-    sv_setsv(TX_lvar(id+1), avref);
-    sv_setiv(TX_lvar(id+2), -1); /* (re)set iterator */
+    (void)   TX_lvar(id+0);      /* for each item, ensure to allocate a sv */
+    sv_setiv(TX_lvar(id+1), -1); /* (re)set iterator */
+    sv_setsv(TX_lvar(id+2), avref);
 
     TX_st->pc++;
 }
@@ -557,12 +556,14 @@ TXC_goto(for_iter) {
     SV* const idsv  = TX_st_sa;
     IV  const id    = SvIVX(idsv); /* by literal_i */
     SV* const item  = TX_lvar_get(id+0);
-    SV* const avref = TX_lvar_get(id+1);
-    SV* const i     = TX_lvar_get(id+2);
+    SV* const i     = TX_lvar_get(id+1);
+    SV* const avref = TX_lvar_get(id+2);
     AV* const av    = (AV*)SvRV(avref);
 
     assert(SvTYPE(av) == SVt_PVAV);
     assert(SvIOK(i));
+
+    SvIOK_only(i); /* for $^item */
 
     //warn("for_next[%d %d]", (int)SvIV(i), (int)AvFILLp(av));
     if(LIKELY(SvRMAGICAL(av) == 0)) {
@@ -582,9 +583,12 @@ TXC_goto(for_iter) {
     }
 
     /* the loop finished */
-    sv_setsv(item,  &PL_sv_undef);
-    sv_setsv(avref, &PL_sv_undef);
-    /* no need to clear the iterator, it's only an integer */
+    {
+        SV* const nil = &PL_sv_undef;
+        sv_setsv(item,  nil);
+        sv_setsv(i,     nil);
+        sv_setsv(avref, nil);
+    }
 
     TX_st->pc = SvUVX(TX_op_arg); /* goto */
 }
@@ -679,17 +683,25 @@ TXC(not) {
     TX_st->pc++;
 }
 
-TXC(plus) { /* unary plus */
-    sv_setnv(TX_st->targ, +SvNVx(TX_st_sa));
-    TX_st_sa = TX_st->targ;
-    TX_st->pc++;
-}
 TXC(minus) { /* unary minus */
     sv_setnv(TX_st->targ, -SvNVx(TX_st_sa));
+    sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
     TX_st->pc++;
 }
 
+TXC(size) {
+    SV* const avref = TX_st_sa;
+
+    if(!(SvROK(avref) && SvTYPE(SvRV(avref)) == SVt_PVAV)) {
+        croak("Oops: Not an ARRAY reference for the size operator: %s",
+            tx_neat(aTHX_ avref));
+    }
+
+    sv_setiv(TX_st->targ, av_len((AV*)SvRV(avref)) + 1);
+    TX_st_sa = TX_st->targ;
+    TX_st->pc++;
+}
 
 static I32
 tx_sv_eq(pTHX_ SV* const a, SV* const b) {
@@ -1238,11 +1250,11 @@ static void
 tx_my_cxt_init(pTHX_ pMY_CXT_ bool const cloning PERL_UNUSED_DECL) {
     MY_CXT.depth = 0;
     MY_CXT.escaped_string_stash = gv_stashpvs(TX_ESC_CLASS, GV_ADDMULTI);
-    MY_CXT.warn_handler         = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::_warn", GV_ADDMULTI));
-    MY_CXT.die_handler          = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::_die",  GV_ADDMULTI));
+    MY_CXT.warn_handler         = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_warn", GV_ADDMULTI));
+    MY_CXT.die_handler          = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_die",  GV_ADDMULTI));
 }
 
-MODULE = Text::Xslate    PACKAGE = Text::Xslate
+MODULE = Text::Xslate    PACKAGE = Text::Xslate::Engine
 
 PROTOTYPES: DISABLE
 
@@ -1400,7 +1412,8 @@ CODE:
             }
             else {
                 if(arg && SvOK(*arg)) {
-                    croak("Oops: Opcode %"SVf" has an extra argument on [%d]", opname, (int)i);
+                    croak("Oops: Opcode %"SVf" has an extra argument %s on [%d]",
+                        opname, tx_neat(aTHX_ *arg), (int)i);
                 }
                 st.code[i].arg = NULL;
             }
@@ -1486,14 +1499,6 @@ CODE:
     tx_execute(aTHX_ st, RETVAL, (HV*)SvRV(vars));
 
     ST(0) = RETVAL;
-    XSRETURN(1);
-}
-
-void
-escaped_string(SV* str)
-CODE:
-{
-    ST(0) = tx_escaped_string(aTHX_ str);
     XSRETURN(1);
 }
 
@@ -1601,6 +1606,16 @@ CODE:
         /* not reached */
     }
     LEAVE;
+}
+
+MODULE = Text::Xslate    PACKAGE = Text::Xslate
+
+void
+escaped_string(SV* str)
+CODE:
+{
+    ST(0) = tx_escaped_string(aTHX_ str);
+    XSRETURN(1);
 }
 
 MODULE = Text::Xslate    PACKAGE = Text::Xslate::EscapedString

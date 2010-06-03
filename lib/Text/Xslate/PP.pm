@@ -3,32 +3,44 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1025';
-
-use Carp ();
+our $VERSION = '0.1026';
 
 use Text::Xslate::PP::Const;
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::EscapedString;
-use Text::Xslate::PP::Booster;
+use Text::Xslate::Util qw($DEBUG p);
 
-use Text::Xslate::Util qw($DEBUG);
-
-my $TX_OPS = \%Text::Xslate::OPS;
+use Carp ();
 
 use parent qw(Exporter);
+
 our @EXPORT_OK = qw(escaped_string); # export to Text::Xslate
 our %EXPORT_TAGS = (
     backend => \@EXPORT_OK,
 );
 
-{
-    package Text::Xslate;
-    Text::Xslate::PP->import(':backend');
-    our @ISA = qw(Text::Xslate::PP);
-}
+use constant _PP_BOOSTER => !scalar($DEBUG =~ /\b pp=opcode \b/xms);
+
+use if  _PP_BOOSTER, 'Text::Xslate::PP::Booster';
+use if !_PP_BOOSTER, 'Text::Xslate::PP::Opcode';
+
+our @OPCODE; # defined in PP::Const
 
 require Text::Xslate;
+
+{
+    package
+        Text::Xslate;
+    our %OPS;
+    if(!%OPS) {
+        # the compiler use %Text::Xslate::OPS in order to optimize the code
+        *OPS = \%Text::Xslate::PP::OPS;
+    }
+}
+
+unshift @Text::Xslate::ISA, __PACKAGE__;
+
+sub compiler_class() { 'Text::Xslate::Compiler' }
 
 #
 # public APIs
@@ -63,9 +75,7 @@ sub render {
     local $SIG{__DIE__}  = \&_die;
     local $SIG{__WARN__} = \&_warn;
 
-    tx_execute( $st, $vars );
-
-    $st->{ output };
+    return tx_execute( $st, $vars );
 }
 
 
@@ -73,6 +83,9 @@ sub _assemble {
     my ( $self, $proto, $name, $fullpath, $cachepath, $mtime ) = @_;
     my $len = scalar( @$proto );
     my $st  = Text::Xslate::PP::State->new;
+
+    our %OPS;    # defined in Text::Xslate::PP::Const
+    our @OPARGS; # defined in Text::Xslate::PP::Const
 
     unless ( defined $name ) { # $name ... filename
         $name = '<input>';
@@ -99,7 +112,6 @@ sub _assemble {
 
     $st->{sa}   = undef;
     $st->{sb}   = undef;
-    $st->{targ} = '';
 
     # stack frame
     $st->frame( [] );
@@ -111,7 +123,6 @@ sub _assemble {
     $mainframe->[ Text::Xslate::PP::TXframe_RETADDR ] = $len;
 
     $st->lines( [] );
-    $st->{ output } = '';
 
     $st->code_len( $len );
 
@@ -125,29 +136,31 @@ sub _assemble {
         }
 
         my ( $opname, $arg, $line ) = @$pair;
-        my $opnum = $TX_OPS->{ $opname };
+        my $opnum = $OPS{ $opname };
 
         unless ( defined $opnum ) {
             Carp::croak( sprintf( "Oops: Unknown opcode '%s' on [%d]", $opname, $i ) );
         }
 
+        $code->[ $i ]->{ exec_code } = $OPCODE[ $opnum ]
+            if !_PP_BOOSTER;
         $code->[ $i ]->{ opname }    = $opname; # for test
 
-        my $tx_oparg = $Text::Xslate::PP::tx_oparg->[ $opnum ];
+        my $oparg = $OPARGS[ $opnum ];
 
-        if ( $tx_oparg & TXARGf_SV ) {
+        if ( $oparg & TXARGf_SV ) {
 
             # This line croak at 'concat'!
             # Carp::croak( sprintf( "Oops: Opcode %s must have an argument on [%d]", $opname, $i ) )
             #     unless ( defined $arg );
 
-            if( $tx_oparg & TXARGf_KEY ) {
+            if( $oparg & TXARGf_KEY ) {
                 $code->[ $i ]->{ arg } = $arg;
             }
-            elsif ( $tx_oparg & TXARGf_INT ) {
-                $code->[ $i ]->{ arg } = $arg;
+            elsif ( $oparg & TXARGf_INT ) {
+                $code->[ $i ]->{ arg } = int($arg);
 
-                if( $tx_oparg & TXARGf_GOTO ) {
+                if( $oparg & TXARGf_GOTO ) {
                     my $abs_addr = $i + $arg;
 
                     if( $abs_addr >= $len ) {
@@ -176,17 +189,19 @@ sub _assemble {
         $st->lines->[ $i ] = $line;
 
         # special cases
-        if( $opnum == $TX_OPS->{ macro_begin } ) {
+        if( $opnum == $OPS{ macro_begin } ) {
             $st->macro->{ $code->[ $i ]->{ arg } } = $i;
         }
-        elsif( $opnum == $TX_OPS->{ depend } ) {
+        elsif( $opnum == $OPS{ depend } ) {
             push @{ $tmpl }, $code->[ $i ]->{ arg };
         }
 
     }
 
-    $st->{ perlcode } = Text::Xslate::PP::Booster->new()->opcode_to_perlcode( $proto );
-    $st->{ code     } = $code;
+    $st->{ booster_code } = Text::Xslate::PP::Booster->new()->opcode_to_perlcode( $proto )
+        if _PP_BOOSTER;
+
+    $st->{ code } = $code;
     return;
 }
 
@@ -301,20 +316,27 @@ sub tx_execute {
         Carp::croak("Execution is too deep (> 100)");
     }
 
-    $st->{output} = '';
-    $st->{pc}     = 0;
-    $st->{vars}     = $vars;
+    $st->{pc}   = 0;
+    $st->{vars} = $vars;
 
     local $_depth      = $_depth + 1;
     local $_current_st = $st;
 
     local $st->{local_stack};
+    local $st->{SP} = [];
 
-    $st->{perlcode}->( $st );
-
-    $st->{targ} = undef;
-    $st->{sa}   = undef;
-    $st->{sb}   = undef;
+    if ( $st->{ booster_code } ) {
+        return $st->{ booster_code }->( $st );
+    }
+    else {
+        local $st->{targ};
+        local $st->{sa};
+        local $st->{sb};
+        local $st->{SP} = [];
+        $st->{output} = '';
+        $st->{code}->[0]->{ exec_code }->( $st );
+        return $st->{output};
+    }
 }
 
 
@@ -378,7 +400,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1025.
+This document describes Text::Xslate::PP version 0.1026.
 
 =head1 DESCRIPTION
 
@@ -397,10 +419,17 @@ If you want to use Text::Xslate::PP, however, you can use it.
 
 XS/PP mode might be switched with C<< $ENV{XSLATE} = 'pp' or 'xs' >>.
 
-From 0.1024 on, pure Perl version is not so slow.
-See L<Text::Xslate::PP::Booster> for details.
+From 0.1024 on, two pure Perl engines are implemented.
+C<Text::Xslate::PP::Booster>, which is the default, generates optimized
+Perl code from intermediate code.
+C<Text::Xlsate::PP::Opcode> emulates the virtual machine in pure Perl,
+available with C<< $ENV{XSLATE} = 'pp=opcode' >>.
 
 =head1 SEE ALSO
+
+L<Text::Xslate::PP::Opcode>
+
+L<Text::Xslate::PP::Booster>
 
 L<Text::Xslate>
 

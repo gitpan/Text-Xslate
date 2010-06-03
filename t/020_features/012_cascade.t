@@ -6,7 +6,7 @@ use Test::More;
 use Text::Xslate;
 use t::lib::Util;
 
-my $tx = Text::Xslate->new(path => [path]);
+my $tx = Text::Xslate->new(path => [path], cache => 0);
 
 my @set = (
     [<<'T', { lang => 'Xslate' }, <<'X', 'without other components (bare name)'],
@@ -120,6 +120,22 @@ HEAD
     D-AFTER
     ]AROUND
     AFTER
+FOOT
+X
+
+    [<<'T', { lang => 'Xslate' }, <<'X', 'override as around'],
+: cascade myapp::base
+
+: override hello -> {
+    AROUND[
+    : super
+    ]AROUND
+: }
+T
+HEAD
+    AROUND[
+    Hello, Xslate world!
+    ]AROUND
 FOOT
 X
 

@@ -5,6 +5,7 @@ use Text::Xslate::Symbol;
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
     is_int any_in
+    value_to_literal
     p
 );
 
@@ -13,7 +14,7 @@ use constant _DUMP_TOKEN => scalar($DEBUG =~ /\b dump=token \b/xmsi);
 
 our @CARP_NOT = qw(Text::Xslate::Compiler Text::Xslate::Symbol);
 
-my $ID      = qr/(?: [A-Za-z_\$][A-Za-z0-9_]* )/xms;
+my $ID      = qr/(?: (?:[A-Za-z_]|\$\~?) [A-Za-z0-9_]* )/xms;
 
 my $OPERATOR_TOKEN = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     ...
@@ -60,6 +61,16 @@ has symbol_table => ( # the global symbol table
     isa => 'HashRef',
 
     default  => sub{ {} },
+
+    init_arg => undef,
+);
+
+has iterator_element => (
+    is  => 'rw',
+    isa => 'HashRef',
+
+    lazy     => 1,
+    default  => sub { {} },
 
     init_arg => undef,
 );
@@ -163,7 +174,8 @@ sub _trim {
     return $s;
 }
 
-sub split {
+# split templates by tags before tokanizing
+sub split :method {
     my $self  = shift;
     local($_) = @_;
 
@@ -173,39 +185,52 @@ sub split {
     my $tag_start     = $self->tag_start;
     my $tag_end       = $self->tag_end;
 
-    my $lex_line = defined($line_start) && qr/\A ^ [ \t]* $line_start ([^\n]* \n?) /xms;
-    my $lex_tag  = qr/\A ([^\n]*?) $tag_start ($CHOMP_FLAGS?) ($CODE) ($CHOMP_FLAGS?) $tag_end /xms;
-    my $lex_text = qr/\A ([^\n]* \n) /xms;
+    my $lex_line_code = defined($line_start) && qr/\A ^ [ \t]* $line_start ([^\n]* \n?) /xms;
+    my $lex_tag_start = qr/\A $tag_start ($CHOMP_FLAGS?)/xms;
+    my $lex_tag_end   = qr/\A ($CODE) ($CHOMP_FLAGS?) $tag_end/xms;
+
+    my $lex_text = qr/\A ( [^\n]*? (?: \n | (?= $tag_start ) | \z ) ) /xms;
+
+    my $in_tag = 0;
 
     while($_) {
-        if($lex_line && s/$lex_line//xms) {
+        if($in_tag) {
+            if(s/$lex_tag_end//xms) {
+                $in_tag = 0;
+
+                my($code, $chomp) = ($1, $2);
+
+                push @tokens, [ code => _trim($code) ];
+                if($chomp) {
+                    push @tokens, [ postchomp => $chomp ];
+                }
+            }
+            else {
+                $self->near_token((split /\n/, $_)[0]);
+                $self->_error("Malformed templates");
+            }
+        }
+        # not $in_tag
+        elsif($lex_line_code && s/$lex_line_code//xms) {
             push @tokens,
                 [ code => _trim($1) ];
         }
-        elsif(s/$lex_tag//xms) {
-            my($text, $prechomp, $code, $postchomp) = ($1, $2, $3, $4);
-            if($text){
-                push @tokens, [ text => $text ];
-            }
-            if($prechomp) {
-                push @tokens, [ 'prechomp' ];
-            }
-            push @tokens, [ code => _trim($code) ];
+        elsif(s/$lex_tag_start//xms) {
+            $in_tag = 1;
 
-            if($postchomp) {
-                push @tokens, [ 'postchomp' ];
+            my $chomp = $1;
+            if($chomp) {
+                push @tokens, [ prechomp => $chomp ];
             }
         }
         elsif(s/$lex_text//xms) {
             push @tokens, [ text => $1 ];
         }
         else {
-            push @tokens, [ text => $_ ];
-            last;
+            confess "Oops: Unreached code, near" . p($_);
         }
     }
-
-    ## tokens: @tokens
+    #p(\@tokens);
     return \@tokens;
 }
 
@@ -342,14 +367,15 @@ sub parse {
 
 sub BUILD {
     my($parser) = @_;
-    $parser->_define_basic_symbols();
-    $parser->define_symbols();
+    $parser->_init_basic_symbols();
+    $parser->init_symbols();
+    $parser->init_iterator_elements();
     return;
 }
 
 # The grammer
 
-sub _define_basic_symbols {
+sub _init_basic_symbols {
     my($parser) = @_;
 
     $parser->symbol('(end)')->is_block_end(1); # EOF
@@ -360,26 +386,32 @@ sub _define_basic_symbols {
     $s->arity('variable');
     $s->set_nud(\&nud_literal);
 
-    $parser->symbol('(literal)')->set_nud(\&nud_literal);
+    $s = $parser->symbol('(literal)');
+    $s->arity('literal');
+    $s->set_nud(\&nud_literal);
 
     $parser->symbol(';');
     $parser->symbol('(');
     $parser->symbol(')');
-    $parser->symbol(',');
-    $parser->symbol('=>');
+    $parser->symbol(',')  ->is_comma(1);
+    $parser->symbol('=>') ->is_comma(1);
 
     # common commands
     $parser->symbol('print')    ->set_std(\&std_command);
     $parser->symbol('print_raw')->set_std(\&std_command);
 
     # common constants
-    $parser->define_constant('nil', undef);
+    $parser->define_constant(nil   => undef);
+    $parser->define_constant(true  => 1);
+    $parser->define_constant(false => 0);
 
     return;
 }
 
-sub define_basic_operators {
+sub init_basic_operators {
     my($parser) = @_;
+
+    # define operator precedence
 
     $parser->prefix('{', 256, \&nud_brace);
     $parser->prefix('[', 256, \&nud_brace);
@@ -410,17 +442,17 @@ sub define_basic_operators {
     $parser->infix('==', 150)->is_logical(1);
     $parser->infix('!=', 150)->is_logical(1);
 
-    $parser->infix('|',  140); # filter
+    $parser->infix('|',  140, \&led_bar);
 
-    $parser->infixr('&&', 130)->is_logical(1);
+    $parser->infix('&&', 130)->is_logical(1);
 
-    $parser->infixr('||', 120)->is_logical(1);
-    $parser->infixr('//', 120)->is_logical(1);
+    $parser->infix('||', 120)->is_logical(1);
+    $parser->infix('//', 120)->is_logical(1);
     $parser->infix('min', 120);
     $parser->infix('max', 120);
 
     $parser->symbol(':');
-    $parser->infix('?', 110, \&led_ternary);
+    $parser->infixr('?', 110, \&led_ternary);
 
     $parser->assignment('=',   100);
     $parser->assignment('+=',  100);
@@ -440,7 +472,7 @@ sub define_basic_operators {
     return;
 }
 
-sub define_symbols {
+sub init_symbols {
     my($parser) = @_;
 
     # syntax specific separators
@@ -450,10 +482,9 @@ sub define_symbols {
     $parser->symbol('else');
     $parser->symbol('with');
     $parser->symbol('::');
-    $parser->symbol('($_)'); # default topic variable
 
     # operators
-    $parser->define_basic_operators();
+    $parser->init_basic_operators();
 
     # statements
     $parser->symbol('{')        ->set_std(\&std_block);
@@ -470,11 +501,30 @@ sub define_symbols {
 
     $parser->symbol('cascade')  ->set_std(\&std_cascade);
     $parser->symbol('macro')    ->set_std(\&std_proc);
-    $parser->symbol('block')    ->set_std(\&std_proc);
     $parser->symbol('around')   ->set_std(\&std_proc);
     $parser->symbol('before')   ->set_std(\&std_proc);
     $parser->symbol('after')    ->set_std(\&std_proc);
+    $parser->symbol('block')    ->set_std(\&std_macro_block);
     $parser->symbol('super')    ->set_std(\&std_marker);
+    $parser->symbol('override') ->set_std(\&std_override);
+
+    return;
+}
+
+sub init_iterator_elements {
+    my($parser) = @_;
+
+    $parser->iterator_element({
+        index     => \&iterator_index,
+        count     => \&iterator_count,
+        is_first  => \&iterator_is_first,
+        is_last   => \&iterator_is_last,
+        body      => \&iterator_body,
+        size      => \&iterator_size,
+        max       => \&iterator_max,
+        peep_next => \&iterator_peep_next,
+        peep_prev => \&iterator_peep_prev,
+    });
 
     return;
 }
@@ -503,8 +553,8 @@ sub advance {
     my($parser, $id) = @_;
 
     my $t = $parser->token;
-    if($id && $t->id ne $id) {
-        $parser->_error("Expected '$id' but '$t'");
+    if(defined($id) && $t->id ne $id) {
+        $parser->_unexpected(value_to_literal($id), $t);
     }
 
     $parser->near_token($t);
@@ -572,16 +622,18 @@ sub expression_list {
     my($parser) = @_;
 
     my @args;
-    if($parser->token->id ne ")") {
-        while(1) {
-            push @args, $parser->expression(0);
-            my $t = $parser->token;
 
-            if(!($t->id eq "," or $t->id eq "=>")) {
+    if($parser->token->has_nud or $parser->token->is_comma) {
+        while(1) {
+            if($parser->token->has_nud) {
+                push @args, $parser->expression(0);
+            }
+
+            if(!$parser->token->is_comma) {
                 last;
             }
 
-            $parser->advance(); # "," or "=>"
+            $parser->advance(); # comma
         }
     }
     return \@args;
@@ -639,9 +691,9 @@ sub led_ternary {
     my $cond = $symbol->clone(arity => 'ternary');
 
     $cond->first($left);
-    $cond->second($parser->expression(0));
+    $cond->second($parser->expression( $cond->lbp - 1 ));
     $parser->advance(":");
-    $cond->third($parser->expression(0));
+    $cond->third($parser->expression( $cond->lbp - 1 ));
     return $cond;
 }
 
@@ -662,16 +714,16 @@ sub led_dot {
 
     my $t = $parser->token;
     if(!$parser->is_valid_field($t)) {
-        $parser->_error("Expected a field name but $_ ($t)");
+        $parser->_unexpected("a field name", $t);
     }
 
-    my $dot = $symbol->clone(arity => 'binary');
-
-    $dot->first($left);
-    $dot->second($t->clone(arity => 'literal'));
+    my $dot = $symbol->clone(
+        arity  => 'binary',
+        first  => $left,
+        second => $t->clone(arity => 'literal'),
+    );
 
     $t = $parser->advance();
-
     if($t->id eq "(") {
         $parser->advance(); # "("
         $dot->third( $parser->expression_list() );
@@ -702,6 +754,17 @@ sub led_call {
 
     $call->second( $parser->expression_list() );
     $parser->advance(")");
+
+    return $call;
+}
+
+sub led_bar { # filter
+    my($parser, $symbol, $left) = @_;
+
+    my $call = $symbol->clone(arity => 'call');
+
+    $call->first($parser->expression($call->lbp));
+    $call->second([$left]);
 
     return $call;
 }
@@ -817,12 +880,10 @@ sub nud_function{
 }
 
 sub define_function {
-    my($compiler, @names) = @_;
+    my($parser, @names) = @_;
 
     foreach my $name(@names) {
-        my $symbol = $compiler->symbol($name);
-        $symbol->set_nud(\&nud_function);
-        $symbol->value($name);
+        $parser->symbol($name)->set_nud(\&nud_function);
     }
     return;
 }
@@ -834,12 +895,10 @@ sub nud_macro{
 }
 
 sub define_macro {
-    my($compiler, @names) = @_;
+    my($parser, @names) = @_;
 
     foreach my $name(@names) {
-        my $symbol = $compiler->symbol($name);
-        $symbol->set_nud(\&nud_macro);
-        $symbol->value($name);
+        $parser->symbol($name)->set_nud(\&nud_macro);
     }
     return;
 }
@@ -856,8 +915,7 @@ sub finish_statement {
 
     my $t = $parser->token;
     if(!($t->is_block_end or $t->id eq ";")) {
-        $parser->_error("Unexpected token (the statement seems to finish): "
-        . $t->id . " (" . $t->arity . ")");
+        $parser->_unexpected("a semicolon or block end", $t);
     }
 
     return;
@@ -894,10 +952,8 @@ sub statements { # process statements
     my($parser) = @_;
     my @a;
 
-    my $t = $parser->token;
-    while(!$t->is_block_end) {
+    for(my $t = $parser->token; !$t->is_block_end; $t = $parser->token) {
         push @a, $parser->statement();
-        $t = $parser->token;
     }
 
     return \@a;
@@ -935,6 +991,40 @@ sub nud_brace {
         arity => 'objectliteral',
         first => $list,
     );
+}
+
+# iterator variables ($~iterator)
+# $~iterator . NAME | NAME()
+sub nud_iterator {
+    my($parser, $symbol) = @_;
+
+    my $iterator = $symbol->clone();
+    if($parser->token->id eq ".") {
+        $parser->advance();
+
+        my $t = $parser->token;
+        if(!any_in($t->arity, qw(variable name))) {
+            $parser->_unexpected("a field name", $t);
+        }
+
+        my $generator = $parser->iterator_element->{$t->id};
+        if(!$generator) {
+            $parser->_error("Undefined iterator element: $t");
+        }
+
+        $parser->advance(); # element name
+
+        if($parser->token->id eq "(") {
+            $parser->advance();
+            # iterator elements are a psudo method,
+            # so they take no arguments.
+            $parser->advance(")");
+        }
+
+        $iterator->second($t);
+        return $generator->($parser, $iterator);
+    }
+    return $iterator;
 }
 
 sub std_block {
@@ -980,11 +1070,12 @@ sub std_block {
 # ->      { STATEMENTS }
 #         { STATEMENTS }
 sub pointy {
-    my($parser, $node) = @_;
+    my($parser, $node, $in_for) = @_;
 
     my @vars;
 
     $parser->new_scope();
+
     if($parser->token->id eq "->") {
         $parser->advance("->");
         if($parser->token->id ne "{") {
@@ -996,6 +1087,11 @@ sub pointy {
             while($t->arity eq "variable") {
                 push @vars, $t;
                 $parser->define($t);
+
+                if($in_for) {
+                    $parser->define_iterator($t);
+                }
+
                 $t = $parser->advance();
 
                 if($t->id eq ",") {
@@ -1019,12 +1115,31 @@ sub pointy {
     return;
 }
 
+sub iterator_name {
+    my($parser, $var) = @_;
+    # $foo -> $~foo
+    (my $it_name = $var->id) =~ s/\A (\$?) /${1}~/xms;
+    return $it_name;
+}
+
+sub define_iterator {
+    my($parser, $var) = @_;
+
+    my $it = $parser->symbol( $parser->iterator_name($var) )->clone(
+        arity => 'iterator',
+        first => $var,
+    );
+    $parser->define($it);
+    $it->set_nud(\&nud_iterator);
+    return $it;
+}
+
 sub std_for {
     my($parser, $symbol) = @_;
 
     my $proc = $symbol->clone(arity => 'for');
     $proc->first( $parser->expression(0) );
-    $parser->pointy($proc);
+    $parser->pointy($proc, 1);
     return $proc;
 }
 
@@ -1040,17 +1155,41 @@ sub std_while {
 sub std_proc {
     my($parser, $symbol) = @_;
 
-    my $proc = $symbol->clone(arity => "proc");
-    my $name = $parser->token;
+    my $macro = $symbol->clone(arity => "proc");
+    my $name  = $parser->token;
     if($name->arity ne "name") {
-        $parser->_error("Expected a name but " . $parser->token);
+        $parser->_unexpected("a name", $name);
     }
 
     $parser->define_macro($name->id);
-    $proc->first( $name->id );
+    $macro->first( $parser->nud_macro($name) );
     $parser->advance();
-    $parser->pointy($proc);
-    return $proc;
+    $parser->pointy($macro);
+    return $macro;
+}
+
+sub std_macro_block {
+    my($parser, $symbol) = @_;
+
+    my $macro = $parser->std_proc($symbol);
+
+    my $call  = $symbol->clone(
+        arity  => 'call',
+        first  => $macro->first, # name
+        second => [],            # args
+    );
+    my $print = $parser->symbol('print')->clone(
+        arity => 'command',
+        first => [$call],
+    );
+    # std() returns a list
+    return( $macro, $print );
+}
+
+sub std_override { # synonym to 'around'
+    my($parser, $symbol) = @_;
+
+    return $parser->std_proc($symbol->clone(id => 'around'));
 }
 
 sub std_if {
@@ -1109,7 +1248,7 @@ sub std_given {
     my $else;
     foreach my $when(@{$proc->third}) {
         if($when->arity ne "when") {
-            $parser->_error("Expected when blocks", $when);
+            $parser->_unexpected("when blocks", $when);
         }
         $when->arity("if");
 
@@ -1195,12 +1334,12 @@ sub std_command {
     return $symbol->clone(first => $args, arity => 'command');
 }
 
-sub _get_bare_name {
+sub barename {
     my($parser) = @_;
 
     my $t = $parser->token;
     if(!any_in($t->arity, qw(name literal))) {
-        $parser->_error("Expected name or string literal");
+        $parser->_unexpected("a name or string literal", $t)
     }
 
     # "string" is ok
@@ -1221,7 +1360,7 @@ sub _get_bare_name {
             $t = $parser->advance(); # "::"
 
             if($t->arity ne "name") {
-                $parser->_error("Expected a name but $t");
+                $parser->_unexpected("a name", $t);
             }
 
             push @parts, $t->id;
@@ -1250,17 +1389,17 @@ sub std_cascade {
 
     my $base;
     if($parser->token->id ne "with") {
-        $base = $parser->_get_bare_name();
+        $base = $parser->barename();
     }
 
     my $components;
     if($parser->token->id eq "with") {
         $parser->advance(); # "with"
 
-        my @c = $parser->_get_bare_name();
+        my @c = $parser->barename();
         while($parser->token->id eq ",") {
             $parser->advance(); # ","
-            push @c, $parser->_get_bare_name();
+            push @c, $parser->barename();
         }
         $components = \@c;
     }
@@ -1269,10 +1408,11 @@ sub std_cascade {
 
     $parser->finish_statement();
     return $symbol->clone(
+        arity  => 'cascade',
         first  => $base,
         second => $components,
         third  => $vars,
-        arity  => 'cascade');
+    );
 }
 
 # markers for the compiler
@@ -1282,13 +1422,169 @@ sub std_marker {
     return $symbol->clone(arity => 'marker');
 }
 
+# iterator elements
+
+sub iterator_index {
+    my($parser, $iterator) = @_;
+
+    # $~iterator itself
+    return $iterator;
+}
+
+sub iterator_count {
+    my($parser, $iterator) = @_;
+
+    my $one = $parser->symbol('(literal)')->clone(
+        value => 1,
+    );
+
+    # $~iterator + 1
+    return $parser->symbol('+')->clone(
+        arity  => 'binary',
+        first  => $iterator,
+        second => $one,
+    );
+}
+
+sub iterator_is_first {
+    my($parser, $iterator) = @_;
+
+    my $zero = $parser->symbol('(literal)')->clone(
+        id => 0,
+    );
+
+    # $~iterator == 0
+    return $parser->symbol('==')->clone(
+        arity  => 'binary',
+        first  => $iterator,
+        second => $zero,
+    );
+}
+
+sub iterator_is_last {
+    my($parser, $iterator) = @_;
+
+    my $max = $parser->iterator_max($iterator);
+
+    # $~iterator == $~iterator.max
+    return $parser->symbol('==')->clone(
+        arity  => 'binary',
+        first  => $iterator,
+        second => $max,
+    );
+}
+
+sub iterator_body {
+    my($parser, $iterator) = @_;
+
+    return $iterator->clone(
+        arity => 'iterator_body',
+    );
+}
+
+sub iterator_size {
+    my($parser, $iterator) = @_;
+
+    my $body = $parser->iterator_body($iterator);
+
+    # __builtin_size($~iterator.body)
+    return $parser->symbol('size')->clone(
+        arity => 'unary',
+        first => $body,
+    );
+}
+
+sub iterator_max {
+    my($parser, $iterator) = @_;
+
+    my $size = $parser->iterator_size($iterator);
+
+    my $one = $parser->symbol('(literal)')->clone(
+        id => 1,
+    );
+
+    # $~iterator.size - 1
+    return $parser->symbol('-')->clone(
+        arity  => 'binary',
+        first  => $size,
+        second => $one,
+    );
+}
+
+sub _iterator_peep {
+    my($parser, $iterator, $pos) = @_;
+
+    my $body  = $parser->iterator_body($iterator);
+    my $index = $parser->iterator_index($iterator);
+    my $value = $parser->symbol('(literal)')->clone(
+        id => $pos,
+    );
+
+    my $next_index = $parser->symbol('+')->clone(
+        arity  => 'binary',
+        first  => $index,
+        second => $value,
+    );
+
+    # $~iterator.body[ $~iterator.index + $value ]
+    return $parser->symbol('[')->clone(
+        arity  => 'binary',
+        first  => $body,
+        second => $next_index,
+    );
+}
+
+sub iterator_peep_next {
+    my($parser, $iterator) = @_;
+    return $parser->_iterator_peep($iterator, +1);
+}
+
+sub iterator_peep_prev {
+    my($parser, $iterator) = @_;
+    my $prev =  $parser->_iterator_peep($iterator, -1);
+
+    my $is_first = $parser->iterator_is_first($iterator);
+    my $nil      = $parser->symbol('nil')->clone(
+        arity => 'literal',
+        value => undef,
+    );
+
+    # $~iterator.is_first ? nil : <prev>
+    return $parser->symbol('?')->clone(
+        arity  => 'ternary',
+        first  => $is_first,
+        second => $nil,
+        third  => $prev,
+    );
+}
+
+# utils
+
+sub _unexpected {
+    my($parser, $expected, $got) = @_;
+    if(defined($got) && $got ne ";") {
+        $got = sprintf '%s (%s)', $got->id, $got->arity
+            if ref $got;
+        $parser->_error("Expected $expected but got $got");
+     }
+     else {
+        $parser->_error("Expected $expected");
+     }
+}
+
 sub _error {
     my($self, $message, $near) = @_;
 
     $near ||= $self->near_token;
+    if($near ne ";") {
+        $near = sprintf ' near %s (%s)', $near->id, $near->arity
+            if ref($near);
+    }
+    else {
+        $near = '';
+    }
     Carp::croak(sprintf 'Xslate::Parser(%s:%d): %s%s while parsing templates',
-        $self->file, $self->line+1, $message,
-        $near ne ';' ? ", near '$near'" : '');
+        $self->file, $self->line+1, $message, $near);
 }
 
 no Any::Moose;

@@ -11,35 +11,37 @@ use Test::More;
 foreach my $mod(qw(Text::Xslate Text::MicroTemplate)){
     print $mod, '/', $mod->VERSION, "\n";
 }
-
 my $n = shift(@ARGV) || 10;
 
 my $tx = Text::Xslate->new();
-$tx->load_string(<<'T' x $n);
-: for $h.keys() -> $k {
-[<: $k :>]
+$tx->load_string(<<'TX');
+: macro fib -> $n {
+:     $n <= 1 ? 1 : fib($n - 1) + fib($n - 2);
 : }
-T
+: fib($x);
+TX
 
-my $mt = build_mt(<<'T' x $n);
-? for my $k(sort keys %{ $_[0]->{h} }) {
-[<?= $k ?>]
+my $mt = build_mt(<<'MT');
+? sub fib {
+?     my($n) = @_;
+?     $n <= 1 ? 1 : fib($n - 1) + fib($n - 2);
 ? }
-T
-
-my $subst_tmpl = qq{Hello, %value% world!\n} x $n;
+?= fib($_[0]->{x})
+MT
 
 my $vars = {
-    h => { %ENV },
+    x => $n,
 };
 
 {
     plan tests => 1;
-    is $mt->($vars), $tx->render(undef, $vars), 'MT'
-        or exit(1);
+    my $out = $mt->($vars);
+    chomp $out;
+    is $out, $tx->render(undef, $vars), 'MT'
+        or die;
 }
 # suppose PSGI response body
-
+print "fib($n) = ", $tx->render(undef, $vars), "\n";
 cmpthese -1 => {
     xslate => sub {
         my $body = [$tx->render(undef, $vars)];
