@@ -1,10 +1,25 @@
 Revision history for Perl extension Text::Xslate
 
+0.1027 Fri Jun  4 15:09:47 2010
+    [CHANGES]
+    - s/peep/peek/, which is really what I want
+
+    [BUG FIXES]
+    - Ternary operators could cause problems in PP::Booster, again (makamaka)
+    - "or" and "and" operators could cause problems in given-when
+
 0.1026 Thu Jun  3 22:04:02 2010
     [CHANGES]
     - Metakolon's line code has been changed to %% like TT3 and TTerse
     - The default cache_dir is chaned to "$HOME/.xslate_cache"
     - Error messages are improved
+
+    [BUG FIXES]
+    - Empty hash/array literals ware not allowed
+    - There ware several edge-case issues in string literals
+    - The precedence of the ternary operator was wrong
+    - Resolve issue #5: [% "foo' %] was silently accepted
+    - Ternary operators could cause problems in PP::Booster (makamaka)
 
     [NEW FEATURES]
     - Macros can be called with the filter operator (e.g. expr | my_macro)
@@ -18,12 +33,6 @@ Revision history for Perl extension Text::Xslate
           is_first/first, is_last/last, peep_next/next, and peep_prev/prev.
         + MACRO foo(...) BLOCK ... END syntax
         + WRAPPER "foo.tt" ... END syntax
-
-    [BUG FIXES]
-    - Empty hash/array literals ware not allowed
-    - There ware several edge-case issues in string literals
-    - The precedence of the ternary operator was wrong
-    - Resolve issue #5: [% "foo' %] was silently accepted
 
 0.1025 Mon May 31 20:29:50 2010
     - Support 5.8.1

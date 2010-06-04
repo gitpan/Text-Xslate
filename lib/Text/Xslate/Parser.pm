@@ -94,7 +94,7 @@ has token => (
     init_arg => undef,
 );
 
-has next_token => ( # to peep the next token
+has next_token => ( # to peek the next token
     is  => 'rw',
     isa => 'Maybe[ArrayRef]',
 
@@ -380,16 +380,21 @@ sub _init_basic_symbols {
 
     $parser->symbol('(end)')->is_block_end(1); # EOF
 
-    $parser->symbol('(name)');
+    # prototypes of value symbols
+    my $s;
+    $s = $parser->symbol('(name)');
+    $s->arity('name');
+    $s->is_value(1);
 
-    my $s = $parser->symbol('(variable)');
+    $s = $parser->symbol('(variable)');
     $s->arity('variable');
-    $s->set_nud(\&nud_literal);
+    $s->is_value(1);
 
     $s = $parser->symbol('(literal)');
     $s->arity('literal');
-    $s->set_nud(\&nud_literal);
+    $s->is_value(1);
 
+    # common separators
     $parser->symbol(';');
     $parser->symbol('(');
     $parser->symbol(')');
@@ -466,8 +471,8 @@ sub init_basic_operators {
     $parser->assignment('//=', 100);
 
     $parser->prefix('not', 70)->is_logical(1);
-    $parser->infix('and',  60);
-    $parser->infix('or',   50);
+    $parser->infix('and',  60)->is_logical(1);
+    $parser->infix('or',   50)->is_logical(1);
 
     return;
 }
@@ -522,8 +527,8 @@ sub init_iterator_elements {
         body      => \&iterator_body,
         size      => \&iterator_size,
         max       => \&iterator_max,
-        peep_next => \&iterator_peep_next,
-        peep_prev => \&iterator_peep_prev,
+        peek_next => \&iterator_peek_next,
+        peek_prev => \&iterator_peek_prev,
     });
 
     return;
@@ -623,9 +628,9 @@ sub expression_list {
 
     my @args;
 
-    if($parser->token->has_nud or $parser->token->is_comma) {
+    if($parser->token->is_value or $parser->token->is_comma) {
         while(1) {
-            if($parser->token->has_nud) {
+            if($parser->token->is_value) {
                 push @args, $parser->expression(0);
             }
 
@@ -786,20 +791,11 @@ sub prefix {
     return $symbol;
 }
 
-sub nud_constant {
-    my($parser, $symbol) = @_;
-
-    my $c = $symbol->clone(arity => 'literal');
-    $parser->reserve($c);
-
-    return $c;
-}
-
 sub define_constant {
     my($parser, $id, $value) = @_;
 
     my $symbol = $parser->symbol($id);
-    $symbol->set_nud(\&nud_constant);
+    $symbol->arity('literal');
     $symbol->value($value);
     return;
 }
@@ -807,6 +803,12 @@ sub define_constant {
 sub new_scope {
     my($parser) = @_;
     push @{ $parser->scope }, {};
+    return;
+}
+
+sub pop_scope {
+    my($parser) = @_;
+    pop @{ $parser->scope };
     return;
 }
 
@@ -849,6 +851,7 @@ sub reserve { # reserve a name to the scope
     }
     $top->{$symbol->id} = $symbol;
     $symbol->reserved(1);
+    #$symbol->scope($top);
     return $symbol;
 }
 
@@ -864,7 +867,7 @@ sub define { # define a name to the scope
     $top->{$symbol->id} = $symbol;
 
     $symbol->reserved(0);
-    $symbol->set_nud(\&nud_literal);
+    $symbol->remove_nud();
     $symbol->remove_led();
     $symbol->remove_std();
     $symbol->lbp(0);
@@ -872,41 +875,33 @@ sub define { # define a name to the scope
     return $symbol;
 }
 
-
 sub nud_function{
-    my($p, $s) = @_;
-    my $f = $s->clone(arity => 'function');
-    return $p->reserve($f);
+    my($parser, $s) = @_;
+    return $s->clone(arity => 'function');
 }
 
 sub define_function {
     my($parser, @names) = @_;
 
     foreach my $name(@names) {
-        $parser->symbol($name)->set_nud(\&nud_function);
+        my $s = $parser->symbol($name);
+        $s->set_nud(\&nud_function);
     }
     return;
 }
 
 sub nud_macro{
-    my($p, $s) = @_;
-    my $f = $s->clone(arity => 'macro');
-    return $p->reserve($f);
+    my($parser, $s) = @_;
+    return $s->clone(arity => 'macro');
 }
 
 sub define_macro {
     my($parser, @names) = @_;
 
     foreach my $name(@names) {
-        $parser->symbol($name)->set_nud(\&nud_macro);
+        my $s = $parser->symbol($name);
+        $s->set_nud(\&nud_macro);
     }
-    return;
-}
-
-
-sub pop_scope {
-    my($parser) = @_;
-    pop @{ $parser->scope };
     return;
 }
 
@@ -965,11 +960,6 @@ sub block {
     $parser->advance("{");
     # std() returns a list of nodes
     return [$t->std($parser)];
-}
-
-sub nud_literal {
-    my($parser, $symbol) = @_;
-    return $symbol; # as is
 }
 
 sub nud_paren {
@@ -1435,7 +1425,7 @@ sub iterator_count {
     my($parser, $iterator) = @_;
 
     my $one = $parser->symbol('(literal)')->clone(
-        value => 1,
+        id => 1,
     );
 
     # $~iterator + 1
@@ -1511,7 +1501,7 @@ sub iterator_max {
     );
 }
 
-sub _iterator_peep {
+sub _iterator_peek {
     my($parser, $iterator, $pos) = @_;
 
     my $body  = $parser->iterator_body($iterator);
@@ -1534,14 +1524,14 @@ sub _iterator_peep {
     );
 }
 
-sub iterator_peep_next {
+sub iterator_peek_next {
     my($parser, $iterator) = @_;
-    return $parser->_iterator_peep($iterator, +1);
+    return $parser->_iterator_peek($iterator, +1);
 }
 
-sub iterator_peep_prev {
+sub iterator_peek_prev {
     my($parser, $iterator) = @_;
-    my $prev =  $parser->_iterator_peep($iterator, -1);
+    my $prev =  $parser->_iterator_peek($iterator, -1);
 
     my $is_first = $parser->iterator_is_first($iterator);
     my $nil      = $parser->symbol('nil')->clone(

@@ -35,6 +35,11 @@ has value => (
 
     lazy    => 1,
     builder => 'id',
+    trigger => sub {
+        my($self) = @_;
+        $self->is_value(1);
+        return;
+    },
 #    default => sub{
 #        if(!defined $_[0]) { #XXX: Any::Moose::XS's bug
 #            my(undef, $file, $line) = caller;
@@ -45,24 +50,15 @@ has value => (
 #   },
 );
 
-has is_block_end => (
-    is  => 'rw',
-    isa => 'Bool',
-
-    required => 0,
-);
-
-has is_comma => (
-    is  => 'rw',
-    isa => 'Bool',
-
-    required => 0,
-);
-
-has is_logical => (
-    is  => 'rw',
-    isa => 'Bool',
-
+# flags
+has [
+        'is_block_end', # block ending markers
+        'is_logical',   # logical operators
+        'is_comma',     # comma like operators
+        'is_value',     # symbols with values
+    ] => (
+    is       => 'rw',
+    isa      => 'Bool',
     required => 0,
 );
 
@@ -74,6 +70,12 @@ has nud => ( # null denotation
     reader    => 'get_nud',
     predicate => 'has_nud',
     clearer   => 'remove_nud',
+
+    trigger => sub{
+        my($self) = @_;
+        $self->is_value(1);
+        return;
+    },
 
     lazy_build => 1,
 
@@ -150,8 +152,6 @@ has reserved => (
 #    is  => 'rw',
 #    isa => 'HashRef',
 #
-#    weak_ref => 1,
-#
 #    required => 0,
 #);
 
@@ -181,7 +181,7 @@ sub _build_std {
 
 sub _nud_default {
     my($parser, $symbol) = @_;
-    return $symbol->clone(first => $parser->token);
+    return $symbol; # as is
 }
 
 sub _led_default {

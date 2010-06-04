@@ -387,7 +387,6 @@ sub _flush_macro_table {
 
 sub _generate_name {
     my($self, $node) = @_;
-
     $self->_error("Undefined symbol '$node'", $node);
 }
 
@@ -692,19 +691,18 @@ sub _generate_binary {
             [ fetch_field_s => $node->second->id ];
     }
     elsif(exists $binary{$id}) {
-        # eval lhs
-        my @code = $self->_expr($node->first);
-        push @code, [ save_to_lvar => $self->lvar_id ];
+        my @lhs = $self->_expr($node->first);
 
-        # eval rhs
         $self->lvar_use(1);
-        push @code, $self->_expr($node->second);
+        my @rhs = $self->_expr($node->second);
         $self->lvar_release(1);
-
-        # execute op
-        push @code,
+        my @code = (
+            @lhs,
+            [ save_to_lvar => $self->lvar_id ],
+            @rhs,
             [ load_lvar_to_sb => $self->lvar_id ],
-            [ $binary{$id}   => undef ];
+            [ $binary{$id}   => undef ],
+        );
 
         if(any_in($id, qw(min max))) {
             splice @code, -1, 0,
@@ -714,6 +712,14 @@ sub _generate_binary {
                 [ load_lvar_to_sb => $self->lvar_id, undef, "$id on false" ],
                 # fall through
                 [ move_from_sb    => undef, undef, "$id on true" ],
+        }
+
+        if($self->optimize
+            and @lhs == 1 and $lhs[0][0] eq 'literal' and defined($lhs[0][1])
+            and @rhs == 1 and $rhs[0][0] eq 'literal' and defined($rhs[0][1])
+            ) {
+
+            @code = $self->_fold_constants(@code);
         }
         return @code;
     }
@@ -838,6 +844,18 @@ sub _variable_to_value {
 }
 
 # optimizatin stuff
+
+sub _fold_constants {
+    my($self, @code) = @_;
+
+    return @code;
+
+    my $engine = $self->engine or return @code;
+
+    push @code, ['print_raw'];
+    $engine->_assemble(\@code, undef, undef, undef, undef);
+    return [ literal => $engine->render(undef), undef, "optimized by constant folding"];
+}
 
 my %goto_family;
 @goto_family{qw(
