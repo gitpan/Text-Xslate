@@ -7,6 +7,9 @@ use Text::Xslate;
 use Text::Xslate::Compiler;
 use t::lib::Util;
 
+my $perl_warnings = '';
+local $SIG{__WARN__} = sub{ $perl_warnings .= "@_" };
+
 my $warn = '';
 sub my_warn { $warn .= "@_" }
 
@@ -27,6 +30,8 @@ foreach my $code(
     q{ $a[nil] },
     q{ nil | raw },
     q{ nil | html },
+    q{ 1 ? raw(nil)  : "UNLIKELY" },
+    q{ 1 ? html(nil) : "UNLIKELY" },
 ) {
     $warn = '';
 
@@ -50,6 +55,16 @@ like $warn, qr/DIE/, $warn;
 like $warn, qr/at $FILE line \d+/, 'warns come from the file';
 is $@,  '';
 
+$warn = '';
+$out = eval {
+    $tx->render_string('<: constant FOO = 42; FOO[0] :>');
+};
+
+is $out, '', 'warn in render_string()';
+like $warn, qr/not a container/;
+like $warn, qr/at $FILE line \d+/, 'warns come from the file';
+is $@,  '';
+
 
 note 'verbose => 2';
 
@@ -67,6 +82,8 @@ foreach my $code(
     q{ $a[nil] },
     q{ nil | raw },
     q{ nil | html },
+    q{ 1 ? raw(nil)  : "UNLIKELY" },
+    q{ 1 ? html(nil) : "UNLIKELY" },
 ) {
     $warn = '';
     my $out = eval {
@@ -100,5 +117,6 @@ like $warn, qr/requires exactly 0 argument/;
 like $warn, qr/at $FILE line \d+/, 'warns come from the file';
 is $@,  '';
 
+is $perl_warnings, '', "Perl doesn't produce warnings";
 
 done_testing;

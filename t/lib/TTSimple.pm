@@ -18,6 +18,7 @@ if(USE_TT) {
     require Template;
     $tt = Template->new(
         INCLUDE_PATH => path,
+        ANYCASE      => 1,
     );
 }
 else {
@@ -28,6 +29,8 @@ else {
             cache_dir =>  path,
             cache     =>  0,
             syntax    => 'TTerse',
+            warn_handler => \&Carp::confess,
+            die_handler  => \&Carp::confess,
     );
 }
 

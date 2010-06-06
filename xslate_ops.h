@@ -43,7 +43,7 @@ TXC(lt);
 TXC(le);
 TXC(gt);
 TXC(ge);
-TXC(macrocall);
+TXC_w_int(macrocall);
 TXC_w_key(macro_begin);
 TXC(macro_end);
 TXC_w_key(macro);
@@ -215,7 +215,7 @@ static const U8 tx_oparg[] = {
     0U, /* le */
     0U, /* gt */
     0U, /* ge */
-    0U, /* macrocall */
+    TXCODE_W_INT, /* macrocall */
     TXCODE_W_KEY, /* macro_begin */
     0U, /* macro_end */
     TXCODE_W_KEY, /* macro */

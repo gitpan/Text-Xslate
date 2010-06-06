@@ -290,16 +290,15 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
 static SV*
 tx_escaped_string(pTHX_ SV* const str) {
     dMY_CXT;
-    SV* const sv = sv_newmortal();
-    sv_copypv(sv, str);
-    return sv_2mortal(sv_bless(newRV_inc(sv), MY_CXT.escaped_string_stash));
+    SV* const sv = newSVsv(str);
+    return sv_2mortal(sv_bless(newRV_noinc(sv), MY_CXT.escaped_string_stash));
 }
 
 static bool
 tx_str_is_escaped(pTHX_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
         dMY_CXT;
-        return SvOK(SvRV(sv))
+        return SvTYPE(SvRV(sv)) <= SVt_PVMG
             && SvSTASH(SvRV(sv)) == MY_CXT.escaped_string_stash;
     }
     return FALSE;
@@ -438,7 +437,12 @@ TXC(print) {
     SV* const output      = TX_st->output;
 
     if(tx_str_is_escaped(aTHX_ sv)) {
-        sv_catsv_nomg(output, SvRV(sv));
+        if(SvOK(SvRV(sv))) {
+            sv_catsv_nomg(output, SvRV(sv));
+        }
+        else {
+            tx_warn(aTHX_ TX_st, "Use of nil to print");
+        }
     }
     else if(SvOK(sv)) {
         STRLEN len;
@@ -560,6 +564,7 @@ TXC_goto(for_iter) {
     SV* const avref = TX_lvar_get(id+2);
     AV* const av    = (AV*)SvRV(avref);
 
+    assert(SvROK(avref));
     assert(SvTYPE(av) == SVt_PVAV);
     assert(SvIOK(i));
 
@@ -757,12 +762,13 @@ TXC(ge) {
     TX_st->pc++;
 }
 
-TXC(macrocall) {
-    U32 const addr = (U32)SvUVX(TX_st_sa);
-    AV* cframe;
+TXC_w_int(macrocall) {
+    UV  const lvars = SvUVX(TX_op_arg); /* how many number of lvars copies */
+    U32 const addr  = (U32)SvUVX(TX_st_sa);
+    AV* cframe; /* new frame */
     dSP;
     dMARK;
-    I32 i;
+    UV i;
     SV* tmp;
 
     /* push a new frame */
@@ -775,6 +781,15 @@ TXC(macrocall) {
 
     /* macroname will be set by macro_begin */
     sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), TX_st->pc + 1);
+
+    if(lvars > 0) {
+        /* copies lexical variables from the old frame to the new one */
+        AV* const oframe = (AV*)AvARRAY(TX_st->frame)[TX_st->current_frame-1];
+        for(i = 0; i < lvars; i++) {
+            UV const real_ix = i + TXframe_START_LVAR;
+            av_store(cframe, real_ix , SvREFCNT_inc_NN(AvARRAY(oframe)[real_ix]));
+        }
+    }
 
     if(SP != MARK) { /* has arguments */
         dORIGMARK;

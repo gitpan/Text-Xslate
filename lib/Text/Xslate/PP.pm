@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1027';
+our $VERSION = '0.1028';
 
 use Text::Xslate::PP::Const;
 use Text::Xslate::PP::State;
@@ -19,10 +19,14 @@ our %EXPORT_TAGS = (
     backend => \@EXPORT_OK,
 );
 
-use constant _PP_BOOSTER => !scalar($DEBUG =~ /\b pp=opcode \b/xms);
+use constant _PP_OPCODE  => scalar($DEBUG =~ /\b pp=opcode  \b/xms);
+use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
 
-use if  _PP_BOOSTER, 'Text::Xslate::PP::Booster';
-use if !_PP_BOOSTER, 'Text::Xslate::PP::Opcode';
+use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
+                            : _PP_BOOSTER ? 'Booster'
+                            :               'Opcode'; # default
+
+require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
 our @OPCODE; # defined in PP::Const
 
@@ -400,7 +404,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1027.
+This document describes Text::Xslate::PP version 0.1028.
 
 =head1 DESCRIPTION
 

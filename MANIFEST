@@ -36,6 +36,7 @@ example/hello.tx
 example/list.gold
 example/list.pl
 example/list.tx
+HACKING
 inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
@@ -122,6 +123,7 @@ t/020_features/023_escape.t
 t/020_features/024_builtins.t
 t/020_features/025_localize_vars.t
 t/020_features/026_objectliteral.t
+t/020_features/027_constant.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t
@@ -137,6 +139,9 @@ t/100_tterse/010_expr.t
 t/100_tterse/011_objectliterals.t
 t/100_tterse/012_macro.t
 t/100_tterse/013_wrapper.t
+t/100_tterse/014_set.t
+t/100_tterse/015_while.t
+t/100_tterse/016_call.t
 t/400_plugin/001_import_from.t
 t/400_plugin/002_import.t
 t/400_plugin/100_error.t

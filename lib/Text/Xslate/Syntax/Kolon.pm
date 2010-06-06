@@ -123,6 +123,19 @@ Operator precedence is the same as Perl's:
     and
     or
 
+=head2 Constants
+
+You can define lexical constants with C<constant>, which requires a bare name,
+and C<my>, which requires a variable name.
+
+    : constant FOO = 42;
+    : my      $foo = 42;
+
+These two statements are exactly the same semantics, so you cannot modify
+them.
+
+    : my $foo = 42; $foo = 3.14; # compile error!
+
 =head2 Loops
 
 There is C<for> loops that are like Perl's C<foreach>.
@@ -162,19 +175,12 @@ Supported iterator elements are C<index :Int>, C<count :Int>,
 C<body : ArrayRef>, C<size : Int>, C<max :Int>, C<is_first :Bool>,
 and C<is_last :Bool>, C<peek_next :Any>, C<peek_prev :Any>.
 
-C<while> loops are also supported to iterate database-handle-like objects.
+C<while> loops are also supported in the same semantics as Perl's:
 
-    : # $obj must be an iteratable object
+    : # $obj might be an iteratable object
     : while $dbh.fetch() -> $item {
         [<: $item.field :>]
     : }
-
-Note that C<while> is B<not the same as Perl's>. In fact, the above Xslate
-C<while> code is the same as the following Perl C<while> code:
-
-    while(defined(my $item = $dbh->fetch())) {
-        ...
-    }
 
 =head2 Conditional statements
 
@@ -196,7 +202,7 @@ C<if-else>:
         $var is 1 .. 10
     : }
 
-Note that C<if> doesn't require parens, so the above code is okay:
+Note that C<if> doesn't require parens, so the following code is okay:
 
     : if ($var + 10) == 20 { } # OK
 
@@ -421,6 +427,11 @@ Note that you cannot call macros before their definitions.
     :>
 
     <: $foo # this is ok :>
+
+Comments are closed by a new line or semicolon, so the following template
+outputs "Hello".
+
+    <: # this is a comment; "Hello" :>
 
 =head1 SEE ALSO
 

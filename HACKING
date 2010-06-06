@@ -1,0 +1,20 @@
+NOTES FOR HACKERS
+
+Easy evaluation:
+    $ xslate -e 'Hello, <: $ARGV[0] :> world!' Xslate
+
+Debugging options ($ENV{XSLATE}; or --debug for xslate(1)):
+    dump=proto  Output preprocessed proto templates
+    dump=token  Output token sequence
+    dump=ast    Output abstract syntax tree
+    dump=asm    Output xslate assembly
+    dump=asm:ix Output xslate assembly with indexes
+    dump=pp     Output Perl code PP::Booster generates
+    optimize=0  Suppress optimization
+
+Parser's terminology:
+    arity  Symbol class; used while compiling
+    bp     Bond power; or operator precedence
+    nud    Null denotation; processing values and prefix operators
+    led    Left denotation; processing infix and postfix operators
+    std    Statement denotation; processing statements

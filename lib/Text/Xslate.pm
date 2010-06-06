@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1027';
+our $VERSION = '0.1028';
 
 use Text::Xslate::Util qw($DEBUG);
 
@@ -390,7 +390,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1027.
+This document describes Text::Xslate version 0.1028.
 
 =head1 SYNOPSIS
 
@@ -651,6 +651,18 @@ Although you need not call it explicitly, this function is available in
 templates as the C<html> filter:
 
     <: $var | html :>
+
+=head2 Application
+
+C<xslate(1)> is provided as an interface to the Text::Xslate module, which
+is used to process directory trees or evaluate one liners. For example:
+
+    $ xslate -D name=value -o dest_path src_path
+
+    $ xslate -e 'Hello, <: $ARGV[0] :> wolrd!' Xslate
+    $ xslate -s TTerse -e 'Hello, [% ARGV.0 %] world!' TTerse
+
+See L<xslate> for details.
 
 =head1 TEMPLATE SYNTAX
 

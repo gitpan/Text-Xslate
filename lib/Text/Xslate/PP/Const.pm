@@ -189,7 +189,7 @@ our @OPARGS = (
     0,             # le
     0,             # gt
     0,             # ge
-    0,             # macrocall
+    TXCODE_W_INT,  # macrocall
     TXCODE_W_KEY,  # macro_begin
     0,             # macro_end
     TXCODE_W_KEY,  # macro

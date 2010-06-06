@@ -55,11 +55,18 @@ sub init_symbols {
     $parser->symbol('foreach') ->set_std(\&std_foreach);
     $parser->symbol('FOR')     ->set_std(\&std_foreach);
     $parser->symbol('for')     ->set_std(\&std_foreach);
+    $parser->symbol('WHILE')   ->set_std(\&std_while);
+    $parser->symbol('while')   ->set_std(\&std_while);
 
     $parser->symbol('INCLUDE') ->set_std(\&std_include);
     $parser->symbol('include') ->set_std(\&std_include);
     $parser->symbol('WITH');
     $parser->symbol('with');
+
+    $parser->symbol('SET')     ->set_std(\&std_set);
+    $parser->symbol('set')     ->set_std(\&std_set);
+    $parser->symbol('CALL')    ->set_std(\&std_call);
+    $parser->symbol('call')    ->set_std(\&std_call);
 
     # macros
 
@@ -125,6 +132,29 @@ sub led_concat {
     return $parser->SUPER::led_infix($symbol->clone(id => '~'), $left);
 }
 
+sub led_assignment {
+    my($parser, $symbol, $left) = @_;
+
+    my $assign = $parser->led_infixr($symbol, $left);
+    $assign->arity('assign');
+    $assign->is_statement(1);
+
+    my $name = $assign->first;
+    if(not $parser->find($name->id)->is_defined) {
+        $parser->define($name);
+        $assign->third('declare');
+    }
+
+    return $assign;
+}
+
+sub assignment {
+    my($parser, $id, $bp) = @_;
+
+    $parser->symbol($id, $bp)->set_led(\&led_assignment);
+    return;
+}
+
 sub std_if {
     my($parser, $symbol) = @_;
     my $if = $symbol->clone(arity => "if");
@@ -150,12 +180,9 @@ sub std_if {
         my $elsif = $t->clone(arity => "if");
         $elsif->first(  $parser->expression(0) );
         $elsif->second( $parser->statements() );
-
         $if->third([$elsif]);
-
         $if = $elsif;
-
-        $t = $parser->token;
+        $t  = $parser->token;
     }
 
     if(uc($t->id) eq "ELSE") {
@@ -163,8 +190,8 @@ sub std_if {
         $t = $parser->advance(); # "ELSE"
 
         $if->third( uc($t->id) eq "IF"
-            ? $parser->statement()
-            : $parser->statements());
+            ? [$parser->statement()]
+            :  $parser->statements());
     }
 
 
@@ -187,20 +214,28 @@ sub std_foreach {
     }
     $parser->advance();
     $parser->advance("IN");
-
     $proc->first( $parser->expression(0) );
     $proc->second([$var]);
-
     $parser->new_scope();
-
     $parser->define_iterator($var);
-
     $proc->third( $parser->statements() );
-    $parser->pop_scope();
-
     $parser->advance("END");
-
+    $parser->pop_scope();
     return $proc;
+}
+
+sub std_while {
+    my($parser, $symbol) = @_;
+
+    my $while = $symbol->clone(arity => "while");
+
+    $while->first( $parser->expression(0) );
+    $while->second([]); # no vars
+    $parser->new_scope();
+    $while->third( $parser->statements() );
+    $parser->advance("END");
+    $parser->pop_scope();
+    return $while;
 }
 
 sub std_include {
@@ -216,7 +251,10 @@ sub localize_vars {
 
     if(uc($parser->token->id) eq "WITH") {
         $parser->advance();
-        return $parser->set_list();
+        $parser->new_scope();
+        my $vars = $parser->set_list();
+        $parser->pop_scope();
+        return $vars;
     }
     return undef;
 }
@@ -227,7 +265,7 @@ sub set_list {
     while(1) {
         my $key = $parser->token;
 
-        if(!($key->arity eq "literal" || $key->arity eq "variable")) {
+        if($key->arity ne "variable") {
             last;
         }
         $parser->advance();
@@ -235,7 +273,6 @@ sub set_list {
 
         my $value = $parser->expression(0);
 
-        $key->arity("literal");
         push @args, $key => $value;
 
         if($parser->token->id eq ",") { # , is optional
@@ -244,6 +281,34 @@ sub set_list {
     }
 
     return \@args;
+}
+
+sub std_set {
+    my($parser, $symbol) = @_;
+
+    my $set_list = $parser->set_list();
+    my @assigns;
+    for(my $i = 0; $i < @{$set_list}; $i += 2) {
+        my($name, $value) = @{$set_list}[$i, $i+1];
+        my $assign = $symbol->clone(
+            id     => '=',
+            arity  => 'assign',
+            first  => $name,
+            second => $value,
+        );
+
+        if(not $parser->find($name->id)->is_defined) {
+            $parser->define($name);
+            $assign->third('declare');
+        }
+        push @assigns, $assign;
+    }
+    return @assigns;
+}
+
+sub std_call {
+    my($parser, $symbol) = @_;
+    return $parser->expression(0);
 }
 
 sub std_macro {
@@ -262,6 +327,8 @@ sub std_macro {
 
     $proc->first($name);
     $parser->advance();
+
+    $parser->new_scope();
 
     my $paren = ($parser->token->id eq "(");
 
@@ -289,6 +356,7 @@ sub std_macro {
     $parser->advance("BLOCK");
     $proc->third( $parser->statements() );
     $parser->advance("END");
+    $parser->pop_scope();
     return $proc;
 }
 
@@ -582,6 +650,18 @@ Unlike Template-Toolkit, calling macros requires parens (C<()>).
 =head2 Template cascading
 
 Not supported.
+
+=head2 Misc.
+
+CALL evaluates expressions, but does not print it.
+
+    [% CALL expr %]
+
+SET and assignments are supported, although the use of them are strongly
+discouraged.
+
+    [% SET var1 = expr1, var2 = expr2 %]
+    [% var = expr %]
 
 =head1 SEE ALSO
 
