@@ -10,6 +10,7 @@ use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP::Const;
+use Text::Xslate::Util qw(p escaped_string html_escape);
 
 use constant TXframe_NAME       => Text::Xslate::PP::TXframe_NAME;
 use constant TXframe_OUTPUT     => Text::Xslate::PP::TXframe_OUTPUT;
@@ -26,6 +27,16 @@ no warnings 'recursion';
 
 our @CARP_NOT = qw(Text::Xslate);
 
+
+my %html_escape = (
+    '&' => '&amp;',
+    '<' => '&lt;',
+    '>' => '&gt;',
+    '"' => '&quot;',
+    "'" => '&apos;',
+);
+my $html_unsafe_chars = sprintf '[%s]', join '', map { quotemeta } keys %html_escape;
+
 #
 #
 #
@@ -40,23 +51,23 @@ sub op_move_to_sb {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-
 sub op_move_from_sb {
     $_[0]->{sa} = $_[0]->{sb};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-
 sub op_save_to_lvar {
-    $_[0]->pad( $_[0]->frame->[ $_[0]->current_frame ] );
-    tx_access_lvar( $_[0], $_[0]->pc_arg, $_[0]->{sa} );
+    tx_access_lvar( $_[0], $_[0]->op_arg, $_[0]->{sa} );
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
+sub op_load_lvar {
+    $_[0]->{sa} = tx_access_lvar( $_[0], $_[0]->op_arg );
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
 
 sub op_load_lvar_to_sb {
-    $_[0]->pad( $_[0]->frame->[ $_[0]->current_frame ] );
-    $_[0]->{sb} = tx_access_lvar( $_[0], $_[0]->pc_arg );
+    $_[0]->{sb} = tx_access_lvar( $_[0], $_[0]->op_arg );
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -67,10 +78,10 @@ sub op_load_lvar_to_sb {
     sub DESTROY { $_[0]->() }
 }
 
-sub op_local_s {
+sub op_localize_s {
     my($st) = @_;
     my $vars   = $st->{vars};
-    my $key    = $st->pc_arg;
+    my $key    = $st->op_arg;
     my $preeminent
                = exists $vars->{$key};
     my $oldval = delete $vars->{$key};
@@ -106,38 +117,21 @@ sub op_nil {
 
 
 sub op_literal {
-    $_[0]->{sa} = $_[0]->pc_arg;
+    $_[0]->{sa} = $_[0]->op_arg;
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_literal_i {
-    $_[0]->{sa} = $_[0]->pc_arg;
+    $_[0]->{sa} = $_[0]->op_arg;
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_fetch_s {
-    $_[0]->{sa} = $_[0]->{vars}->{ $_[0]->pc_arg };
+    $_[0]->{sa} = $_[0]->{vars}->{ $_[0]->op_arg };
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
-
-
-sub op_fetch_lvar {
-    my $id     = $_[0]->pc_arg;
-    my $cframe = $_[0]->frame->[ $_[0]->current_frame ];
-
-    if ( scalar @{ $cframe } < $id + TXframe_START_LVAR + 1 ) {
-        tx_error( $_[0], "Too few arguments for %s", $cframe->[ TXframe_NAME ] );
-        $_[0]->{sa} = undef;
-    }
-    else {
-        $_[0]->{sa} = tx_access_lvar( $_[0], $id );
-    }
-
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
-}
-
 
 sub op_fetch_field {
     my $var = $_[0]->{sb};
@@ -149,7 +143,7 @@ sub op_fetch_field {
 
 sub op_fetch_field_s {
     my $var = $_[0]->{sa};
-    my $key = $_[0]->pc_arg;
+    my $key = $_[0]->op_arg;
     $_[0]->{sa} = tx_fetch( $_[0], $var, $key );
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
@@ -167,13 +161,7 @@ sub op_print {
         }
     }
     elsif ( defined $sv ) {
-        if ( $sv =~ /[&<>"']/ ) {
-            $sv =~ s/&/&amp;/g;
-            $sv =~ s/</&lt;/g;
-            $sv =~ s/>/&gt;/g;
-            $sv =~ s/"/&quot;/g;
-            $sv =~ s/'/&apos;/g; # ' for poor editors
-        }
+        $sv =~ s/($html_unsafe_chars)/$html_escape{$1}/xmsgeo;
         $_[0]->{ output } .= $sv;
     }
     else {
@@ -196,7 +184,7 @@ sub op_print_raw {
 
 
 sub op_print_raw_s {
-    $_[0]->{ output } .= $_[0]->pc_arg;
+    $_[0]->{ output } .= $_[0]->op_arg;
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -212,7 +200,7 @@ sub op_include {
 
 sub op_for_start {
     my $ar = $_[0]->{sa};
-    my $id = $_[0]->pc_arg;
+    my $id = $_[0]->op_arg;
 
     unless ( $ar and ref $ar eq 'ARRAY' ) {
         if ( defined $ar ) {
@@ -223,8 +211,6 @@ sub op_for_start {
         }
         $ar = [];
     }
-
-    $_[0]->pad( $_[0]->frame->[ $_[0]->current_frame ] );
 
     #tx_access_lvar( $_[0], $id + _FOR_ITEM, undef );
     tx_access_lvar( $_[0], $id + _FOR_ITER, -1 );
@@ -254,7 +240,7 @@ sub op_for_iter {
     }
 
     # finish
-    $_[0]->{ pc } = $_[0]->pc_arg;
+    $_[0]->{ pc } = $_[0]->op_arg;
     goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -295,7 +281,7 @@ sub op_mod {
 
 
 sub op_concat {
-    my $sv = $_[0]->pc_arg;
+    my $sv = $_[0]->op_arg;
     $sv .= $_[0]->{sb} . $_[0]->{sa};
     $_[0]->{sa} = $sv;
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
@@ -306,7 +292,7 @@ sub op_and {
         goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
     }
     else {
-        $_[0]->{ pc } = $_[0]->pc_arg;
+        $_[0]->{ pc } = $_[0]->op_arg;
         goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
     }
 }
@@ -317,7 +303,7 @@ sub op_dand {
         goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
     }
     else {
-        $_[0]->{ pc } = $_[0]->pc_arg;
+        $_[0]->{ pc } = $_[0]->op_arg;
         goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
     }
 }
@@ -328,7 +314,7 @@ sub op_or {
         goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
     }
     else {
-        $_[0]->{ pc } = $_[0]->pc_arg;
+        $_[0]->{ pc } = $_[0]->op_arg;
         goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
     }
 }
@@ -337,7 +323,7 @@ sub op_or {
 sub op_dor {
     my $sv = $_[0]->{sa};
     if ( defined $sv ) {
-        $_[0]->{ pc } = $_[0]->pc_arg;
+        $_[0]->{ pc } = $_[0]->op_arg;
         goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
     }
     else {
@@ -366,8 +352,18 @@ sub op_minus {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-sub op_size {
-    $_[0]->{sa} = scalar @{ $_[0]->{sa} };
+sub op_max_index {
+    $_[0]->{sa} = scalar(@{ $_[0]->{sa} }) - 1;
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
+
+sub op_builtin_raw {
+    $_[0]->{sa} = escaped_string($_[0]->{sa});
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
+
+sub op_builtin_html {
+    $_[0]->{sa} = html_escape($_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -417,102 +413,98 @@ sub op_ge {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-
-sub op_macrocall {
-    my $lvars  = $_[0]->pc_arg;
-    my $addr   = $_[0]->{sa}; # macro entry point
-    my $cframe = tx_push_frame( $_[0] );
-
-    $cframe->[ TXframe_RETADDR ] = $_[0]->{ pc } + 1;
-
-    $cframe->[ TXframe_OUTPUT ] = $_[0]->{ output };
-
-    $_[0]->{ output } = '';
-
-    if($lvars > 0) {
-        # copies lexical variables from the old frame to the new one
-        my $oframe = $_[0]->frame->[ $_[0]->current_frame - 1 ];
-        for(my $i = 0; $i < $lvars; $i++) {
-            my $real_ix = $i + TXframe_START_LVAR;
-            $cframe->[$real_ix] = $oframe->[$real_ix];
-        }
-    }
-
-    my $i   = 0;
-
-    $_[0]->pad( $_[0]->frame->[ $_[0]->current_frame ] );
-
-    for my $val ( @{ pop @{ $_[0]->{ SP } } } ) {
-        tx_access_lvar( $_[0], $i++, $val );
-    }
-
-    $_[0]->{ pc } = $addr;
-    goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
-}
-
-
-sub op_macro_begin {
-    $_[0]->frame->[ $_[0]->current_frame ]->[ TXframe_NAME ] = $_[0]->pc_arg;
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
-}
-
-
-sub op_macro_end {
-    my $oldframe = $_[0]->frame->[ $_[0]->current_frame ];
-    my $cframe   = $_[0]->frame->[ $_[0]->current_frame( $_[0]->current_frame - 1 ) ];
-
-    $_[0]->{targ} = Text::Xslate::PP::escaped_string( $_[0]->{ output } );
-
-    $_[0]->{sa} = $_[0]->{targ};
-
-    $_[0]->{ output } = $oldframe->[ TXframe_OUTPUT ];
-
-    $_[0]->{ pc } = $oldframe->[ TXframe_RETADDR ];
-
-    goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
-}
-
-
-sub op_macro {
-    my $name = $_[0]->pc_arg;
-
-    $_[0]->{sa} = $_[0]->macro->{ $name };
-
-    unless ( defined $_[0]->{sa} ) {
-        croak("Macro %s is not defined", tx_neat(aTHX_ name));
-    }
-
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
-}
-
-
 sub op_function {
-    my $name = $_[0]->pc_arg;
+    my $name = $_[0]->op_arg;
 
     if ( my $func = $_[0]->function->{ $name } ) {
         $_[0]->{sa} = $func;
     }
     else {
-        Carp::croak( sprintf( "Function %s is not registered", $name ) );
+        Carp::croak( sprintf( "Oops: Undefined function %s", $name ) );
     }
 
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
+sub _do_macrocall {
+    my($st, $macro) = @_;
+    my $name   = $macro->name;
+    my $addr   = $macro->addr;
+    my $nargs  = $macro->nargs;
+    my $outer  = $macro->outer;
+    my $args   = pop @{ $st->{SP} };
+
+    if(@{$args} != $nargs) {
+        tx_error($st, "Wrong number of arguments for %s (%d %s %d)",
+            $name, scalar(@{$args}), scalar(@{$args}) > $nargs ? '>' : '<', $nargs);
+        $st->{ sa } = undef;
+        $st->{ pc }++;
+        return;
+    }
+
+    my $cframe = tx_push_frame( $st );
+
+    $cframe->[ TXframe_RETADDR ] = $st->{ pc } + 1;
+    $cframe->[ TXframe_OUTPUT ]  = $st->{ output };
+    $cframe->[ TXframe_NAME ]    = $name;
+
+    $_[0]->{ output } = '';
+
+    if($outer > 0) {
+        # copies lexical variables from the old frame to the new one
+        my $oframe = $_[0]->frame->[ $_[0]->current_frame - 1 ];
+        for(my $i = 0; $i < $outer; $i++) {
+            my $real_ix = $i + TXframe_START_LVAR;
+            $cframe->[$real_ix] = $oframe->[$real_ix];
+        }
+    }
+
+    my $i  = 0;
+    for my $val (@{$args}) {
+        tx_access_lvar( $_[0], $i++, $val );
+    }
+
+    $_[0]->{ pc } = $addr;
+    return;
+}
+
+sub op_macro_end {
+    my($st) = @_;
+    my $frames   = $st->frame;
+    my $oldframe = $frames->[ $st->current_frame ];
+    my $cframe   = $frames->[ $st->current_frame( $st->current_frame - 1 ) ]; # pop frame
+
+    if($st->op_arg) { # immediate macros
+        $st->{targ} = $st->{ output };
+    }
+    else {
+        $st->{targ} = escaped_string( $st->{ output } );
+    }
+
+    $st->{sa} = $st->{targ};
+
+    $st->{ output } = $oldframe->[ TXframe_OUTPUT ];
+    $st->{ pc }     = $oldframe->[ TXframe_RETADDR ];
+
+    goto $st->{ code }->[ $st->{ pc } ]->{ exec_code };
+}
 
 sub op_funcall {
     my $func = $_[0]->{sa};
-    my ( @args ) = @{ pop @{ $_[0]->{ SP } } };
-    my $ret = tx_call( $_[0], 0, $func, @args );
-    $_[0]->{targ} = $ret;
-    $_[0]->{sa} = $ret;
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    if(ref $func eq 'Text::Xslate::PP::Macro') {
+        _do_macrocall($_[0], $func);
+        goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
+    }
+    else {
+        my ( @args ) = @{ pop @{ $_[0]->{ SP } } };
+        $_[0]->{sa} = tx_call( $_[0], 0, $func, @args );
+        goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    }
 }
-
 
 sub op_methodcall_s {
     require Text::Xslate::PP::Method;
-    $_[0]->{sa} = Text::Xslate::PP::Method::tx_methodcall($_[0], $_[0]->pc_arg);
+    $_[0]->{sa} = Text::Xslate::PP::Method::tx_methodcall($_[0], $_[0]->op_arg);
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -542,22 +534,24 @@ sub op_leave {
 }
 
 sub op_goto {
-    $_[0]->{ pc } = $_[0]->pc_arg;
+    $_[0]->{ pc } = $_[0]->op_arg;
     goto $_[0]->{ code }->[ $_[0]->{ pc } ]->{ exec_code };
 }
 
-
-sub op_depend {
-    # = noop
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
-}
-
-
 sub op_end {
     $_[0]->{ pc } = $_[0]->code_len;
+
+    if($_[0]->current_frame != 0) {
+        Carp::croak("Oops: broken stack frame:" .  p($_[0]->frame));
+    }
     return;
 }
 
+sub op_depend; *op_depend = \&op_noop;
+
+sub op_macro_begin; *op_macro_begin = \&op_noop;
+sub op_macro_nargs; *op_macro_nargs = \&op_noop;
+sub op_macro_outer; *op_macro_outer = \&op_noop;
 
 #
 # INTERNAL COMMON FUNCTIONS
@@ -576,13 +570,7 @@ sub tx_push_frame {
         Carp::croak("Macro call is too deep (> 100)");
     }
 
-    $st->current_frame( $st->current_frame + 1 );
-
-    $st->frame->[ $st->current_frame ] ||= [];
-
-    $st->pad( $st->frame->[ $st->current_frame ] );
-
-    $st->frame->[ $st->current_frame ];
+    return $st->frame->[ $st->current_frame( $st->current_frame + 1 ) ] ||= [];
 }
 
 sub tx_call {

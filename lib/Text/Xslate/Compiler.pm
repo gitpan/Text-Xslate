@@ -12,7 +12,6 @@ use Text::Xslate::Util qw(
     p
 );
 
-use File::Spec   ();
 use Scalar::Util ();
 
 #use constant _VERBOSE  => scalar($DEBUG =~ /\b verbose \b/xms);
@@ -64,7 +63,7 @@ my %unary = (
     '+'   => 'noop',
     '-'   => 'minus',
 
-    'size' => 'size', # for loop context vars
+    'max_index' => 'max_index', # for loop context vars
 );
 
 has lvar_id => ( # local varialbe id
@@ -124,7 +123,7 @@ has parser => (
     is  => 'rw',
     isa => 'Object', # Text::Xslate::Parser
 
-    handles => [qw(file line define_constant define_function)],
+    handles => [qw(file line define_function)],
 
     lazy    => 1,
     default => sub {
@@ -207,7 +206,7 @@ sub _finish_main {
 
 sub _compile_ast {
     my($self, $ast) = @_;
-    return unless defined $ast;
+    return if not defined $ast;
 
     Carp::confess("Oops: Not an ARRAY reference: " . p($ast)) if ref($ast) ne 'ARRAY';
 
@@ -383,9 +382,16 @@ sub _flush_macro_table {
     my @code;
     foreach my $macros(values %{$mtable}) {
         foreach my $macro(ref($macros) eq 'ARRAY' ? @{$macros} : $macros) {
-            push @code, [ 'macro_begin', $macro->{name}, $macro->{line} ];
-            push @code, @{ $macro->{body} };
-            push @code, [ 'macro_end' ];
+            push @code,
+                [ macro_begin => $macro->{name}, $macro->{line} ];
+
+            push @code, [ macro_nargs => $macro->{nargs} ]
+                if $macro->{nargs};
+
+            push @code, [ macro_outer => $macro->{lvar_used} ]
+                if $macro->{lvar_used};
+
+            push @code, @{ $macro->{body} }, [ macro_end => $macro->{immediate} ];
         }
     }
     %{$mtable} = ();
@@ -404,7 +410,7 @@ sub _generate_name {
             return @{$code};
         }
         else {
-            return [ fetch_lvar => $lvar_id, $node->line, "constant $node" ];
+            return [ load_lvar => $lvar_id, $node->line, "constant $node" ];
         }
     }
 
@@ -464,7 +470,7 @@ sub _generate_command {
 sub _bare_to_file {
     my($self, $file) = @_;
     if(ref($file) eq 'ARRAY') { # myapp::foo
-        $file  = File::Spec->catfile(@{$file}) . $self->{engine}->{suffix};
+        $file  = join('/', @{$file}) . $self->{engine}->{suffix};
     }
     else { # "myapp/foo.tx"
         $file = literal_to_value($file);
@@ -490,7 +496,8 @@ sub _generate_for {
     if(@{$vars} != 1) {
         $self->_error("A for-loop requires single variable for each items", $node);
     }
-    #local $self->{lvar} = { %{$self->lvar} }; # new scope
+    local $self->{lvar}  = { %{$self->lvar} }; # new scope
+    local $self->{const} = [];                 # new scope
 
     my @code = $self->_expr($expr);
 
@@ -498,7 +505,7 @@ sub _generate_for {
     my $lvar_id   = $self->lvar_id;
     my $lvar_name = $iter_var->id;
 
-    local $self->lvar->{$lvar_name} = $lvar_id;
+    $self->lvar->{$lvar_name} = $lvar_id;
 
     push @code, [ for_start => $lvar_id, $expr->line, $lvar_name ];
 
@@ -524,7 +531,8 @@ sub _generate_while {
     if(@{$vars} > 1) {
         $self->_error("A while-loop requires one or zero variable for each items", $node);
     }
-    #local $self->{lvar} = { %{$self->lvar} }; # new scope
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
 
     my @code = $self->_expr($expr);
 
@@ -532,19 +540,14 @@ sub _generate_while {
     my($lvar_id, $lvar_name);
 
     if(@{$vars}) {
-        $lvar_id   = $self->lvar_id;
-        $lvar_name = $iter_var->id;
+        $lvar_id                  = $self->lvar_id;
+        $lvar_name                = $iter_var->id;
+        $self->lvar->{$lvar_name} = $lvar_id;
+        push @code, [ save_to_lvar => $lvar_id, $expr->line, $lvar_name ];
     }
 
-    local $self->lvar->{$lvar_name} = $lvar_id
-        if @{$vars};
-
-    # a for statement uses three local variables (container, iterator, and item)
     local $self->{lvar_id} = $self->lvar_use(scalar @{$vars});
     my @block_code = $self->_compile_ast($block);
-
-    push @code, [ save_to_lvar => $lvar_id, $expr->line, $lvar_name ]
-        if @{$vars};
 
     push @code,
         [ and  => scalar(@block_code) + 2, undef, "while" ],
@@ -561,7 +564,8 @@ sub _generate_proc { # definition of macro, block, before, around, after
     my @args   = map{ $_->id } @{$node->second};
     my $block  = $node->third;
 
-    local $self->{lvar} = { %{$self->lvar} }; # new scope
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
 
     my $arg_ix = 0;
     foreach my $arg(@args) {
@@ -574,13 +578,13 @@ sub _generate_proc { # definition of macro, block, before, around, after
     local $self->{lvar_id} = $self->lvar_use($arg_ix);
 
     my %macro = (
-        name   => $name,
-        nargs  => $arg_ix,
-        body   => [ $self->_compile_ast($block) ],
-        line   => $node->line,
-        file   => $self->file,
-
-        lvar_used => $lvar_used,
+        name      => $name,
+        nargs     => $arg_ix,
+        body      => [ $self->_compile_ast($block) ],
+        line      => $node->line,
+        file      => $self->file,
+        lvar_used => $lvar_used, # outer lexical variables
+        immediate => 0,
     );
 
     my @code;
@@ -588,6 +592,9 @@ sub _generate_proc { # definition of macro, block, before, around, after
     if(any_in($type, qw(macro block))) {
         if(exists $self->macro_table->{$name}) {
             $self->_error("Redefinition of $type $name is forbidden", $node);
+        }
+        if($type eq 'block') {
+            $macro{immediate} = 1;
         }
         $self->macro_table->{$name} = \%macro;
     }
@@ -612,9 +619,19 @@ sub _generate_if {
         $first            = $first->first;
         ($second, $third) = ($third, $second);
     }
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
 
     my @cond  = $self->_expr($first);
+
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
+
     my @then  = $self->_compile_ast($second);
+
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
+
     my @else  = $self->_compile_ast($third);
 
     if(_OPTIMIZE) {
@@ -662,16 +679,18 @@ sub _generate_given {
     if(@{$vars} > 1) {
         $self->_error("A given block requires one or zero variables", $node);
     }
+    local $self->{lvar}  = { %{$self->lvar}  }; # new scope
+    local $self->{const} = [ @{$self->const} ]; # new scope
+
     my @code = $self->_expr($expr);
 
-    my($lvar) = @{$vars};
+    my($lvar)     = @{$vars};
     my $lvar_id   = $self->lvar_id;
     my $lvar_name = $lvar->id;
 
-    local $self->lvar->{$lvar_name} = $lvar_id;
+    $self->lvar->{$lvar_name} = $lvar_id;
 
-    # a for statement uses three local variables (container, iterator, and item)
-    local $self->{lvar_id} = $self->lvar_use(1);
+    local $self->{lvar_id} = $self->lvar_use(1); # topic variable
     push @code, [ save_to_lvar => $lvar_id, undef, "given $lvar_name" ],
         $self->_compile_ast($block);
 
@@ -683,7 +702,7 @@ sub _generate_variable {
 
     my @op;
     if(defined(my $lvar_id = $self->lvar->{$node->id})) {
-        @op = ( fetch_lvar => $lvar_id );
+        @op = ( load_lvar => $lvar_id );
     }
     else {
         @op = ( fetch_s => $self->_variable_to_value($node) );
@@ -812,7 +831,7 @@ sub _generate_methodcall {
         $self->_expr($node->first),
         [ 'push' ],
         (map { $self->_expr($_), [ 'push' ] } @{$args}),
-        [ methodcall_s => $method ],
+        [ methodcall_s => $method, $node->line ],
     );
 }
 
@@ -821,33 +840,32 @@ sub _generate_call {
     my $callable = $node->first; # function or macro
     my $args     = $node->second;
 
-    my @code = (
-        [ pushmark => undef, undef, $callable->id ],
+    if(any_in($callable->id, qw(raw html))) {
+        if(@{$args} != 1) {
+            $self->_error("Wrong number of arguments for $callable", $node);
+        }
+        return $self->_expr($args->[0]), [ 'builtin_' . $callable->id => undef, $node->line ];
+    }
+
+    return(
+        [ pushmark => undef, undef, "funcall " . $callable->id ],
         (map { $self->_expr($_), [ 'push' ] } @{$args}),
         $self->_expr($callable),
+        # lvar_used inidicates how many number of lexical variables refers
+        [ funcall => undef, $node->line ],
     );
-
-    if($code[-1][0] eq 'macro') {
-        # lvar_used inidicates how many number of lvars copies
-        my $m = $self->macro_table->{$callable->id};
-        push @code, [ macrocall => $m->{lvar_used} || 0, $node->line ];
-    }
-    else {
-        push @code, [ funcall => undef, $node->line ];
-    }
-    return @code;
 }
 
 sub _generate_function {
     my($self, $node) = @_;
 
-    return [ function => $node->id ];
+    return [ function => $node->id, $node->line, 'function' ];
 }
 
 sub _generate_macro {
     my($self, $node) = @_;
 
-    return [ macro => $node->id ];
+    return [ function => $node->id, $node->line, 'macro' ];
 }
 
 # $~iterator
@@ -861,7 +879,7 @@ sub _generate_iterator {
             $node);
     }
 
-    return [ fetch_lvar => $lvar_id+1, $node->line, $node->id ];
+    return [ load_lvar => $lvar_id+1, $node->line, $node->id ];
 }
 
 sub _generate_iterator_body {
@@ -874,7 +892,7 @@ sub _generate_iterator_body {
             $node);
     }
 
-    return [ fetch_lvar => $lvar_id+2, $node->line, $node->id ];
+    return [ load_lvar => $lvar_id+2, $node->line, $node->id ];
 }
 
 sub _generate_assign {
@@ -921,10 +939,10 @@ sub _generate_constant {
     $self->{lvar_id}    = $self->lvar_use(1); # don't use local()
 
     if(_OPTIMIZE) {
-        if(@expr == 1 && $expr[0][0] eq 'literal') {
+        if(@expr == 1 && any_in($expr[0][0], qw(literal load_lvar))) {
             $expr[0][3] = "constant $lvar_name"; # comment
             $self->const->[$lvar_id] = \@expr;
-            return; # no real definition
+            return @expr; # no real definition
         }
     }
 
@@ -944,7 +962,7 @@ sub _localize_vars {
         }
         push @localize,
             $self->_expr($expr),
-            [ local_s => literal_to_value($key->value) ];
+            [ localize_s => literal_to_value($key->value) ];
     }
     return @localize;
 }

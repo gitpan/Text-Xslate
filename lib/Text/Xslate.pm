@@ -4,9 +4,9 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1028';
+our $VERSION = '0.1029';
 
-use Text::Xslate::Util qw($DEBUG);
+use Text::Xslate::Util qw($DEBUG html_escape escaped_string);
 
 use Carp       ();
 use File::Spec ();
@@ -15,11 +15,6 @@ use Exporter   ();
 our @ISA = qw(Text::Xslate::Engine Exporter);
 
 our @EXPORT_OK = qw(escaped_string html_escape);
-
-{
-    no warnings 'once';
-    *html_escape    = \&Text::Xslate::Engine::html_escape;
-}
 
 if(!__PACKAGE__->can('render')) { # The backend (which is maybe PP.pm) has been loaded
     if($DEBUG !~ /\b pp \b/xms) {
@@ -37,13 +32,10 @@ if(!__PACKAGE__->can('render')) { # The backend (which is maybe PP.pm) has been 
 
 package Text::Xslate::Engine;
 
-Text::Xslate->import('escaped_string');
-
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
     literal_to_value
     import_from
-    p
 );
 
 BEGIN {
@@ -103,9 +95,11 @@ sub new {
                 . " because it is embeded in the engine");
         }
     }
-    $funcs{raw}  = \&escaped_string;
-    $funcs{html} = \&html_escape;
-    $funcs{dump} = \&p;
+
+    # the following functions are not overridable
+    $funcs{raw}  = \&Text::Xslate::Util::escaped_string;
+    $funcs{html} = \&Text::Xslate::Util::html_escape;
+    $funcs{dump} = \&Text::Xslate::Util::p;
 
     $args{function} = \%funcs;
 
@@ -357,25 +351,6 @@ sub _error {
     goto &Carp::croak;
 }
 
-# utility functions
-sub escaped_string;
-
-# TODO: make it into XS
-sub html_escape {
-    my($s) = @_;
-    return $s if
-        ref($s) eq 'Text::Xslate::EscapedString'
-        or !defined($s);
-
-    $s =~ s/&/&amp;/g;
-    $s =~ s/</&lt;/g;
-    $s =~ s/>/&gt;/g;
-    $s =~ s/"/&quot;/g; # " for poor editors
-    $s =~ s/'/&apos;/g; # ' for poor editors
-
-    return escaped_string($s);
-}
-
 sub dump :method {
     goto &Text::Xslate::Util::p;
 }
@@ -390,7 +365,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1028.
+This document describes Text::Xslate version 0.1029.
 
 =head1 SYNOPSIS
 
@@ -548,6 +523,17 @@ You B<should> specify this option on productions.
 =item C<< function => \%functions >>
 
 Specifies functions, which may be called as C<f($arg)> or C<$arg | f>.
+
+You can also define methods with pseudo type names: C<scalar>, C<array>,
+and C<hash>. For example:
+
+    my $tx = Text::Xslate->new(
+        function => {
+            'scalar::some_method' => sub { my($scalar)    = @_; ... },
+            'array::some_method'  => sub { my($array_ref) = @_; ... },
+            'hash::some_method'   => sub { my($hash_ref)  = @_; ... },
+        },
+    );
 
 =item C<< module => [$module => ?\@import_args, ...] >>
 
@@ -719,6 +705,26 @@ Dealt as an empty array.
 C<< $var == nil >> returns true if and only if I<$var> is nil.
 
 =back
+
+=head2 Automatic semicolon insertion
+
+The Xslate tokenizer automatically inserts semicolons at the end of the line
+codes. Currently this mechanism is not so smart, which could cause problems:
+
+For example, the following Kolon template causes syntax errors.
+
+    : my $foo = {
+    :    bar => 42,
+    : };
+
+It must be:
+
+    <: my $foo = {
+         bar => 42,
+       };
+    -:>
+
+This limitation should be resolved in a future.
 
 =head1 DEPENDENCIES
 

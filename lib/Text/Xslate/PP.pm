@@ -3,7 +3,11 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1028';
+our $VERSION = '0.1029';
+
+BEGIN{
+    $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
+}
 
 use Text::Xslate::PP::Const;
 use Text::Xslate::PP::State;
@@ -11,13 +15,6 @@ use Text::Xslate::PP::EscapedString;
 use Text::Xslate::Util qw($DEBUG p);
 
 use Carp ();
-
-use parent qw(Exporter);
-
-our @EXPORT_OK = qw(escaped_string); # export to Text::Xslate
-our %EXPORT_TAGS = (
-    backend => \@EXPORT_OK,
-);
 
 use constant _PP_OPCODE  => scalar($DEBUG =~ /\b pp=opcode  \b/xms);
 use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
@@ -30,19 +27,16 @@ require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
 our @OPCODE; # defined in PP::Const
 
-require Text::Xslate;
-
 {
     package
         Text::Xslate;
-    our %OPS;
-    if(!%OPS) {
+    if(!our %OPS) {
         # the compiler use %Text::Xslate::OPS in order to optimize the code
         *OPS = \%Text::Xslate::PP::OPS;
     }
+    unshift our @ISA, 'Text::Xslate::PP';
 }
 
-unshift @Text::Xslate::ISA, __PACKAGE__;
 
 sub compiler_class() { 'Text::Xslate::Compiler' }
 
@@ -97,7 +91,7 @@ sub _assemble {
         $mtime    = time();
     }
 
-    $st->function( $self->{ function } );
+    $st->function({ %{$self->{ function }} });
 
     my $tmpl = [];
 
@@ -111,8 +105,6 @@ sub _assemble {
 
     $st->tmpl( $tmpl );
     $st->self( $self ); # weak_ref!
-
-    $st->macro( {} );
 
     $st->{sa}   = undef;
     $st->{sb}   = undef;
@@ -131,6 +123,7 @@ sub _assemble {
     $st->code_len( $len );
 
     my $code = [];
+    my $macro;
 
     for ( my $i = 0; $i < $len; $i++ ) {
         my $pair = $proto->[ $i ];
@@ -194,7 +187,28 @@ sub _assemble {
 
         # special cases
         if( $opnum == $OPS{ macro_begin } ) {
-            $st->macro->{ $code->[ $i ]->{ arg } } = $i;
+            my $name = $code->[ $i ]->{ arg };
+            if(!exists $st->function->{$name}) {
+                require Text::Xslate::PP::Macro;
+                $macro = Text::Xslate::PP::Macro->new(
+                    name => $name,
+                    addr => $i,
+                );
+                $st->function->{ $name } = $macro;
+            }
+            else {
+                $macro = undef;
+            }
+        }
+        elsif( $opnum == $OPS{ macro_nargs } ) {
+            if($macro) {
+                $macro->nargs($code->[$i]->{arg});
+            }
+        }
+        elsif( $opnum == $OPS{ macro_outer } ) {
+            if($macro) {
+                $macro->outer($code->[$i]->{arg});
+            }
         }
         elsif( $opnum == $OPS{ depend } ) {
             push @{ $tmpl }, $code->[ $i ]->{ arg };
@@ -209,12 +223,30 @@ sub _assemble {
     return;
 }
 
+{
+    package
+        Text::Xslate::Util;
 
-sub escaped_string {
-    my $str = $_[0];
-    bless \$str, 'Text::Xslate::EscapedString';
+    sub escaped_string {
+        my $str = $_[0];
+        bless \$str, 'Text::Xslate::EscapedString';
+    }
+
+    sub html_escape {
+        my($s) = @_;
+        return $s if
+            ref($s) eq 'Text::Xslate::EscapedString'
+            or !defined($s);
+
+        $s =~ s/&/&amp;/g;
+        $s =~ s/</&lt;/g;
+        $s =~ s/>/&gt;/g;
+        $s =~ s/"/&quot;/g; # " for poor editors
+        $s =~ s/'/&apos;/g; # ' for poor editors
+
+        return escaped_string($s);
+    }
 }
-
 
 #
 # INTERNAL
@@ -404,7 +436,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1028.
+This document describes Text::Xslate::PP version 0.1029.
 
 =head1 DESCRIPTION
 

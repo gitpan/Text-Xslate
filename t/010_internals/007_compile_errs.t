@@ -106,8 +106,8 @@ like $@, qr/Parser/;
 
 eval {
     Text::Xslate::Compiler->new->compile(<<'T');
-: constant FOO = 42
-: constant FOO = 42
+: constant FOO = 42;
+: constant FOO = 42;
 T
 };
 like $@, qr/Already defined/;
@@ -116,12 +116,48 @@ like $@, qr/Parser/;
 
 eval {
     Text::Xslate::Compiler->new->compile(<<'T');
-: constant FOO = 42
+: constant FOO = 42;
 : FOO = 42
 T
 };
 like $@, qr/\b FOO \b/xms;
 like $@, qr/Parser/;
+
+eval {
+    Text::Xslate::Compiler->new->compile(<<'T');
+: if( constant FOO = 42 ) { }
+: FOO
+T
+};
+like $@, qr/Undefined symbol/;
+like $@, qr/\b FOO \b/xms;
+
+eval {
+    Text::Xslate::Compiler->new->compile(<<'T');
+: for $data -> $i { constant FOO = 42 }
+: FOO
+T
+};
+like $@, qr/Undefined symbol/;
+like $@, qr/\b FOO \b/xms;
+
+eval {
+    Text::Xslate::Compiler->new->compile(<<'T');
+: while constant FOO = 42 {  }
+: FOO
+T
+};
+like $@, qr/Undefined symbol/;
+like $@, qr/\b FOO \b/xms;
+
+eval {
+    Text::Xslate::Compiler->new->compile(<<'T');
+: given constant FOO = 42 {  }
+: FOO
+T
+};
+like $@, qr/Undefined symbol/;
+like $@, qr/\b FOO \b/xms;
 
 foreach my $assign(qw(= += -= *= /= %= ~= &&= ||= //=)) {
     eval {

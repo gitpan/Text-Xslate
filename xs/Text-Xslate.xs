@@ -5,6 +5,7 @@
 
 #define NEED_newSVpvn_flags_GLOBAL
 #define NEED_newSVpvn_share
+#define NEED_newSV_type
 #include "ppport.h"
 
 #include "xslate.h"
@@ -32,12 +33,12 @@ tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
     assert(SvTYPE(cframe) == SVt_PVAV);
 
     if(AvFILLp(cframe) < real_ix) {
-        croak("panic: local variable storage is too small (%d < %d)",
-            (int)(AvFILLp(cframe) - TXframe_START_LVAR), (int)lvar_ix); 
+        croak("Oops: Refers to unallocated local variable %d (> %d)",
+            (int)lvar_ix, (int)(AvFILLp(cframe) - TXframe_START_LVAR));
     }
 
     if(!st->pad) {
-        croak("panic: access local variable (%d) before initialization",
+        croak("panic: Refers to local variable %d before initialization",
             (int)lvar_ix);
     }
     return st->pad[lvar_ix];
@@ -52,16 +53,16 @@ tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
 #define TX_lvarx_get(st, ix) ((st)->pad[ix])
 #endif /* DEBUGGING */
 
-#define TX_lvarx(st, ix) tx_fetch_lvar(aTHX_ st, ix)
+#define TX_lvarx(st, ix) tx_load_lvar(aTHX_ st, ix)
 
 #define TX_lvar(ix)     TX_lvarx(TX_st, ix)     /* init if uninitialized */
 #define TX_lvar_get(ix) TX_lvarx_get(TX_st, ix)
-
 
 #define MY_CXT_KEY "Text::Xslate::_guts" XS_VERSION
 typedef struct {
     U32 depth;
     HV* escaped_string_stash;
+    HV* macro_stash;
 
     tx_state_t* current_st; /* set while tx_execute(), othewise NULL */
 
@@ -135,8 +136,8 @@ tx_error(pTHX_ tx_state_t* const st, const char* const fmt, ...) {
     }
 }
 
-static SV*
-tx_fetch_lvar(pTHX_ tx_state_t* const st, I32 const lvar_ix) { /* the guts of TX_lvar() */
+static SV* /* allocate and load a lexcal variable */
+tx_load_lvar(pTHX_ tx_state_t* const st, I32 const lvar_ix) { /* the guts of TX_lvar() */
     AV* const cframe  = TX_current_framex(st);
     I32 const real_ix = lvar_ix + TXframe_START_LVAR;
 
@@ -170,36 +171,37 @@ tx_push_frame(pTHX_ tx_state_t* const st) {
     return newframe;
 }
 
-static SV*
+SV*
 tx_call(pTHX_ tx_state_t* const st, SV* proc, I32 const flags, const char* const name) {
     SV* retval = NULL;
     /* ENTER & SAVETMPS must be done */
 
     if(!(flags & G_METHOD)) { /* functions */
-        HV* dummy_stash;
-        GV* dummy_gv;
-        CV* cv;
+        if(SvTYPE(proc) != SVt_PVCV) {
+            HV* dummy_stash;
+            GV* dummy_gv;
+            CV* cv;
+            SvGETMAGIC(proc);
+            if(!SvOK(proc)) {
+                tx_code_t* const c = &(st->code[ st->pc - 1 ]);
+                (void)POPMARK;
+                tx_error(aTHX_ st, "Undefined function%s is called on %s",
+                    c->exec_code == TXCODE_fetch_s
+                        ? form(" %"SVf"()", c->arg)
+                        : "", name);
+                goto finish;
+            }
 
-        SvGETMAGIC(proc);
-        if(!SvOK(proc)) {
-            tx_code_t* const c = &(st->code[ st->pc - 1 ]);
-            (void)POPMARK;
-            tx_error(aTHX_ st, "Undefined function%s is called",
-                c->exec_code == TXCODE_fetch_s
-                    ? form(" %"SVf"()", c->arg)
-                    : "");
-            goto finish;
+            cv = sv_2cv(proc, &dummy_stash, &dummy_gv, FALSE);
+            if(!cv) {
+                (void)POPMARK;
+                tx_error(aTHX_ st, "Functions must be a CODE reference, not %s",
+                    tx_neat(aTHX_ proc));
+
+                goto finish;
+            }
+            proc = (SV*)cv;
         }
-
-        cv = sv_2cv(proc, &dummy_stash, &dummy_gv, FALSE);
-        if(!cv) {
-            (void)POPMARK;
-            tx_error(aTHX_ st, "Functions must be a CODE reference, not %s",
-                tx_neat(aTHX_ proc));
-
-            goto finish;
-        }
-        proc = (SV*)cv;
     }
     else { /* methods */
         SV* const invocant = PL_stack_base[TOPMARK+1];
@@ -287,13 +289,6 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     return sv ? sv : &PL_sv_undef;
 }
 
-static SV*
-tx_escaped_string(pTHX_ SV* const str) {
-    dMY_CXT;
-    SV* const sv = newSVsv(str);
-    return sv_2mortal(sv_bless(newRV_noinc(sv), MY_CXT.escaped_string_stash));
-}
-
 static bool
 tx_str_is_escaped(pTHX_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
@@ -302,6 +297,86 @@ tx_str_is_escaped(pTHX_ SV* const sv) {
             && SvSTASH(SvRV(sv)) == MY_CXT.escaped_string_stash;
     }
     return FALSE;
+}
+
+static SV*
+tx_escaped_string(pTHX_ SV* const str) {
+    if(tx_str_is_escaped(aTHX_ str)) {
+        return str;
+    }
+    else {
+        dMY_CXT;
+        SV* const sv = newSV_type(SVt_PVMG);
+        sv_setsv(sv, str);
+        return sv_2mortal(sv_bless(newRV_noinc(sv), MY_CXT.escaped_string_stash));
+    }
+}
+
+inline static void /* doesn't care about escaped-ness */
+tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
+    STRLEN len;
+    const char*       cur = SvPV_const(src, len);
+    const char* const end = cur + len;
+
+    (void)SvGROW(dest, SvCUR(dest) + len);
+
+    while(cur != end) {
+        const char* parts;
+        STRLEN      parts_len;
+
+        switch(*cur) {
+        case '<':
+            parts     =        "&lt;";
+            parts_len = sizeof("&lt;") - 1;
+            break;
+        case '>':
+            parts     =        "&gt;";
+            parts_len = sizeof("&gt;") - 1;
+            break;
+        case '&':
+            parts     =        "&amp;";
+            parts_len = sizeof("&amp;") - 1;
+            break;
+        case '"':
+            parts     =        "&quot;";
+            parts_len = sizeof("&quot;") - 1;
+            break;
+        case '\'':
+            parts     =        "&apos;";
+            parts_len = sizeof("&apos;") - 1;
+            break;
+        default:
+            parts     = cur;
+            parts_len = 1;
+            break;
+        }
+
+        len = SvCUR(dest) + parts_len + 1;
+        (void)SvGROW(dest, len);
+
+        if(LIKELY(parts_len == 1)) {
+            *SvEND(dest) = *parts;
+        }
+        else {
+            Copy(parts, SvEND(dest), parts_len, char);
+        }
+        SvCUR_set(dest, SvCUR(dest) + parts_len);
+
+        cur++;
+    }
+    *SvEND(dest) = '\0';
+}
+
+static SV*
+tx_html_escape(pTHX_ SV* const str) {
+    if(!( tx_str_is_escaped(aTHX_ str) || !SvOK(str) )) {
+        SV* const dest = newSVpvs_flags("", SVs_TEMP);
+        tx_force_html_escape(aTHX_ str, dest);
+        return tx_escaped_string(aTHX_ dest);
+    }
+    else {
+        return str;
+    }
 }
 
 /*********************
@@ -331,6 +406,11 @@ TXC_w_var(save_to_lvar) {
     TX_st->pc++;
 }
 
+TXC_w_var(load_lvar) {
+    TX_st_sa = TX_lvar_get(SvIVX(TX_op_arg));
+    TX_st->pc++;
+}
+
 TXC_w_var(load_lvar_to_sb) {
     TX_st_sb = TX_lvar_get(SvIVX(TX_op_arg));
     TX_st->pc++;
@@ -338,7 +418,7 @@ TXC_w_var(load_lvar_to_sb) {
 
 /* local $vars->{$key} = $val */
 /* see pp_helem() in pp_hot.c */
-TXC_w_key(local_s) {
+TXC_w_key(localize_s) {
     HV* const vars   = TX_st->vars;
     SV* const key    = TX_op_arg;
     bool const preeminent
@@ -369,7 +449,6 @@ TXC(push) {
     TX_st->pc++;
 }
 
-/* pushmark does ENTER & SAVETMPS */
 TXC(pushmark) {
     dSP;
     PUSHMARK(SP);
@@ -398,21 +477,6 @@ TXC_w_key(fetch_s) { /* fetch a field from the top */
 
     TX_st_sa = LIKELY(he != NULL) ? hv_iterval(vars, he) : &PL_sv_undef;
 
-    TX_st->pc++;
-}
-
-TXC_w_var(fetch_lvar) {
-    IV const id      = SvIVX(TX_op_arg);
-    AV* const cframe = TX_current_frame();
-
-    /* XXX: is there a better way? */
-    if(AvFILLp(cframe) < (id + TXframe_START_LVAR)) {
-        tx_error(aTHX_ TX_st, "Too few arguments for %"SVf, AvARRAY(cframe)[TXframe_NAME]);
-        TX_st_sa = &PL_sv_undef;
-    }
-    else {
-        TX_st_sa = TX_lvar_get(id);
-    }
     TX_st->pc++;
 }
 
@@ -445,57 +509,7 @@ TXC(print) {
         }
     }
     else if(SvOK(sv)) {
-        STRLEN len;
-        const char*       cur = SvPV_const(sv, len);
-        const char* const end = cur + len;
-
-        (void)SvGROW(output, SvCUR(output) + len);
-
-        while(cur != end) {
-            const char* parts;
-            STRLEN      parts_len;
-
-            switch(*cur) {
-            case '<':
-                parts     =        "&lt;";
-                parts_len = sizeof("&lt;") - 1;
-                break;
-            case '>':
-                parts     =        "&gt;";
-                parts_len = sizeof("&gt;") - 1;
-                break;
-            case '&':
-                parts     =        "&amp;";
-                parts_len = sizeof("&amp;") - 1;
-                break;
-            case '"':
-                parts     =        "&quot;";
-                parts_len = sizeof("&quot;") - 1;
-                break;
-            case '\'':
-                parts     =        "&apos;";
-                parts_len = sizeof("&apos;") - 1;
-                break;
-            default:
-                parts     = cur;
-                parts_len = 1;
-                break;
-            }
-
-            len = SvCUR(output) + parts_len + 1;
-            (void)SvGROW(output, len);
-
-            if(LIKELY(parts_len == 1)) {
-                *SvEND(output) = *parts;
-            }
-            else {
-                Copy(parts, SvEND(output), parts_len, char);
-            }
-            SvCUR_set(output, SvCUR(output) + parts_len);
-
-            cur++;
-        }
-        *SvEND(output) = '\0';
+        tx_force_html_escape(aTHX_ sv, output);
     }
     else {
         tx_warn(aTHX_ TX_st, "Use of nil to print");
@@ -695,7 +709,7 @@ TXC(minus) { /* unary minus */
     TX_st->pc++;
 }
 
-TXC(size) {
+TXC(max_index) {
     SV* const avref = TX_st_sa;
 
     if(!(SvROK(avref) && SvTYPE(SvRV(avref)) == SVt_PVAV)) {
@@ -703,8 +717,18 @@ TXC(size) {
             tx_neat(aTHX_ avref));
     }
 
-    sv_setiv(TX_st->targ, av_len((AV*)SvRV(avref)) + 1);
+    sv_setiv(TX_st->targ, av_len((AV*)SvRV(avref)));
     TX_st_sa = TX_st->targ;
+    TX_st->pc++;
+}
+
+TXC(builtin_raw) {
+    TX_st_sa = tx_escaped_string(aTHX_ TX_st_sa);
+    TX_st->pc++;
+}
+
+TXC(builtin_html) {
+    TX_st_sa = tx_html_escape(aTHX_ TX_st_sa);
     TX_st->pc++;
 }
 
@@ -762,36 +786,76 @@ TXC(ge) {
     TX_st->pc++;
 }
 
-TXC_w_int(macrocall) {
-    UV  const lvars = SvUVX(TX_op_arg); /* how many number of lvars copies */
-    U32 const addr  = (U32)SvUVX(TX_st_sa);
-    AV* cframe; /* new frame */
+TXC_w_key(function) { /* find a function or macro */
+    SV* const name = TX_op_arg;
+    HE* he;
+
+    if((he = hv_fetch_ent(TX_st->function, name, FALSE, 0U))) {
+        TX_st_sa = hv_iterval(TX_st->function, he);
+    }
+    else {
+        croak("Oops: Undefined function %s", tx_neat(aTHX_ name));
+    }
+
+    TX_st->pc++;
+}
+
+static void
+tx_do_macrocall(pTHX_ tx_state_t* const txst, AV* const macro) {
     dSP;
     dMARK;
+    I32 const items = SP - MARK;
+    SV* const name  = AvARRAY(macro)[TXm_NAME];
+    U32 const addr  = (U32)SvUVX(AvARRAY(macro)[TXm_ADDR]);
+    IV const nargs  = SvIVX(AvARRAY(macro)[TXm_NARGS]);
+    UV const outer  = SvUVX(AvARRAY(macro)[TXm_OUTER]);
+    AV* cframe; /* new frame */
     UV i;
     SV* tmp;
 
-    /* push a new frame */
+    assert( addr < TX_st->code_len );
+    assert( TX_st->code[addr].exec_code != NULL );
+
+    if(TX_st->code[addr].exec_code != TXCODE_macro_begin) {
+        croak("Oops: Invalid macro address: %u", (unsigned)addr);
+    }
+
+    if(items != nargs) {
+        tx_error(aTHX_ TX_st, "Wrong number of arguments for %"SVf" (%d %c %d)",
+            name, (int)items, items > nargs ? '>' : '<', (int)nargs);
+        TX_st->sa = &PL_sv_undef;
+        TX_st->pc++;
+
+        FREETMPS;
+        LEAVE;
+        return;
+    }
+
+    /* create a new frame */
     cframe = tx_push_frame(aTHX_ TX_st);
 
+    /* setup frame info: name, retaddr and output buffer */
+    sv_setsv(*av_fetch(cframe, TXframe_NAME,    TRUE), name);
+    sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), TX_st->pc + 1);
+
+    /* swap TXframe_OUTPUT and TX_st->output.
+       I know it's ugly. Any ideas?
+    */
     tmp                             = *av_fetch(cframe, TXframe_OUTPUT, TRUE);
     AvARRAY(cframe)[TXframe_OUTPUT] = TX_st->output;
     TX_st->output                   = tmp;
     sv_setpvs(tmp, "");
 
-    /* macroname will be set by macro_begin */
-    sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), TX_st->pc + 1);
-
-    if(lvars > 0) {
+    if(outer > 0) { /* refers outer lexical variales */
         /* copies lexical variables from the old frame to the new one */
         AV* const oframe = (AV*)AvARRAY(TX_st->frame)[TX_st->current_frame-1];
-        for(i = 0; i < lvars; i++) {
+        for(i = 0; i < outer; i++) {
             UV const real_ix = i + TXframe_START_LVAR;
             av_store(cframe, real_ix , SvREFCNT_inc_NN(AvARRAY(oframe)[real_ix]));
         }
     }
 
-    if(SP != MARK) { /* has arguments */
+    if(items > 0) { /* has arguments */
         dORIGMARK;
         MARK++;
         i = 0; /* must start zero */
@@ -807,74 +871,50 @@ TXC_w_int(macrocall) {
     TX_st->pc = addr;
 }
 
-TXC_w_key(macro_begin) {
-    AV* const cframe  = TX_current_frame();
-
-    sv_setsv(*av_fetch(cframe, TXframe_NAME, TRUE), TX_op_arg);
-
-    ENTER;
-    SAVETMPS;
-
-    TX_st->pc++;
-}
-
-TXC(macro_end) {
+TXC_w_int(macro_end) {
     AV* const oldframe  = TX_current_frame();
-    AV* const cframe    = (AV*)AvARRAY(TX_st->frame)[--TX_st->current_frame];
+    AV* const cframe    = (AV*)AvARRAY(TX_st->frame)[--TX_st->current_frame]; /* pop frame */
     SV* const retaddr   = AvARRAY(oldframe)[TXframe_RETADDR];
     SV* tmp;
 
     TX_st->pad = AvARRAY(cframe) + TXframe_START_LVAR; /* switch the pad */
 
-    sv_setsv(TX_st->targ, tx_escaped_string(aTHX_ TX_st->output)); 
-    TX_st_sa = TX_st->targ; /* retval */
+    if(sv_true(TX_op_arg)) { /* immediate macros; skip to mark as escaped */
+        sv_setsv(TX_st->targ, TX_st->output);
+    }
+    else { /* normal macros */
+        sv_setsv(TX_st->targ, tx_escaped_string(aTHX_ TX_st->output));
+    }
+    TX_st_sa = TX_st->targ;
 
     tmp                               = AvARRAY(oldframe)[TXframe_OUTPUT];
     AvARRAY(oldframe)[TXframe_OUTPUT] = TX_st->output;
     TX_st->output                     = tmp;
 
     TX_st->pc = SvUVX(retaddr);
-    /* ENTER & SAVETMPS will be done by TXC(pushmark) */
+    /* ENTER & SAVETMPS will be done by TXC(funcall) */
     FREETMPS;
     LEAVE;
 }
 
-TXC_w_key(macro) {
-    SV* const name = TX_op_arg;
-    HE* he;
-    if((he = hv_fetch_ent(TX_st->macro, name, FALSE, 0U))) {
-        TX_st_sa = hv_iterval(TX_st->macro, he);
-    }
-    else {
-        croak("Macro %s is not defined", tx_neat(aTHX_ name));
-    }
-
-    TX_st->pc++;
-}
-
-TXC_w_key(function) {
-    SV* const name = TX_op_arg;
-    HE* he;
-
-    if((he = hv_fetch_ent(TX_st->function, name, FALSE, 0U))) {
-        TX_st_sa = hv_iterval(TX_st->function, he);
-    }
-    else {
-        croak("Function %s is not registered", tx_neat(aTHX_ name));
-    }
-
-    TX_st->pc++;
-}
-
-
-TXC(funcall) {
+TXC(funcall) { /* call a function or a macro */
+    dMY_CXT;
+    SV* const func = TX_st_sa;
     /* PUSHMARK & PUSH must be done */
     ENTER;
     SAVETMPS;
 
-    TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "function call");
-
-    TX_st->pc++;
+    if(sv_isobject(func) && SvSTASH(SvRV(func)) == MY_CXT.macro_stash) {
+        AV* const macro = (AV*)SvRV(func);
+        if(!(SvTYPE(macro) == SVt_PVAV && AvFILLp(macro) == (TXm_size - 1))) {
+            croak("Broken macro object");
+        }
+        tx_do_macrocall(aTHX_ TX_st, macro);
+    }
+    else {
+        TX_st_sa = tx_call(aTHX_ TX_st, TX_st_sa, 0, "function call");
+        TX_st->pc++;
+    }
 }
 
 TXC_w_key(methodcall_s) {
@@ -960,12 +1000,17 @@ TXC_goto(goto) {
     TX_st->pc = SvUVX(TX_op_arg);
 }
 
-TXC_w_sv(depend); /* tell the vm to dependent template files */
-
 TXC(end) {
+    assert(TX_st->current_frame == 0);
     TX_st->pc = TX_st->code_len;
 }
 
+/* opcode markers (noop) */
+TXC_w_sv(depend); /* tell the vm to dependent template files */
+
+TXC_w_key(macro_begin);
+TXC_w_int(macro_nargs);
+TXC_w_int(macro_outer);
 
 /* End of opcodes */
 
@@ -1048,7 +1093,6 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     Safefree(st->lines);
 
     SvREFCNT_dec(st->function);
-    SvREFCNT_dec(st->macro);
     SvREFCNT_dec(st->frame);
     SvREFCNT_dec(st->targ);
     SvREFCNT_dec(st->self);
@@ -1087,7 +1131,6 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
     Copy(proto_lines, st->lines, len, U16);
 
     st->function = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->function, param);
-    st->macro    = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->macro,    param);
     st->frame    = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->frame,    param);
     st->targ     =      tx_sv_dup_inc(aTHX_ st->targ, param);
     st->self     =      tx_sv_dup_inc(aTHX_ st->self, param);
@@ -1265,6 +1308,7 @@ static void
 tx_my_cxt_init(pTHX_ pMY_CXT_ bool const cloning PERL_UNUSED_DECL) {
     MY_CXT.depth = 0;
     MY_CXT.escaped_string_stash = gv_stashpvs(TX_ESC_CLASS, GV_ADDMULTI);
+    MY_CXT.macro_stash          = gv_stashpvs(TX_MACRO_CLASS, GV_ADDMULTI);
     MY_CXT.warn_handler         = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_warn", GV_ADDMULTI));
     MY_CXT.die_handler          = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_die",  GV_ADDMULTI));
 }
@@ -1304,6 +1348,7 @@ void
 _assemble(HV* self, AV* proto, SV* name, SV* fullpath, SV* cachepath, SV* mtime)
 CODE:
 {
+    dMY_CXT;
     MAGIC* mg;
     HV* const ops = get_hv("Text::Xslate::OPS", GV_ADD);
     U32 const len = av_len(proto) + 1;
@@ -1314,6 +1359,7 @@ CODE:
     SV* tobj;
     SV** svp;
     AV* mainframe;
+    AV* macro = NULL;
 
     Zero(&st, 1, tx_state_t);
 
@@ -1333,15 +1379,11 @@ CODE:
     );
 
     svp = hv_fetchs(self, "function", FALSE);
-    if(svp && SvOK(*svp)) {
-        if(SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV) {
-            st.function = (HV*)SvRV(*svp);
-            SvREFCNT_inc_simple_void_NN(st.function);
-        }
-    }
-    if(!st.function) {
+    if(!( SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV )) {
         croak("Function table must be a HASH reference");
     }
+    st.function = newHVhv((HV*)SvRV(*svp)); /* must be copied */
+    tx_register_builtin_methods(aTHX_ st.function);
 
     tmpl = newAV();
     sv_setsv(tobj, sv_2mortal(newRV_noinc((SV*)tmpl)));
@@ -1357,8 +1399,6 @@ CODE:
     sv_rvweaken(st.self);
 
     st.hint_size = TX_HINT_SIZE;
-
-    st.macro    = newHV();
 
     st.sa       = &PL_sv_undef;
     st.sb       = &PL_sv_undef;
@@ -1442,11 +1482,45 @@ CODE:
 
             /* special cases */
             if(opnum == TXOP_macro_begin) {
-                (void)hv_store_ent(st.macro, st.code[i].arg, newSViv(i), 0U);
+                SV* const name = st.code[i].arg;
+                SV* const ent  = hv_iterval(st.function,
+                    hv_fetch_ent(st.function, name, TRUE, 0U));
+
+                if(!sv_true(ent)) {
+                    SV* mref;
+                    macro = newAV();
+                    mref  = sv_2mortal(newRV_noinc((SV*)macro));
+                    sv_bless(mref, MY_CXT.macro_stash);
+                    sv_setsv(ent, mref);
+
+                    (void)av_store(macro, TXm_OUTER, newSViv(0));
+                    (void)av_store(macro, TXm_NARGS, newSViv(0));
+                    (void)av_store(macro, TXm_ADDR,  newSViv(i));
+                    (void)av_store(macro, TXm_NAME,  name);
+                    st.code[i].arg = NULL;
+                }
+                else { /* already defined */
+                    macro = NULL;
+                }
+            }
+            else if(opnum == TXOP_macro_nargs) {
+                if(macro) {
+                    /* the number of outer lexical variables */
+                    (void)av_store(macro, TXm_NARGS, st.code[i].arg);
+                    st.code[i].arg = NULL;
+                }
+            }
+            else if(opnum == TXOP_macro_outer) {
+                if(macro) {
+                    /* the number of outer lexical variables */
+                    (void)av_store(macro, TXm_OUTER, st.code[i].arg);
+                    st.code[i].arg = NULL;
+                }
             }
             else if(opnum == TXOP_depend) {
                 /* add a dependent file to the tmpl object */
-                av_push(tmpl, SvREFCNT_inc_simple_NN(st.code[i].arg));
+                av_push(tmpl, st.code[i].arg);
+                st.code[i].arg = NULL;
             }
         }
         else {
@@ -1623,13 +1697,21 @@ CODE:
     LEAVE;
 }
 
-MODULE = Text::Xslate    PACKAGE = Text::Xslate
+MODULE = Text::Xslate    PACKAGE = Text::Xslate::Util
 
 void
 escaped_string(SV* str)
 CODE:
 {
     ST(0) = tx_escaped_string(aTHX_ str);
+    XSRETURN(1);
+}
+
+void
+html_escape(SV* str)
+CODE:
+{
+    ST(0) = tx_html_escape(aTHX_ str);
     XSRETURN(1);
 }
 
@@ -1656,7 +1738,7 @@ as_string(SV* self, ...)
 OVERLOAD: \"\"
 CODE:
 {
-    if(!( SvROK(self) && SvOK(SvRV(self))) ) {
+    if(! tx_str_is_escaped(aTHX_ self) ) {
         croak("You cannot call %s->as_string() as a class method", TX_ESC_CLASS);
     }
     ST(0) = SvRV(self);

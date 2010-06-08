@@ -77,6 +77,12 @@ Hash:
 
     : foo({ foo => "bar" })
 
+C<{ ... }> is always parsed as hash literals, so you need not to use prefix C<+>
+as Perl sometimes requires:
+
+    :  {}.kv(); # ok
+    : +{}.kv(); # also ok
+
 =head2 Expressions
 
 Conditional operator (C<< ?: >>):
@@ -131,8 +137,7 @@ and C<my>, which requires a variable name.
     : constant FOO = 42;
     : my      $foo = 42;
 
-These two statements are exactly the same semantics, so you cannot modify
-them.
+These two statements has the same semantics, so you cannot modify C<$foo>.
 
     : my $foo = 42; $foo = 3.14; # compile error!
 
@@ -274,19 +279,21 @@ NOTE: C<raw> and C<html> might be optimized away by the compiler.
 
 =head2 Methods
 
-When I<$var> is an object instance, you can call its methods.
+When I<$var> is an object instance, you can call its methods with the C<()>
+operator.
 
     <: $var.method() :>
     <: $var.method(1, 2, 3) :>
     <: $var.method( foo => [ 1, 2, 3 ] ) :>
 
-For arrays and hashes, there are builtin methods (i.e. there
-is an autoboxing mechanism):
+There is an autoboxing mechanism that provides primitive types with builtin
+methods.
 
     <: $array.size() :>
     <: $array.join(",") :>
     <: $array.reverse() :>
 
+    <: $hash.size() :>
     <: $hash.keys().join(", ") :>
     <: $hash.values().join(", ") :>
     <: for $hash.kv() -> $pair { :>
@@ -294,14 +301,14 @@ is an autoboxing mechanism):
         <: $pair.key :> = <: $pair.value :>
     <: } :>
 
-Note that you must use C<()> in order to invoke methods.
+You can define methods with the C<function> option. See L<Text::Xslate>.
 
 =head2 Template inclusion
 
 Template inclusion is a traditional way to extend templates.
 
-    : include "foo.tx"
-    : include "foo.tx" { var1 => value1, var2 => value2, ... }
+    : include "foo.tx";
+    : include "foo.tx" { var1 => value1, var2 => value2, ... };
 
 Xslate templates may be recursively included, but the including depth is
 limited to 100.
@@ -413,6 +420,16 @@ return a string marked as escaped.
     : }
     : factorial(1)  # as a function
     : 1 | factorial # as a filter
+
+Macros are first objects.
+
+    <: macro foo -> { "foo" }
+       macro bar -> { "bar" }
+       my $dispatcher = {
+           foo => foo,
+           bar => bar,
+       }; -:>
+    : $dispatcher{$key}()
 
 Macros returns what their body renders. That is, macros themselves output nothing.
 

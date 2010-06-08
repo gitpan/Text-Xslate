@@ -48,6 +48,7 @@ inc/Module/Install/Scripts.pm
 inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
+lib/Text/Xslate/Bridge.pm
 lib/Text/Xslate/Compiler.pm
 lib/Text/Xslate/EscapedString.pm
 lib/Text/Xslate/Parser.pm
@@ -55,6 +56,7 @@ lib/Text/Xslate/PP.pm
 lib/Text/Xslate/PP/Booster.pm
 lib/Text/Xslate/PP/Const.pm
 lib/Text/Xslate/PP/EscapedString.pm
+lib/Text/Xslate/PP/Macro.pm
 lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
@@ -124,6 +126,7 @@ t/020_features/024_builtins.t
 t/020_features/025_localize_vars.t
 t/020_features/026_objectliteral.t
 t/020_features/027_constant.t
+t/020_features/028_autobox.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t
@@ -144,6 +147,7 @@ t/100_tterse/015_while.t
 t/100_tterse/016_call.t
 t/400_plugin/001_import_from.t
 t/400_plugin/002_import.t
+t/400_plugin/003_bridge.t
 t/400_plugin/100_error.t
 t/500_examples/001_basic.t
 t/500_examples/002_cascade.t

@@ -66,6 +66,51 @@ like $warn, qr/at $FILE line \d+/, 'warns come from the file';
 is $@,  '';
 
 
+$warn = '';
+$out = eval {
+    $tx->render_string('<: $a + $b :>', { a => 'foo', b => 'bar' });
+};
+
+is $out, '0', 'warn in render_string()';
+like $warn, qr/"foo" isn't numeric/;
+like $warn, qr/"bar" isn't numeric/;
+like $warn, qr/at $FILE line \d+/, 'warns come from the file';
+is $@,  '';
+
+$warn = '';
+$out = eval {
+    $tx->render_string('<: [].size(1) :>', { a => 'foo', b => 'bar' });
+};
+
+is $out, '', 'warn in render_string()';
+like $warn, qr/Wrong number of arguments for size/, $warn;
+like $warn, qr/at $FILE line \d+/, 'warns come from the file';
+is $@,  '';
+
+$warn = '';
+$out = eval {
+    $tx->render_string('<: [].foo() :>', { a => 'foo', b => 'bar' });
+};
+
+is $out, '', 'warn in render_string()';
+like $warn, qr/Undefined method/;
+like $warn, qr/\b foo \b/xms;
+like $warn, qr/\b ARRAY \b/xms;
+like $warn, qr/at $FILE line \d+/, 'warns come from the file';
+is $@,  '';
+
+$warn = '';
+$out = eval {
+    $tx->render_string('<: $o.foo() :>', { o => bless {}, 'MyObject' });
+};
+
+is $out, '', 'warn in render_string()';
+like $warn, qr/Undefined method/;
+like $warn, qr/\b foo \b/xms;
+like $warn, qr/\b MyObject \b/xms;
+like $warn, qr/at $FILE line \d+/, 'warns come from the file';
+is $@,  '';
+
 note 'verbose => 2';
 
 $tx = Text::Xslate->new(
@@ -95,27 +140,6 @@ foreach my $code(
     like $warn, qr/at $FILE line \d+/;
     is $@,  '';
 }
-
-$warn = '';
-$out = eval {
-    $tx->render_string('<: $a + $b :>', { a => 'foo', b => 'bar' });
-};
-
-is $out, '0', 'warn in render_string()';
-like $warn, qr/"foo" isn't numeric/;
-like $warn, qr/"bar" isn't numeric/;
-like $warn, qr/at $FILE line \d+/, 'warns come from the file';
-is $@,  '';
-
-$warn = '';
-$out = eval {
-    $tx->render_string('<: [].keys(1) :>', { a => 'foo', b => 'bar' });
-};
-
-is $out, '', 'warn in render_string()';
-like $warn, qr/requires exactly 0 argument/;
-like $warn, qr/at $FILE line \d+/, 'warns come from the file';
-is $@,  '';
 
 is $perl_warnings, '', "Perl doesn't produce warnings";
 

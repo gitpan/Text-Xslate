@@ -5,6 +5,7 @@ use warnings;
 
 use parent qw(Exporter);
 our @EXPORT_OK = qw(
+    html_escape escaped_string
     literal_to_value value_to_literal
     import_from
     is_int any_in
@@ -32,6 +33,11 @@ our $NUMBER  = qr/ [+-]? (?:
 
 our $DEBUG;
 defined($DEBUG) or $DEBUG = $ENV{XSLATE} || '';
+
+require Text::Xslate; # load XS stuff
+
+sub html_escape;    # XS
+sub escaped_string; # XS
 
 sub is_int {
     my($s) = @_;
@@ -157,7 +163,23 @@ Text::Xslate::Util - A set of utilities for Xslate
 
 =head1 DESCRIPTION
 
-This module provides internal utilities.
+This module provides utilities for Xslate.
+
+=head1 INTERFACE
+
+=head2 Exportable functions
+
+=head3 C<escaped_string($str)>
+
+This is the entity of the C<raw> filter.
+
+=head3 C<html_escape($str)>
+
+This is the entity of the C<html> filter.
+
+=head3 C<p($any)>
+
+This is the entity of the C<dump> filter.
 
 =head1 SEE ALSO
 

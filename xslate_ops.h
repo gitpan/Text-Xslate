@@ -7,15 +7,15 @@ TXC(noop);
 TXC(move_to_sb);
 TXC(move_from_sb);
 TXC_w_var(save_to_lvar);
+TXC_w_var(load_lvar);
 TXC_w_var(load_lvar_to_sb);
-TXC_w_key(local_s);
+TXC_w_key(localize_s);
 TXC(push);
 TXC(pushmark);
 TXC(nil);
 TXC_w_sv(literal);
 TXC_w_int(literal_i);
 TXC_w_key(fetch_s); /* fetch a field from the top */
-TXC_w_var(fetch_lvar);
 TXC(fetch_field); /* fetch a field from a variable (bin operator) */
 TXC_w_key(fetch_field_s); /* fetch a field from a variable (for literal) */
 TXC(print);
@@ -36,42 +36,44 @@ TXC_goto(or);
 TXC_goto(dor);
 TXC(not);
 TXC(minus); /* unary minus */
-TXC(size);
+TXC(max_index);
+TXC(builtin_raw);
+TXC(builtin_html);
 TXC(eq);
 TXC(ne);
 TXC(lt);
 TXC(le);
 TXC(gt);
 TXC(ge);
-TXC_w_int(macrocall);
-TXC_w_key(macro_begin);
-TXC(macro_end);
-TXC_w_key(macro);
-TXC_w_key(function);
-TXC(funcall);
+TXC_w_key(function); /* find a function or macro */
+TXC_w_int(macro_end);
+TXC(funcall); /* call a function or a macro */
 TXC_w_key(methodcall_s);
 TXC(make_array);
 TXC(make_hash);
 TXC(enter);
 TXC(leave);
 TXC_goto(goto);
-TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC(end);
+TXC_w_sv(depend); /* tell the vm to dependent template files */
+TXC_w_key(macro_begin);
+TXC_w_int(macro_nargs);
+TXC_w_int(macro_outer);
 
 enum tx_opcode_t {
     TXOP_noop, /* 0 */
     TXOP_move_to_sb, /* 1 */
     TXOP_move_from_sb, /* 2 */
     TXOP_save_to_lvar, /* 3 */
-    TXOP_load_lvar_to_sb, /* 4 */
-    TXOP_local_s, /* 5 */
-    TXOP_push, /* 6 */
-    TXOP_pushmark, /* 7 */
-    TXOP_nil, /* 8 */
-    TXOP_literal, /* 9 */
-    TXOP_literal_i, /* 10 */
-    TXOP_fetch_s, /* 11 */
-    TXOP_fetch_lvar, /* 12 */
+    TXOP_load_lvar, /* 4 */
+    TXOP_load_lvar_to_sb, /* 5 */
+    TXOP_localize_s, /* 6 */
+    TXOP_push, /* 7 */
+    TXOP_pushmark, /* 8 */
+    TXOP_nil, /* 9 */
+    TXOP_literal, /* 10 */
+    TXOP_literal_i, /* 11 */
+    TXOP_fetch_s, /* 12 */
     TXOP_fetch_field, /* 13 */
     TXOP_fetch_field_s, /* 14 */
     TXOP_print, /* 15 */
@@ -92,27 +94,29 @@ enum tx_opcode_t {
     TXOP_dor, /* 30 */
     TXOP_not, /* 31 */
     TXOP_minus, /* 32 */
-    TXOP_size, /* 33 */
-    TXOP_eq, /* 34 */
-    TXOP_ne, /* 35 */
-    TXOP_lt, /* 36 */
-    TXOP_le, /* 37 */
-    TXOP_gt, /* 38 */
-    TXOP_ge, /* 39 */
-    TXOP_macrocall, /* 40 */
-    TXOP_macro_begin, /* 41 */
-    TXOP_macro_end, /* 42 */
-    TXOP_macro, /* 43 */
-    TXOP_function, /* 44 */
-    TXOP_funcall, /* 45 */
-    TXOP_methodcall_s, /* 46 */
-    TXOP_make_array, /* 47 */
-    TXOP_make_hash, /* 48 */
-    TXOP_enter, /* 49 */
-    TXOP_leave, /* 50 */
-    TXOP_goto, /* 51 */
+    TXOP_max_index, /* 33 */
+    TXOP_builtin_raw, /* 34 */
+    TXOP_builtin_html, /* 35 */
+    TXOP_eq, /* 36 */
+    TXOP_ne, /* 37 */
+    TXOP_lt, /* 38 */
+    TXOP_le, /* 39 */
+    TXOP_gt, /* 40 */
+    TXOP_ge, /* 41 */
+    TXOP_function, /* 42 */
+    TXOP_macro_end, /* 43 */
+    TXOP_funcall, /* 44 */
+    TXOP_methodcall_s, /* 45 */
+    TXOP_make_array, /* 46 */
+    TXOP_make_hash, /* 47 */
+    TXOP_enter, /* 48 */
+    TXOP_leave, /* 49 */
+    TXOP_goto, /* 50 */
+    TXOP_end, /* 51 */
     TXOP_depend, /* 52 */
-    TXOP_end, /* 53 */
+    TXOP_macro_begin, /* 53 */
+    TXOP_macro_nargs, /* 54 */
+    TXOP_macro_outer, /* 55 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -121,15 +125,15 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_move_to_sb,
     TXCODE_move_from_sb,
     TXCODE_save_to_lvar,
+    TXCODE_load_lvar,
     TXCODE_load_lvar_to_sb,
-    TXCODE_local_s,
+    TXCODE_localize_s,
     TXCODE_push,
     TXCODE_pushmark,
     TXCODE_nil,
     TXCODE_literal,
     TXCODE_literal_i,
     TXCODE_fetch_s,
-    TXCODE_fetch_lvar,
     TXCODE_fetch_field,
     TXCODE_fetch_field_s,
     TXCODE_print,
@@ -150,18 +154,17 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_dor,
     TXCODE_not,
     TXCODE_minus,
-    TXCODE_size,
+    TXCODE_max_index,
+    TXCODE_builtin_raw,
+    TXCODE_builtin_html,
     TXCODE_eq,
     TXCODE_ne,
     TXCODE_lt,
     TXCODE_le,
     TXCODE_gt,
     TXCODE_ge,
-    TXCODE_macrocall,
-    TXCODE_macro_begin,
-    TXCODE_macro_end,
-    TXCODE_macro,
     TXCODE_function,
+    TXCODE_macro_end,
     TXCODE_funcall,
     TXCODE_methodcall_s,
     TXCODE_make_array,
@@ -169,8 +172,11 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_enter,
     TXCODE_leave,
     TXCODE_goto,
-    TXCODE_depend,
     TXCODE_end,
+    TXCODE_depend,
+    TXCODE_macro_begin,
+    TXCODE_macro_nargs,
+    TXCODE_macro_outer,
     NULL
 }; /* tx_opcode[] */
 
@@ -179,15 +185,15 @@ static const U8 tx_oparg[] = {
     0U, /* move_to_sb */
     0U, /* move_from_sb */
     TXCODE_W_VAR, /* save_to_lvar */
+    TXCODE_W_VAR, /* load_lvar */
     TXCODE_W_VAR, /* load_lvar_to_sb */
-    TXCODE_W_KEY, /* local_s */
+    TXCODE_W_KEY, /* localize_s */
     0U, /* push */
     0U, /* pushmark */
     0U, /* nil */
     TXCODE_W_SV, /* literal */
     TXCODE_W_INT, /* literal_i */
     TXCODE_W_KEY, /* fetch_s */
-    TXCODE_W_VAR, /* fetch_lvar */
     0U, /* fetch_field */
     TXCODE_W_KEY, /* fetch_field_s */
     0U, /* print */
@@ -208,18 +214,17 @@ static const U8 tx_oparg[] = {
     TXCODE_GOTO, /* dor */
     0U, /* not */
     0U, /* minus */
-    0U, /* size */
+    0U, /* max_index */
+    0U, /* builtin_raw */
+    0U, /* builtin_html */
     0U, /* eq */
     0U, /* ne */
     0U, /* lt */
     0U, /* le */
     0U, /* gt */
     0U, /* ge */
-    TXCODE_W_INT, /* macrocall */
-    TXCODE_W_KEY, /* macro_begin */
-    0U, /* macro_end */
-    TXCODE_W_KEY, /* macro */
     TXCODE_W_KEY, /* function */
+    TXCODE_W_INT, /* macro_end */
     0U, /* funcall */
     TXCODE_W_KEY, /* methodcall_s */
     0U, /* make_array */
@@ -227,8 +232,11 @@ static const U8 tx_oparg[] = {
     0U, /* enter */
     0U, /* leave */
     TXCODE_GOTO, /* goto */
-    TXCODE_W_SV, /* depend */
     0U, /* end */
+    TXCODE_W_SV, /* depend */
+    TXCODE_W_KEY, /* macro_begin */
+    TXCODE_W_INT, /* macro_nargs */
+    TXCODE_W_INT, /* macro_outer */
 }; /* tx_oparg[] */
 
 static void
@@ -237,15 +245,15 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(move_to_sb), newSViv(TXOP_move_to_sb));
     (void)hv_stores(ops, STRINGIFY(move_from_sb), newSViv(TXOP_move_from_sb));
     (void)hv_stores(ops, STRINGIFY(save_to_lvar), newSViv(TXOP_save_to_lvar));
+    (void)hv_stores(ops, STRINGIFY(load_lvar), newSViv(TXOP_load_lvar));
     (void)hv_stores(ops, STRINGIFY(load_lvar_to_sb), newSViv(TXOP_load_lvar_to_sb));
-    (void)hv_stores(ops, STRINGIFY(local_s), newSViv(TXOP_local_s));
+    (void)hv_stores(ops, STRINGIFY(localize_s), newSViv(TXOP_localize_s));
     (void)hv_stores(ops, STRINGIFY(push), newSViv(TXOP_push));
     (void)hv_stores(ops, STRINGIFY(pushmark), newSViv(TXOP_pushmark));
     (void)hv_stores(ops, STRINGIFY(nil), newSViv(TXOP_nil));
     (void)hv_stores(ops, STRINGIFY(literal), newSViv(TXOP_literal));
     (void)hv_stores(ops, STRINGIFY(literal_i), newSViv(TXOP_literal_i));
     (void)hv_stores(ops, STRINGIFY(fetch_s), newSViv(TXOP_fetch_s));
-    (void)hv_stores(ops, STRINGIFY(fetch_lvar), newSViv(TXOP_fetch_lvar));
     (void)hv_stores(ops, STRINGIFY(fetch_field), newSViv(TXOP_fetch_field));
     (void)hv_stores(ops, STRINGIFY(fetch_field_s), newSViv(TXOP_fetch_field_s));
     (void)hv_stores(ops, STRINGIFY(print), newSViv(TXOP_print));
@@ -266,18 +274,17 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(dor), newSViv(TXOP_dor));
     (void)hv_stores(ops, STRINGIFY(not), newSViv(TXOP_not));
     (void)hv_stores(ops, STRINGIFY(minus), newSViv(TXOP_minus));
-    (void)hv_stores(ops, STRINGIFY(size), newSViv(TXOP_size));
+    (void)hv_stores(ops, STRINGIFY(max_index), newSViv(TXOP_max_index));
+    (void)hv_stores(ops, STRINGIFY(builtin_raw), newSViv(TXOP_builtin_raw));
+    (void)hv_stores(ops, STRINGIFY(builtin_html), newSViv(TXOP_builtin_html));
     (void)hv_stores(ops, STRINGIFY(eq), newSViv(TXOP_eq));
     (void)hv_stores(ops, STRINGIFY(ne), newSViv(TXOP_ne));
     (void)hv_stores(ops, STRINGIFY(lt), newSViv(TXOP_lt));
     (void)hv_stores(ops, STRINGIFY(le), newSViv(TXOP_le));
     (void)hv_stores(ops, STRINGIFY(gt), newSViv(TXOP_gt));
     (void)hv_stores(ops, STRINGIFY(ge), newSViv(TXOP_ge));
-    (void)hv_stores(ops, STRINGIFY(macrocall), newSViv(TXOP_macrocall));
-    (void)hv_stores(ops, STRINGIFY(macro_begin), newSViv(TXOP_macro_begin));
-    (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
-    (void)hv_stores(ops, STRINGIFY(macro), newSViv(TXOP_macro));
     (void)hv_stores(ops, STRINGIFY(function), newSViv(TXOP_function));
+    (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
     (void)hv_stores(ops, STRINGIFY(methodcall_s), newSViv(TXOP_methodcall_s));
     (void)hv_stores(ops, STRINGIFY(make_array), newSViv(TXOP_make_array));
@@ -285,6 +292,9 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(enter), newSViv(TXOP_enter));
     (void)hv_stores(ops, STRINGIFY(leave), newSViv(TXOP_leave));
     (void)hv_stores(ops, STRINGIFY(goto), newSViv(TXOP_goto));
-    (void)hv_stores(ops, STRINGIFY(depend), newSViv(TXOP_depend));
     (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
+    (void)hv_stores(ops, STRINGIFY(depend), newSViv(TXOP_depend));
+    (void)hv_stores(ops, STRINGIFY(macro_begin), newSViv(TXOP_macro_begin));
+    (void)hv_stores(ops, STRINGIFY(macro_nargs), newSViv(TXOP_macro_nargs));
+    (void)hv_stores(ops, STRINGIFY(macro_outer), newSViv(TXOP_macro_outer));
 } /* tx_register_ops() */

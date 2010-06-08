@@ -39,15 +39,15 @@ our %OPS = (
     move_to_sb       => 1,
     move_from_sb     => 2,
     save_to_lvar     => 3,
-    load_lvar_to_sb  => 4,
-    local_s          => 5,
-    push             => 6,
-    pushmark         => 7,
-    nil              => 8,
-    literal          => 9,
-    literal_i        => 10,
-    fetch_s          => 11,
-    fetch_lvar       => 12,
+    load_lvar        => 4,
+    load_lvar_to_sb  => 5,
+    localize_s       => 6,
+    push             => 7,
+    pushmark         => 8,
+    nil              => 9,
+    literal          => 10,
+    literal_i        => 11,
+    fetch_s          => 12,
     fetch_field      => 13,
     fetch_field_s    => 14,
     print            => 15,
@@ -68,27 +68,29 @@ our %OPS = (
     dor              => 30,
     not              => 31,
     minus            => 32,
-    size             => 33,
-    eq               => 34,
-    ne               => 35,
-    lt               => 36,
-    le               => 37,
-    gt               => 38,
-    ge               => 39,
-    macrocall        => 40,
-    macro_begin      => 41,
-    macro_end        => 42,
-    macro            => 43,
-    function         => 44,
-    funcall          => 45,
-    methodcall_s     => 46,
-    make_array       => 47,
-    make_hash        => 48,
-    enter            => 49,
-    leave            => 50,
-    goto             => 51,
+    max_index        => 33,
+    builtin_raw      => 34,
+    builtin_html     => 35,
+    eq               => 36,
+    ne               => 37,
+    lt               => 38,
+    le               => 39,
+    gt               => 40,
+    ge               => 41,
+    function         => 42,
+    macro_end        => 43,
+    funcall          => 44,
+    methodcall_s     => 45,
+    make_array       => 46,
+    make_hash        => 47,
+    enter            => 48,
+    leave            => 49,
+    goto             => 50,
+    end              => 51,
     depend           => 52,
-    end              => 53,
+    macro_begin      => 53,
+    macro_nargs      => 54,
+    macro_outer      => 55,
 ); # %OPS
 
 our @OPCODE = (
@@ -96,15 +98,15 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_move_to_sb,          # 1
     \&Text::Xslate::PP::Opcode::op_move_from_sb,        # 2
     \&Text::Xslate::PP::Opcode::op_save_to_lvar,        # 3
-    \&Text::Xslate::PP::Opcode::op_load_lvar_to_sb,     # 4
-    \&Text::Xslate::PP::Opcode::op_local_s,             # 5
-    \&Text::Xslate::PP::Opcode::op_push,                # 6
-    \&Text::Xslate::PP::Opcode::op_pushmark,            # 7
-    \&Text::Xslate::PP::Opcode::op_nil,                 # 8
-    \&Text::Xslate::PP::Opcode::op_literal,             # 9
-    \&Text::Xslate::PP::Opcode::op_literal_i,           # 10
-    \&Text::Xslate::PP::Opcode::op_fetch_s,             # 11
-    \&Text::Xslate::PP::Opcode::op_fetch_lvar,          # 12
+    \&Text::Xslate::PP::Opcode::op_load_lvar,           # 4
+    \&Text::Xslate::PP::Opcode::op_load_lvar_to_sb,     # 5
+    \&Text::Xslate::PP::Opcode::op_localize_s,          # 6
+    \&Text::Xslate::PP::Opcode::op_push,                # 7
+    \&Text::Xslate::PP::Opcode::op_pushmark,            # 8
+    \&Text::Xslate::PP::Opcode::op_nil,                 # 9
+    \&Text::Xslate::PP::Opcode::op_literal,             # 10
+    \&Text::Xslate::PP::Opcode::op_literal_i,           # 11
+    \&Text::Xslate::PP::Opcode::op_fetch_s,             # 12
     \&Text::Xslate::PP::Opcode::op_fetch_field,         # 13
     \&Text::Xslate::PP::Opcode::op_fetch_field_s,       # 14
     \&Text::Xslate::PP::Opcode::op_print,               # 15
@@ -125,27 +127,29 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_dor,                 # 30
     \&Text::Xslate::PP::Opcode::op_not,                 # 31
     \&Text::Xslate::PP::Opcode::op_minus,               # 32
-    \&Text::Xslate::PP::Opcode::op_size,                # 33
-    \&Text::Xslate::PP::Opcode::op_eq,                  # 34
-    \&Text::Xslate::PP::Opcode::op_ne,                  # 35
-    \&Text::Xslate::PP::Opcode::op_lt,                  # 36
-    \&Text::Xslate::PP::Opcode::op_le,                  # 37
-    \&Text::Xslate::PP::Opcode::op_gt,                  # 38
-    \&Text::Xslate::PP::Opcode::op_ge,                  # 39
-    \&Text::Xslate::PP::Opcode::op_macrocall,           # 40
-    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 41
-    \&Text::Xslate::PP::Opcode::op_macro_end,           # 42
-    \&Text::Xslate::PP::Opcode::op_macro,               # 43
-    \&Text::Xslate::PP::Opcode::op_function,            # 44
-    \&Text::Xslate::PP::Opcode::op_funcall,             # 45
-    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 46
-    \&Text::Xslate::PP::Opcode::op_make_array,          # 47
-    \&Text::Xslate::PP::Opcode::op_make_hash,           # 48
-    \&Text::Xslate::PP::Opcode::op_enter,               # 49
-    \&Text::Xslate::PP::Opcode::op_leave,               # 50
-    \&Text::Xslate::PP::Opcode::op_goto,                # 51
+    \&Text::Xslate::PP::Opcode::op_max_index,           # 33
+    \&Text::Xslate::PP::Opcode::op_builtin_raw,         # 34
+    \&Text::Xslate::PP::Opcode::op_builtin_html,        # 35
+    \&Text::Xslate::PP::Opcode::op_eq,                  # 36
+    \&Text::Xslate::PP::Opcode::op_ne,                  # 37
+    \&Text::Xslate::PP::Opcode::op_lt,                  # 38
+    \&Text::Xslate::PP::Opcode::op_le,                  # 39
+    \&Text::Xslate::PP::Opcode::op_gt,                  # 40
+    \&Text::Xslate::PP::Opcode::op_ge,                  # 41
+    \&Text::Xslate::PP::Opcode::op_function,            # 42
+    \&Text::Xslate::PP::Opcode::op_macro_end,           # 43
+    \&Text::Xslate::PP::Opcode::op_funcall,             # 44
+    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 45
+    \&Text::Xslate::PP::Opcode::op_make_array,          # 46
+    \&Text::Xslate::PP::Opcode::op_make_hash,           # 47
+    \&Text::Xslate::PP::Opcode::op_enter,               # 48
+    \&Text::Xslate::PP::Opcode::op_leave,               # 49
+    \&Text::Xslate::PP::Opcode::op_goto,                # 50
+    \&Text::Xslate::PP::Opcode::op_end,                 # 51
     \&Text::Xslate::PP::Opcode::op_depend,              # 52
-    \&Text::Xslate::PP::Opcode::op_end,                 # 53
+    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 53
+    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 54
+    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 55
 ); # @OPCODE
 
 our @OPARGS = (
@@ -153,15 +157,15 @@ our @OPARGS = (
     0,             # move_to_sb
     0,             # move_from_sb
     TXCODE_W_VAR,  # save_to_lvar
+    TXCODE_W_VAR,  # load_lvar
     TXCODE_W_VAR,  # load_lvar_to_sb
-    TXCODE_W_KEY,  # local_s
+    TXCODE_W_KEY,  # localize_s
     0,             # push
     0,             # pushmark
     0,             # nil
     TXCODE_W_SV,   # literal
     TXCODE_W_INT,  # literal_i
     TXCODE_W_KEY,  # fetch_s
-    TXCODE_W_VAR,  # fetch_lvar
     0,             # fetch_field
     TXCODE_W_KEY,  # fetch_field_s
     0,             # print
@@ -182,18 +186,17 @@ our @OPARGS = (
     TXCODE_GOTO,   # dor
     0,             # not
     0,             # minus
-    0,             # size
+    0,             # max_index
+    0,             # builtin_raw
+    0,             # builtin_html
     0,             # eq
     0,             # ne
     0,             # lt
     0,             # le
     0,             # gt
     0,             # ge
-    TXCODE_W_INT,  # macrocall
-    TXCODE_W_KEY,  # macro_begin
-    0,             # macro_end
-    TXCODE_W_KEY,  # macro
     TXCODE_W_KEY,  # function
+    TXCODE_W_INT,  # macro_end
     0,             # funcall
     TXCODE_W_KEY,  # methodcall_s
     0,             # make_array
@@ -201,8 +204,11 @@ our @OPARGS = (
     0,             # enter
     0,             # leave
     TXCODE_GOTO,   # goto
-    TXCODE_W_SV,   # depend
     0,             # end
+    TXCODE_W_SV,   # depend
+    TXCODE_W_KEY,  # macro_begin
+    TXCODE_W_INT,  # macro_nargs
+    TXCODE_W_INT,  # macro_outer
 ); # @OPARGS
 
 1;
