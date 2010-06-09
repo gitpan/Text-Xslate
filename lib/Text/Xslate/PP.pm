@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1030';
+our $VERSION = '0.1031';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -21,7 +21,7 @@ use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
 
 use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
                             : _PP_BOOSTER ? 'Booster'
-                            :               'Opcode'; # default
+                            :               'Booster'; # default
 
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
@@ -140,7 +140,7 @@ sub _assemble {
         }
 
         $code->[ $i ]->{ exec_code } = $OPCODE[ $opnum ]
-            if !_PP_BOOSTER;
+            if _PP_BACKEND eq 'Opcode';
         $code->[ $i ]->{ opname }    = $opname; # for test
 
         my $oparg = $OPARGS[ $opnum ];
@@ -217,7 +217,7 @@ sub _assemble {
     }
 
     $st->{ booster_code } = Text::Xslate::PP::Booster->new()->opcode_to_perlcode( $proto )
-        if _PP_BOOSTER;
+        if _PP_BACKEND eq 'Booster';
 
     $st->{ code } = $code;
     return;
@@ -436,7 +436,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1030.
+This document describes Text::Xslate::PP version 0.1031.
 
 =head1 DESCRIPTION
 
@@ -456,9 +456,10 @@ If you want to use Text::Xslate::PP, however, you can use it.
 XS/PP mode might be switched with C<< $ENV{XSLATE} = 'pp' or 'xs' >>.
 
 From 0.1024 on, two pure Perl engines are implemented.
-C<Text::Xslate::PP::Booster>, which is the default, generates optimized
-Perl code from intermediate code.
-C<Text::Xlsate::PP::Opcode> emulates the virtual machine in pure Perl,
+C<Text::Xslate::PP::Booster>, which is the default pure Perl engine,
+generates optimized Perl code from intermediate code.
+C<Text::Xlsate::PP::Opcode>, which is slower than PP::Booster but might be more
+stable, emulates the virtual machine in pure Perl,
 available with C<< $ENV{XSLATE} = 'pp=opcode' >>.
 
 =head1 SEE ALSO

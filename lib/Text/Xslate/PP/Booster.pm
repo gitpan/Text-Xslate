@@ -16,7 +16,7 @@ use constant _FOR_ARRAY => 2;
 
 my %CODE_MANIP = ();
 
-our @CARP_NOT = qw(Text::Xslate);
+our @CARP_NOT = qw(Text::Xslate Text::Xslate::PP::Method);
 
 has indent_depth => ( is => 'rw', default => 1 );
 
@@ -136,13 +136,19 @@ $CODE_MANIP{ 'save_to_lvar' } = sub {
 };
 
 
-$CODE_MANIP{ 'local_s' } = sub {
+$CODE_MANIP{ 'localize_s' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $key    = $arg;
     my $newval = $self->sa;
 
-    $self->write_lines( sprintf( 'local_s( $st, "%s", %s );', $key, $newval ) );
+    $self->write_lines( sprintf( 'localize_s( $st, "%s", %s );', $key, $newval ) );
     $self->write_code( "\n" );
+};
+
+
+$CODE_MANIP{ 'load_lvar' } = sub {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( '$pad->[ -1 ]->[ %s ]', $arg ) );
 };
 
 
@@ -432,6 +438,18 @@ $CODE_MANIP{ 'max_index' } = sub {
 };
 
 
+$CODE_MANIP{ 'builtin_raw' } = sub  {
+    my ( $self, $arg, $line ) = @_;
+    $self->optimize_to_print( 'raw' );
+};
+
+
+$CODE_MANIP{ 'builtin_html' } = sub  {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( 'Text::Xslate::html_escape( %s )', $self->sa ) );
+};
+
+
 $CODE_MANIP{ 'eq' } = sub {
     my ( $self, $arg, $line ) = @_;
     $self->sa( sprintf( 'cond_eq( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
@@ -500,10 +518,30 @@ $CODE_MANIP{ 'macro_begin' } = sub {
         $name, $name ) );
     $self->indent_depth( $self->indent_depth + 1 );
 
-    $self->write_lines( 'my ( $st, $pad ) = @_;' );
+    $self->write_lines( 'my ( $st, $pad, $f_l ) = @_;' );
     $self->write_lines( 'my $vars = $st->{ vars };' );
+    $self->write_lines( sprintf( 'my $mobj = $st->{ function }->{ %s };', $name ) );
     $self->write_lines( sprintf( 'my $output = q{};' ) );
     $self->write_code( "\n" );
+
+    my $error = sprintf(
+        '_error($st, @$f_l, _macro_args_error( $mobj, $pad ) )',
+        $self->stash->{ in_macro }
+    );
+
+    $self->write_lines( sprintf( <<'CODE', $error ) );
+if ( @{$pad->[-1]} != $mobj->nargs ) {
+    %s;
+    return '';
+}
+CODE
+
+    $self->write_lines( sprintf( <<'CODE', $error ) );
+if ( $mobj->outer ) {
+    push @{$pad->[-1]}, @{$pad->[-2]};
+}
+CODE
+
 
     $self->write_lines(
         sprintf( q{Carp::croak('Macro call is too deep (> 100) on %s') if ++$depth > 100;}, $name )
@@ -540,6 +578,19 @@ $CODE_MANIP{ 'macro' } = sub {
 
 $CODE_MANIP{ 'function' } = sub {
     my ( $self, $arg, $line ) = @_;
+
+    # macro
+    if ( exists $self->stash->{ macro_names }->{ $arg } ) {
+        my $next_op = $self->ops->[ $self->current_line + 1 ]; 
+        if ( $next_op->[0] eq 'funcall' ) {
+            $self->sa( $arg );
+        }
+        else {
+            $self->sa( sprintf( 'bless( [ %s ], "Text::Xslate::PP::Booster::Macro" )', value_to_literal($arg) ) );
+        }
+        return;
+    }
+
     $self->sa(
         sprintf('$st->function->{ %s }', value_to_literal($arg) )
     );
@@ -549,6 +600,18 @@ $CODE_MANIP{ 'function' } = sub {
 $CODE_MANIP{ 'funcall' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $args_str = join( ', ', @{ pop @{ $self->SP } } );
+use Data::Dumper;
+
+    if ( exists $self->stash->{ macro_names }->{ $self->sa } ) { # this is optimization!
+        $self->optimize_to_print( 'macro' );
+        $self->sa( sprintf( '$macro{ %s }->( $st, %s, [ %s ] )',
+            value_to_literal( $self->sa() ),
+            sprintf( 'push_pad( $pad, [ %s ] )', $args_str  ),
+            join( ', ', $self->frame_and_line )
+#            sprintf( 'push_pad_for_macro( %s, $pad, [ %s ] )', $arg, $args_str )
+        ) );
+        return;
+    }
 
     $args_str = ', ' . $args_str if length $args_str;
 
@@ -622,7 +685,7 @@ $CODE_MANIP{ 'goto' } = sub {
 };
 
 
-$CODE_MANIP{ 'depend' } = sub {};
+$CODE_MANIP{ 'depend' } = $CODE_MANIP{'noop'};
 
 
 $CODE_MANIP{ 'end' } = sub {
@@ -631,13 +694,18 @@ $CODE_MANIP{ 'end' } = sub {
 };
 
 
+$CODE_MANIP{ 'macro_nargs' } = $CODE_MANIP{'noop'};
+$CODE_MANIP{ 'macro_outer' } = $CODE_MANIP{'noop'};
+
+
 #
 # Internal APIs
 #
 
 sub _spawn_child {
     my ( $self, $opts ) = @_;
-    $opts ||= {};
+    $opts ||= { stash => { macro_names => $self->stash->{ macro_names } } };
+
     ( ref $self )->new($opts);
 }
 
@@ -648,14 +716,22 @@ sub _convert_opcode {
     my $ops  = [ map { [ @$_ ] } @$ops_orig ]; # this method is destructive to $ops. so need to copy.
     my $len  = scalar( @$ops );
 
+    # check macro
+    if ( not exists $self->stash->{ macro_names } ) {
+        $self->stash->{ macro_names }
+             = { map { ( $_->[1] => 1 ) } grep { $_->[0] eq 'macro_begin' } @$ops_orig };
+    }
+
     # reset
     if ( $self->is_completed ) {
+        my $macro_names = $self->stash->{ macro_names };
         $self->sa( undef );
         $self->sb( undef );
         $self->lvar( [] );
         $self->lines( [] );
         $self->SP( [] );
         $self->stash( {} );
+        $self->stash->{ macro_names } = $macro_names; # inherit macro names
         $self->is_completed( 0 );
     }
 
@@ -970,7 +1046,10 @@ sub optimize_to_print {
     return unless $ops;
     return unless ( $ops->[0] eq 'print' );
 
-    if ( $type eq 'num' ) { # currently num only
+    if ( $type eq 'num' ) {
+        $ops->[0] = 'print_raw';
+    }
+    elsif ( $type eq 'raw' ) {
         $ops->[0] = 'print_raw';
     }
     elsif ( $type eq 'macro' ) { # extent op code for booster
@@ -1025,6 +1104,11 @@ sub call {
                 );
             }
         }
+        elsif ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
+            return bless \do {
+                $st->{ booster_macro }->{ $proc->[0] }->( $st, [ [ @args ] ], [ $frame, $line ] )
+            }, 'Text::Xslate::EscapedString';
+        }
         else {
             $ret = eval { $proc->( @args ) };
             _error( $st, $frame, $line, "%s\t...", $@) if $@;
@@ -1035,62 +1119,79 @@ sub call {
 }
 
 
-use Text::Xslate::PP::Type::Pair;
-use Text::Xslate::PP::Type::Array;
-use Text::Xslate::PP::Type::Hash;
-
-use constant TX_ENUMERABLE => 'Text::Xslate::PP::Type::Array';
-use constant TX_KV         => 'Text::Xslate::PP::Type::Hash';
+use Text::Xslate::PP::Method;
 
 my %builtin_method = (
-    size    => [0, TX_ENUMERABLE],
-    join    => [1, TX_ENUMERABLE],
-    reverse => [0, TX_ENUMERABLE],
-    sort    => [0, TX_ENUMERABLE],
+    'nil::defined'    => \&Text::Xslate::PP::Method::_any_defined,
 
-    keys    => [0, TX_KV],
-    values  => [0, TX_KV],
-    kv      => [0, TX_KV],
+    'scalar::defined' => \&Text::Xslate::PP::Method::_any_defined,
+
+    'array::defined' => \&Text::Xslate::PP::Method::_any_defined,
+    'array::size'    => \&Text::Xslate::PP::Method::_array_size,
+    'array::join'    => \&Text::Xslate::PP::Method::_array_join,
+    'array::reverse' => \&Text::Xslate::PP::Method::_array_reverse,
+    'array::sort'    => \&Text::Xslate::PP::Method::_array_sort,
+
+    'hash::defined'  => \&Text::Xslate::PP::Method::_any_defined,
+    'hash::size'     => \&Text::Xslate::PP::Method::_hash_size,
+    'hash::keys'     => \&Text::Xslate::PP::Method::_hash_keys,
+    'hash::values'   => \&Text::Xslate::PP::Method::_hash_values,
+    'hash::kv'       => \&Text::Xslate::PP::Method::_hash_kv,
 );
+
+our @_f_l_for_methodcall;
+
+{
+    no warnings;
+
+    sub Text::Xslate::PP::Method::_bad_arg {
+        my ( $st, $frame, $line ) = @_f_l_for_methodcall;
+        _error( $st, $frame, $line, "Wrong number of arguments for %s", $_[0] );
+        return undef;
+    }
+
+}
+
 
 sub methodcall {
     my ( $st, $frame, $line, $method, $invocant, @args ) = @_;
 
-    my $retval;
     if(Scalar::Util::blessed($invocant)) {
         if($invocant->can($method)) {
-            $retval = eval { $invocant->$method(@args) };
+            my $retval = eval { $invocant->$method(@args) };
             if($@) {
                 _error( $st, $frame, $line, "%s" . "\t...", $@ );
             }
             return $retval;
         }
-        # fallback to builtin methods
-    }
-
-    if(!defined $invocant) {
-        _warn( $st, $frame, $line, "Use of nil to invoke method %s", $method );
-    }
-    elsif(my $bm = $builtin_method{$method}){
-        my($nargs, $klass) = @{$bm};
-        if(@args != $nargs) {
-            _error($st, $frame, $line,
-                "Builtin method %s requires exactly %d argument(s), "
-                . "but supplied %d",
-                $method, $nargs, scalar @args);
-            return undef;
-         }
-
-         $retval = eval {
-            $klass->new($invocant)->$method(@args);
-         };
-    }
-    else {
         _error($st, $frame, $line, "Undefined method %s called for %s",
             $method, $invocant);
     }
 
-    return $retval;
+    my $type = ref($invocant) eq 'ARRAY' ? 'array'
+             : ref($invocant) eq 'HASH'  ? 'hash'
+             : defined($invocant)        ? 'scalar'
+             :                             'nil';
+    my $fq_name = $type . "::" . $method;
+
+    local @_f_l_for_methodcall = ( $st, $frame, $line );
+
+    if( my $body = $st->function->{ $fq_name } || $builtin_method{ $fq_name } ){
+        my $retval = eval { $body->($invocant, @args) };
+        if($@) {
+            _error( $st, $frame, $line, "%s", $@ );
+        }
+        return $retval;
+    }
+
+    if ( not defined $invocant ) {
+        _warn($st, $frame, $line, "Use of nil to invoke method %", $method);
+        return undef;
+    }
+
+    _error($st, $frame, $line, "Undefined method %s called for %s", $method, $invocant);
+
+    return undef;
 }
 
 
@@ -1214,7 +1315,7 @@ sub push_pad_for_macro {
 }
 
 
-sub local_s {
+sub localize_s {
     my( $st, $key, $newval ) = @_;
     my $vars       = $st->{vars};
     my $preeminent = exists $vars->{$key};
@@ -1261,6 +1362,16 @@ sub _error {
 }
 
 
+sub _macro_args_error {
+    my ( $macro, $pad ) = @_;
+    my $nargs = $macro->nargs;
+    my $args  = scalar( @{ $pad->[ -1 ] } );
+    sprintf(
+        'Wrong number of arguments for %s (%d %s %d)', $macro->name, $args,  $args > $nargs ? '>' : '<', $nargs
+    );
+}
+
+
 {
     package
         Text::Xslate::PP::Booster::Guard;
@@ -1288,8 +1399,8 @@ Text::Xslate::PP::Booster - Text::Xslate code generator to build Perl code
     my $booster = Text::Xslate::PP::Booster->new();
 
     my $optext  = q{<: $value :>};
-    my $code    = $booster->opcode_to_perlcode_string( $tx->_compiler->compile( $optext ) );
-    my $coderef = $booster->opcode_to_perlcode( $tx->_compiler->compile( $optext ) );
+    my $code    = $booster->opcode_to_perlcode_string( $tx->compile( $optext ) );
+    my $coderef = $booster->opcode_to_perlcode( $tx->compile( $optext ) );
     # $coderef takes a Text::Xslate::PP::State object
 
 =head1 DESCRIPTION
