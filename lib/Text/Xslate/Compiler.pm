@@ -68,6 +68,14 @@ my %unary = (
     'max_index' => 'max_index', # for loop context vars
 );
 
+my %builtin = (
+    'raw'        => 'builtin_mark_raw',
+    'html'       => 'builtin_html_escape',
+
+    'mark_raw'   => 'builtin_mark_raw',
+    'unmark_raw' => 'builtin_unmark_raw',
+);
+
 has lvar_id => ( # local varialbe id
     is  => 'rw',
     isa => 'Int',
@@ -106,19 +114,27 @@ has engine => (
     required => 0,
 );
 
-has syntax => (
-    is  => 'rw',
-    isa => 'Str|Object',
-
-    default  => 'Kolon',
-    required => 0,
-);
-
 has escape_mode => (
     is  => 'rw',
     isa => enum([qw(html none)]),
 
     default => 'html',
+
+    init_arg => 'escape',
+);
+
+has syntax => (
+    is       => 'rw',
+
+    default  => 'Kolon',
+    required => 0,
+);
+
+has parser_option => (
+    is       => 'rw',
+    isa      => 'HashRef',
+
+    default  => sub { {} },
 );
 
 has parser => (
@@ -131,7 +147,7 @@ has parser => (
     default => sub {
         my($self) = @_;
         my $syntax = $self->syntax;
-        if(ref $syntax) {
+        if(blessed($syntax)) {
             return $syntax;
         }
         else {
@@ -139,7 +155,7 @@ has parser => (
                 "Text::Xslate::Syntax::" . $syntax,
                 $syntax,
             );
-            return $parser_class->new();
+            return $parser_class->new($self->parser_option);
         }
     },
 
@@ -149,6 +165,8 @@ has parser => (
 has cascade => (
     is  => 'rw',
     isa => 'Object',
+
+    init_arg => undef,
 );
 
 sub lvar_use {
@@ -265,23 +283,27 @@ sub _process_cascade {
     }
 
     foreach my $cfile(@components) {
-        my $body;
         my $code     = $engine->load_file($cfile);
         my $fullpath = $engine->find_file($cfile)->{fullpath};
 
         my $mtable   = $self->macro_table;
+        my $macro;
         foreach my $c(@{$code}) {
             if($c->[0] eq 'macro_begin' .. $c->[0] eq 'macro_end') {
                 if($c->[0] eq 'macro_begin') {
-                    $body = [];
-                    push @{ $mtable->{$c->[1]} ||= [] }, {
+                    $macro = [];
+                    $macro = {
                         name  => $c->[1],
                         line  => $c->[2],
-                        body  => $body,
+                        body  => [],
                     };
+                    push @{ $mtable->{$c->[1]} ||= [] }, $macro;
                 }
-                elsif($c->[0] ne 'macro_end') {
-                    push @{$body}, $c;
+                elsif($c->[0] eq 'macro_end') {
+                    $macro->{immediate} = $c->[1];
+                }
+                else {
+                    push @{$macro->{body}}, $c;
                 }
             }
         }
@@ -416,7 +438,7 @@ sub _generate_name {
         }
     }
 
-    $self->_error("Undefined symbol '$node'", $node);
+    return [ symbol => $node->id, $node->line ];
 }
 
 sub _can_print_optimize {
@@ -426,9 +448,9 @@ sub _can_print_optimize {
     return 0 if !($name eq 'print' or $name eq 'print_raw');
 
     return $node->arity eq 'call'
-        && $node->first->arity eq 'function'
-        && any_in($node->first->id, qw(raw html))
-        && @{$node->second} == 1;
+        && $node->first->arity eq 'name'
+        && @{$node->second} == 1 # args of the filter
+        && any_in($node->first->id, qw(raw mark_raw html));
 }
 
 sub _generate_command {
@@ -446,12 +468,13 @@ sub _generate_command {
             push @code, [ $proc . '_s' => literal_to_value($arg->value), $node->line ];
         }
         elsif($self->_can_print_optimize($proc, $arg)){
-            # expr | html
-            # expr | raw
-            my $command = $arg->first->id eq 'html' ? 'print' : 'print_raw';
+            my $filter_name = $arg->first->id;
+            my $command = $builtin{ $filter_name } eq 'builtin_mark_raw'
+                ? 'print_raw'  # mark_raw, raw
+                : 'print';     # html
             push @code,
                 $self->_expr($arg->second->[0]),
-                [ $command => undef, $node->line, "builtin filter" ];
+                [ $command => undef, $node->line, "$filter_name (builtin filter)" ];
         }
         else {
             push @code,
@@ -860,11 +883,11 @@ sub _generate_call {
     my $callable = $node->first; # function or macro
     my $args     = $node->second;
 
-    if(any_in($callable->id, qw(raw html))) {
+    if(my $intern = $builtin{$callable->id}) {
         if(@{$args} != 1) {
             $self->_error("Wrong number of arguments for $callable", $node);
         }
-        return $self->_expr($args->[0]), [ 'builtin_' . $callable->id => undef, $node->line ];
+        return $self->_expr($args->[0]), [ $intern => undef, $node->line ];
     }
 
     return(
@@ -874,12 +897,6 @@ sub _generate_call {
         # lvar_used inidicates how many number of lexical variables refers
         [ funcall => undef, $node->line ],
     );
-}
-
-sub _generate_function {
-    my($self, $node) = @_;
-
-    return [ function => $node->id, $node->line, 'function' ];
 }
 
 # $~iterator

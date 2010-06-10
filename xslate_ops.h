@@ -37,15 +37,16 @@ TXC_goto(dor);
 TXC(not);
 TXC(minus); /* unary minus */
 TXC(max_index);
-TXC(builtin_raw);
-TXC(builtin_html);
+TXC(builtin_mark_raw);
+TXC(builtin_unmark_raw);
+TXC(builtin_html_escape);
 TXC(eq);
 TXC(ne);
 TXC(lt);
 TXC(le);
 TXC(gt);
 TXC(ge);
-TXC_w_key(function); /* find a function or macro */
+TXC_w_key(symbol); /* find a symbol (function, macro, constant) */
 TXC_w_int(macro_end);
 TXC(funcall); /* call a function or a macro */
 TXC_w_key(methodcall_s);
@@ -95,28 +96,29 @@ enum tx_opcode_t {
     TXOP_not, /* 31 */
     TXOP_minus, /* 32 */
     TXOP_max_index, /* 33 */
-    TXOP_builtin_raw, /* 34 */
-    TXOP_builtin_html, /* 35 */
-    TXOP_eq, /* 36 */
-    TXOP_ne, /* 37 */
-    TXOP_lt, /* 38 */
-    TXOP_le, /* 39 */
-    TXOP_gt, /* 40 */
-    TXOP_ge, /* 41 */
-    TXOP_function, /* 42 */
-    TXOP_macro_end, /* 43 */
-    TXOP_funcall, /* 44 */
-    TXOP_methodcall_s, /* 45 */
-    TXOP_make_array, /* 46 */
-    TXOP_make_hash, /* 47 */
-    TXOP_enter, /* 48 */
-    TXOP_leave, /* 49 */
-    TXOP_goto, /* 50 */
-    TXOP_end, /* 51 */
-    TXOP_depend, /* 52 */
-    TXOP_macro_begin, /* 53 */
-    TXOP_macro_nargs, /* 54 */
-    TXOP_macro_outer, /* 55 */
+    TXOP_builtin_mark_raw, /* 34 */
+    TXOP_builtin_unmark_raw, /* 35 */
+    TXOP_builtin_html_escape, /* 36 */
+    TXOP_eq, /* 37 */
+    TXOP_ne, /* 38 */
+    TXOP_lt, /* 39 */
+    TXOP_le, /* 40 */
+    TXOP_gt, /* 41 */
+    TXOP_ge, /* 42 */
+    TXOP_symbol, /* 43 */
+    TXOP_macro_end, /* 44 */
+    TXOP_funcall, /* 45 */
+    TXOP_methodcall_s, /* 46 */
+    TXOP_make_array, /* 47 */
+    TXOP_make_hash, /* 48 */
+    TXOP_enter, /* 49 */
+    TXOP_leave, /* 50 */
+    TXOP_goto, /* 51 */
+    TXOP_end, /* 52 */
+    TXOP_depend, /* 53 */
+    TXOP_macro_begin, /* 54 */
+    TXOP_macro_nargs, /* 55 */
+    TXOP_macro_outer, /* 56 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -155,15 +157,16 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_not,
     TXCODE_minus,
     TXCODE_max_index,
-    TXCODE_builtin_raw,
-    TXCODE_builtin_html,
+    TXCODE_builtin_mark_raw,
+    TXCODE_builtin_unmark_raw,
+    TXCODE_builtin_html_escape,
     TXCODE_eq,
     TXCODE_ne,
     TXCODE_lt,
     TXCODE_le,
     TXCODE_gt,
     TXCODE_ge,
-    TXCODE_function,
+    TXCODE_symbol,
     TXCODE_macro_end,
     TXCODE_funcall,
     TXCODE_methodcall_s,
@@ -215,15 +218,16 @@ static const U8 tx_oparg[] = {
     0U, /* not */
     0U, /* minus */
     0U, /* max_index */
-    0U, /* builtin_raw */
-    0U, /* builtin_html */
+    0U, /* builtin_mark_raw */
+    0U, /* builtin_unmark_raw */
+    0U, /* builtin_html_escape */
     0U, /* eq */
     0U, /* ne */
     0U, /* lt */
     0U, /* le */
     0U, /* gt */
     0U, /* ge */
-    TXCODE_W_KEY, /* function */
+    TXCODE_W_KEY, /* symbol */
     TXCODE_W_INT, /* macro_end */
     0U, /* funcall */
     TXCODE_W_KEY, /* methodcall_s */
@@ -275,15 +279,16 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(not), newSViv(TXOP_not));
     (void)hv_stores(ops, STRINGIFY(minus), newSViv(TXOP_minus));
     (void)hv_stores(ops, STRINGIFY(max_index), newSViv(TXOP_max_index));
-    (void)hv_stores(ops, STRINGIFY(builtin_raw), newSViv(TXOP_builtin_raw));
-    (void)hv_stores(ops, STRINGIFY(builtin_html), newSViv(TXOP_builtin_html));
+    (void)hv_stores(ops, STRINGIFY(builtin_mark_raw), newSViv(TXOP_builtin_mark_raw));
+    (void)hv_stores(ops, STRINGIFY(builtin_unmark_raw), newSViv(TXOP_builtin_unmark_raw));
+    (void)hv_stores(ops, STRINGIFY(builtin_html_escape), newSViv(TXOP_builtin_html_escape));
     (void)hv_stores(ops, STRINGIFY(eq), newSViv(TXOP_eq));
     (void)hv_stores(ops, STRINGIFY(ne), newSViv(TXOP_ne));
     (void)hv_stores(ops, STRINGIFY(lt), newSViv(TXOP_lt));
     (void)hv_stores(ops, STRINGIFY(le), newSViv(TXOP_le));
     (void)hv_stores(ops, STRINGIFY(gt), newSViv(TXOP_gt));
     (void)hv_stores(ops, STRINGIFY(ge), newSViv(TXOP_ge));
-    (void)hv_stores(ops, STRINGIFY(function), newSViv(TXOP_function));
+    (void)hv_stores(ops, STRINGIFY(symbol), newSViv(TXOP_symbol));
     (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
     (void)hv_stores(ops, STRINGIFY(methodcall_s), newSViv(TXOP_methodcall_s));

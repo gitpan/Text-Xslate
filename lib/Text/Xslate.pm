@@ -4,9 +4,12 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1031';
+our $VERSION = '0.1032';
 
-use Text::Xslate::Util qw($DEBUG html_escape escaped_string);
+use Text::Xslate::Util qw($DEBUG
+    mark_raw unmark_raw
+    html_escape escaped_string
+);
 
 use Carp       ();
 use File::Spec ();
@@ -14,7 +17,10 @@ use Exporter   ();
 
 our @ISA = qw(Text::Xslate::Engine Exporter);
 
-our @EXPORT_OK = qw(escaped_string html_escape);
+our @EXPORT_OK = qw(
+    mark_raw unmark_raw
+    escaped_string html_escape
+);
 
 if(!__PACKAGE__->can('render')) { # The backend (which is maybe PP.pm) has been loaded
     if($DEBUG !~ /\b pp \b/xms) {
@@ -52,8 +58,13 @@ BEGIN {
 
 my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
-# version syntax compiler escape path
-my $XSLATE_MAGIC = qq{.xslate "%s - %s - %s - %s - %s"\n};
+# version-path-{compiler options}
+my $XSLATE_MAGIC    = qq{.xslate "%s-%s-{%s}"\n};
+
+my %compiler_option = (
+    syntax      => undef,
+    escape      => undef,
+);
 
 sub compiler_class() { 'Text::Xslate::Compiler' }
 
@@ -63,18 +74,19 @@ sub options { # overridable
         # name => default
         suffix      => '.tx',
         path        => ['.'],
-        compiler    => $class->compiler_class,
         input_layer => ':utf8',
-        syntax      => 'Kolon',
-        escape      => 'html',
         cache       => 1,
         cache_dir   => _DEFAULT_CACHE_DIR,
         module      => undef,
         function    => undef,
+        compiler    => $class->compiler_class,
 
         verbose      => 1,
         warn_handler => undef,
         die_handler  => undef,
+
+        # compiler options
+        %compiler_option,
     };
 }
 
@@ -119,9 +131,11 @@ sub new {
                 . " because it is embeded in the engine");
         }
     }
-    $funcs{raw}  = \&Text::Xslate::Util::escaped_string;
-    $funcs{html} = \&Text::Xslate::Util::html_escape;
-    $funcs{dump} = \&Text::Xslate::Util::p;
+    $funcs{raw}         = \&Text::Xslate::Util::mark_raw;
+    $funcs{html}        = \&Text::Xslate::Util::html_escape;
+    $funcs{mark_raw}    = \&Text::Xslate::Util::mark_raw;
+    $funcs{unmark_raw}  = \&Text::Xslate::Util::unmark_raw;
+    $funcs{dump}        = \&Text::Xslate::Util::p;
 
     $args{function} = \%funcs;
 
@@ -147,31 +161,29 @@ sub load_string { # for <input>
 }
 
 sub find_file {
-    my($self, $file, $mtime) = @_;
+    my($self, $file, $threshold_mtime) = @_;
 
     my $fullpath;
     my $cachepath;
     my $orig_mtime;
     my $cache_mtime;
-    my $is_compiled;
 
     foreach my $p(@{$self->{path}}) {
         $fullpath = File::Spec->catfile($p, $file);
         defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
-            or next; # does not exist
+            or next;
+
+        # $file is found
 
         $cachepath = File::Spec->catfile($self->{cache_dir}, $file . 'c');
 
         if(-f $cachepath) {
-            $cache_mtime = (stat(_))[_ST_MTIME]; # compiled
+            my $cmt = (stat(_))[_ST_MTIME]; # compiled
 
-            # mtime indicates the threshold time.
             # see also tx_load_template() in xs/Text-Xslate.xs
-            $is_compiled = (($mtime || $cache_mtime) >= $orig_mtime);
-            last;
-        }
-        else {
-            $is_compiled = 0;
+            if(($threshold_mtime || $cmt) >= $orig_mtime) {
+                $cache_mtime = $cmt;
+            }
         }
 
         last;
@@ -181,17 +193,17 @@ sub find_file {
         $self->_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
 
+    print STDOUT "  find_file: $fullpath\n" if _DUMP_LOAD_FILE;
+
     return {
+        file        => $file,
         fullpath    => $fullpath,
         cachepath   => $cachepath,
 
         orig_mtime  => $orig_mtime,
         cache_mtime => $cache_mtime,
-
-        is_compiled => $is_compiled,
     };
 }
-
 
 sub load_file {
     my($self, $file, $mtime) = @_;
@@ -202,115 +214,171 @@ sub load_file {
         return $self->load_string($self->{string});
     }
 
-    my $f = $self->find_file($file, $mtime);
+    my $fi = $self->find_file($file, $mtime);
 
-    my $fullpath    = $f->{fullpath};
-    my $cachepath   = $f->{cachepath};
-    my $is_compiled = $f->{is_compiled};
+    my $asm = $self->_load_compiled($fi, $mtime) || $self->_load_source($fi, $mtime);
 
-    if($self->{cache} == 0) {
-        $is_compiled = 0;
-    }
-
-    print STDOUT "---> $fullpath ($is_compiled)\n" if _DUMP_LOAD_FILE;
-
-    my $string;
-    {
-        my $to_read = $is_compiled ? $cachepath : $fullpath;
-        open my($in), '<' . $self->{input_layer}, $to_read
-            or $self->_error("LoadError: Cannot open $to_read for reading: $!");
-
-        if($is_compiled && scalar(<$in>) ne $self->_magic($fullpath)) {
-            # magic token is not matched
-            close $in;
-            unlink $cachepath
-                or $self->_error("LoadError: Cannot unlink $cachepath: $!");
-            goto &load_file; # retry
-        }
-
-        local $/;
-        $string = <$in>;
-    }
-
-    my $asm;
-    if($is_compiled) {
-        $asm = $self->deserialize($string);
-
-        # checks the mtime of dependencies
-        foreach my $code(@{$asm}) {
-            if($code->[0] eq 'depend') {
-                my $dep_mtime = (stat $code->[1])[_ST_MTIME];
-                if(!defined $dep_mtime) {
-                    $dep_mtime = '+inf'; # force reload
-                    Carp::carp("Xslate: failed to stat $code->[1] (ignored): $!");
-                }
-                if($dep_mtime > ($mtime || $f->{cache_mtime})){
-                    unlink $cachepath
-                        or $self->_error("LoadError: Cannot unlink $cachepath: $!");
-                    printf "---> %s(%s) is newer than %s(%s)\n",
-                        $code->[1], scalar localtime($dep_mtime),
-                        $cachepath, scalar localtime($mtime || $f->{cache_mtime})
-                            if _DUMP_LOAD_FILE;
-                    goto &load_file; # retry
-                }
-            }
-        }
-    }
-    else {
-        $asm = $self->compile($string,
-            file     => $file,
-            fullpath => $fullpath,
-        );
-
-        if($self->{cache}) {
-            my($volume, $dir) = File::Spec->splitpath($cachepath);
-            my $cachedir      = File::Spec->catpath($volume, $dir, '');
-            if(not -e $cachedir) {
-                require File::Path;
-                File::Path::mkpath($cachedir);
-            }
-
-            # use input_layer for caches
-            if(open my($out), '>' . $self->{input_layer}, $cachepath) {
-                print $out $self->serialize($asm, $fullpath);
-
-                if(!close $out) {
-                     Carp::carp("Xslate: Cannot close $cachepath (ignored): $!");
-                     unlink $cachepath;
-                }
-                else {
-                    $is_compiled = 1;
-                }
-            }
-            else {
-                Carp::carp("Xslate: Cannot open $cachepath for writing (ignored): $!");
-            }
-        }
-    }
-    # if $mtime is undef, the runtime does not check freshness of caches.
+    # $cache_mtime is undef : uses caches without any checks
+    # $cache_mtime > 0      : uses caches with mtime checks
+    # $cache_mtime == 0     : doesn't use caches
     my $cache_mtime;
     if($self->{cache} < 2) {
-        if($is_compiled) {
-            $cache_mtime = $f->{cache_mtime} || ( stat $cachepath )[_ST_MTIME];
+        $cache_mtime = $fi->{cache_time} || 0;
+    }
+
+    $self->_assemble($asm, $file, $fi->{fullpath}, $fi->{cachepath}, $cache_mtime);
+    return $asm;
+}
+
+sub _load_source {
+    my($self, $fi) = @_;
+    my $fullpath  = $fi->{fullpath};
+    my $cachepath = $fi->{cachepath};
+
+    my $source;
+    {
+        open my($in), '<' . $self->{input_layer}, $fullpath
+            or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
+        local $/;
+        $source = <$in>;
+    }
+
+    my $asm = $self->compile($source,
+        file     => $fi->{file},
+        fullpath => $fullpath,
+    );
+
+    if($self->{cache} >= 1) {
+        my($volume, $dir) = File::Spec->splitpath($fi->{cachepath});
+        my $cachedir      = File::Spec->catpath($volume, $dir, '');
+        if(not -e $cachedir) {
+            require File::Path;
+            File::Path::mkpath($cachedir);
+        }
+
+        # use input_layer for caches
+        if(open my($out), '>' . $self->{input_layer}, $cachepath) {
+            $self->_save_compiled($out, $asm, $fullpath);
+
+            if(!close $out) {
+                 Carp::carp("Xslate: Cannot close $cachepath (ignored): $!");
+                 unlink $cachepath;
+            }
+            else {
+                $self->{cache_mtime} = ( stat $cachepath )[_ST_MTIME];
+            }
         }
         else {
-            $cache_mtime = 0; # no compiled cache, always need to reload
+            Carp::carp("Xslate: Cannot open $cachepath for writing (ignored): $!");
         }
     }
 
-    $self->_assemble($asm, $file, $fullpath, $cachepath, $cache_mtime);
+    if(_DUMP_LOAD_FILE) {
+        print STDERR "  _load_source: cache(",
+            defined($self->{cache_mtime}) ? $self->{cache_mtime} : 'undef',
+            ")\n";
+    }
+
     return $asm;
+}
+
+sub _load_compiled {
+    my($self, $fi, $threshold_mtime) = @_;
+
+    $fi->{cache_mtime} = undef if $self->{cache} == 0;
+
+    return undef if !$fi->{cache_mtime};
+
+    $threshold_mtime ||= $fi->{cache_mtime};
+
+    my $cachepath = $fi->{cachepath};
+
+    open my($in), '<' . $self->{input_layer}, $cachepath
+        or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
+
+    if(scalar(<$in>) ne $self->_magic($fi->{fullpath})) {
+        # magic token is not matched
+        close $in;
+        unlink $cachepath
+            or $self->_error("LoadError: Cannot unlink $cachepath: $!");
+        return undef;
+    }
+
+    # parse assembly
+    my @asm;
+    while(defined(my $line = <$in>)) {
+        next if $line =~ m{\A [ \t]* (?: \# | // )}xms; # comments
+        chomp $line;
+
+        my($name, $value, $line) = $line =~ m{
+            \A
+                [ \t]*
+                ($IDENT)                        # an opname
+                (?: [ \t]+ ($STRING|$NUMBER) )? # an operand   (optional)
+                (?:\#($NUMBER))?                # line number  (optional)
+                [^\n]*                          # any comments (optional)
+            \z
+        }xmsog or $self->_error("LoadError: Cannot parse assembly (line $.): $line");
+
+        $value = literal_to_value($value);
+
+        # checks the modified of dependencies
+        if($name eq 'depend') {
+            my $dep_mtime = (stat $value)[_ST_MTIME];
+            if(!defined $dep_mtime) {
+                $dep_mtime = '+inf'; # force reload
+                Carp::carp("Xslate: failed to stat $value (ignored): $!");
+            }
+            if($dep_mtime > $threshold_mtime){
+                unlink $cachepath
+                    or $self->_error("LoadError: Cannot unlink $cachepath: $!");
+
+                printf "  _load_cache_compiled: %s(%s) is newer than %s(%s)\n",
+                    $value,     scalar localtime($dep_mtime),
+                    $cachepath, scalar localtime($threshold_mtime)
+                        if _DUMP_LOAD_FILE;
+
+                return undef;
+            }
+        }
+
+        push @asm, [ $name, $value, $line ];
+    }
+
+    if(_DUMP_LOAD_FILE) {
+        print STDERR "  _load_cache_compiled: cache(", $self->{cache_mtime}, ")\n";
+    }
+
+    return \@asm;
+}
+
+sub _save_compiled {
+    my($self, $out, $asm, $fullpath) = @_;
+    print $out $self->_magic($fullpath), $self->_compiler->as_assembly($asm);
+    return;
 }
 
 sub _magic {
     my($self, $fullpath) = @_;
-    return sprintf $XSLATE_MAGIC,
-        $VERSION,
-        $self->{syntax},
+
+    my $compiler_options = join(',',
         ref($self->{compiler}) || $self->{compiler},
-        $self->{escape},
-        $fullpath,
-    ;
+        $self->_compiler_options,
+    );
+
+    return sprintf $XSLATE_MAGIC,
+        $VERSION, $fullpath, $compiler_options;
+}
+
+sub _compiler_options {
+    my($self) = @_;
+    my @options;
+    foreach my $name(sort keys %compiler_option) {
+        if(defined($self->{$name})) {
+            push @options, $name => $self->{$name};
+        }
+    }
+    return @options;
 }
 
 sub _compiler {
@@ -318,12 +386,13 @@ sub _compiler {
     my $compiler = $self->{compiler};
 
     if(!ref $compiler){
+        $compiler ||= $self->compiler_class;
         require Any::Moose;
         Any::Moose::load_class($compiler);
+
         $compiler = $compiler->new(
-            engine       => $self,
-            syntax      => $self->{syntax},
-            escape_mode => $self->{escape},
+            engine => $self,
+            $self->_compiler_options,
         );
 
         $compiler->define_function(keys %{ $self->{function} });
@@ -337,33 +406,6 @@ sub _compiler {
 sub compile {
     my $self = shift;
     return $self->_compiler->compile(@_);
-}
-
-sub deserialize {
-    my($self, $assembly) = @_;
-
-    my @asm;
-    while($assembly =~ m{
-            ^[ \t]*
-                ($IDENT)                        # an opname
-                (?: [ \t]+ ($STRING|$NUMBER) )? # an operand
-                (?:\#($NUMBER))?                # line number
-                [^\n]*                          # any comments
-            \n}xmsog) {
-
-        my $name  = $1;
-        my $value = $2;
-        my $line  = $3;
-
-        push @asm, [ $name, literal_to_value($value), $line ];
-    }
-
-    return \@asm;
-}
-
-sub serialize {
-    my($self, $asm, $fullpath) = @_;
-    return $self->_magic($fullpath) . $self->_compiler->as_assembly($asm);
 }
 
 sub _error {
@@ -386,7 +428,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1031.
+This document describes Text::Xslate version 0.1032.
 
 =head1 SYNOPSIS
 
@@ -426,14 +468,13 @@ This document describes Text::Xslate version 0.1031.
     print $tx->render_string($template, \%vars);
 
     # you can tell the engine that some strings are already escaped.
-    use Text::Xslate qw(escaped_string);
+    use Text::Xslate qw(mark_raw);
 
-    $vars{email} = escaped_string('gfx &lt;gfuji at cpan.org&gt;');
-    # or
-    $vars{email} = Text::Xslate::EscapedString->new(
+    $vars{email} = mark_raw('gfx &lt;gfuji at cpan.org&gt;');
+    # or if you don't want to pollute your namespace:
+    $vars{email} = Text::Xslate::Type::Raw->new(
         'gfx &lt;gfuji at cpan.org&gt;',
-    ); # if you don't want to pollute your namespace.
-
+    );
 
     # if you want Template-Toolkit syntx:
     $tx = Text::Xslate->new(syntax => 'TTerse');
@@ -634,33 +675,47 @@ This method can be used for pre-compiling template files.
 
 =head2 Exportable functions
 
-=head3 C<< escaped_string($str :Str) -> EscapedString >>
+=head3 C<< mark_raw($str :Str) -> RawString >>
 
-Marks I<$str> as escaped. Escaped strings will not be escaped by the template 
-engine, so you have to escape these strings by yourself.
+Marks I<$str> as raw, so that the content of I<$str> will be rendered as is,
+so you have to escape these strings by yourself.
 
 For example:
 
     my $tx   = Text::Xslate->new();
     my $tmpl = 'Mailaddress: <: $email :>';
     my %vars = (
-        email => 'Foo &lt;foo@example.com&gt;',
+        email => mark_raw('Foo &lt;foo@example.com&gt;'),
     );
     print $tx->render_string($tmpl, \%email);
     # => Mailaddress: Foo &lt;foo@example.com&gt;
 
-This function is available in templates as the C<raw> filter:
+This function is available in templates as the C<mark_raw> filter:
 
-    <: $var | raw :>
+    <: $var | mark_raw :>
+    <: $var | raw # alias :>
 
-=head3 C<< html_escape($str :Str) -> EscapedString >>
+=head3 C<< unmark_raw($str :Str) -> Str >>
 
-Escapes html special characters in I<$str>, and returns an escaped string (see above).
+Clears the raw marker from I<$str>, so that the content of I<$str> will
+be escaped before rendered.
 
-Although you need not call it explicitly, this function is available in
-templates as the C<html> filter:
+This function is available in templates as the C<unmark_raw> filter:
 
-    <: $var | html :>
+    <: $var | unmark_raw :>
+
+=head3 C<< html_escape($str :Str) -> RawString >>
+
+Escapes html special characters in I<$str>, and returns a raw string (see above).
+If I<$str> is already a raw string, it returns I<$str> as is.
+
+You need not call this function explicitly, because all the values
+will be escaped automatically.
+
+This function is available in templates as the C<html> filter, but keep
+in mind that it will do nothing if the argument is already escaped.
+Consider C<< <: $var | unmark_raw | html :> >>, which forces to escape
+the argument.
 
 =head2 Application
 

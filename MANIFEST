@@ -55,18 +55,20 @@ lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
 lib/Text/Xslate/PP/Booster.pm
 lib/Text/Xslate/PP/Const.pm
-lib/Text/Xslate/PP/EscapedString.pm
 lib/Text/Xslate/PP/Macro.pm
 lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
 lib/Text/Xslate/PP/Type/Array.pm
+lib/Text/Xslate/PP/Type/EscapedString.pm
 lib/Text/Xslate/PP/Type/Hash.pm
 lib/Text/Xslate/PP/Type/Pair.pm
+lib/Text/Xslate/PP/Type/Raw.pm
 lib/Text/Xslate/Symbol.pm
 lib/Text/Xslate/Syntax/Kolon.pm
 lib/Text/Xslate/Syntax/Metakolon.pm
 lib/Text/Xslate/Syntax/TTerse.pm
+lib/Text/Xslate/Type/Raw.pm
 lib/Text/Xslate/Util.pm
 Makefile.PL
 MANIFEST			This list of files
@@ -162,6 +164,7 @@ t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
 t/lib/Util.pm
+t/template/common.tx
 t/template/eg/base.tx
 t/template/eg/child.tx
 t/template/for.tx

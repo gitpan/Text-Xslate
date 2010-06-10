@@ -576,7 +576,7 @@ $CODE_MANIP{ 'macro' } = sub {
 };
 
 
-$CODE_MANIP{ 'function' } = sub {
+$CODE_MANIP{ 'symbol' } = sub {
     my ( $self, $arg, $line ) = @_;
 
     # macro
@@ -592,7 +592,7 @@ $CODE_MANIP{ 'function' } = sub {
     }
 
     $self->sa(
-        sprintf('$st->function->{ %s }', value_to_literal($arg) )
+        sprintf('$st->symbol->{ %s }', value_to_literal($arg) )
     );
 };
 
@@ -1176,7 +1176,7 @@ sub methodcall {
 
     local @_f_l_for_methodcall = ( $st, $frame, $line );
 
-    if( my $body = $st->function->{ $fq_name } || $builtin_method{ $fq_name } ){
+    if( my $body = $st->symbol->{ $fq_name } || $builtin_method{ $fq_name } ){
         my $retval = eval { $body->($invocant, @args) };
         if($@) {
             _error( $st, $frame, $line, "%s", $@ );
@@ -1387,7 +1387,7 @@ __END__
 
 =head1 NAME
 
-Text::Xslate::PP::Booster - Text::Xslate code generator to build Perl code
+Text::Xslate::PP::Booster - Text::Xslate code generator for pure Perl
 
 =head1 SYNOPSIS
 
@@ -1443,7 +1443,7 @@ But now Text::Xslate::PP::Booster is available, and is as fast as Text::MicroTem
 
 Text::Xslate::PP becomes much faster than the default pure Perl engine!
 
-The engine is enabled by default, and disabled by C<< $ENV{ENV}='pp=opcode' >>.
+The engine is enabled with C<< $ENV{ENV}='pp=booster' >>.
 
 =head1 APIs
 

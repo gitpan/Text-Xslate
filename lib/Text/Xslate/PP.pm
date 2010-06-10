@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1031';
+our $VERSION = '0.1032';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -11,8 +11,9 @@ BEGIN{
 
 use Text::Xslate::PP::Const;
 use Text::Xslate::PP::State;
-use Text::Xslate::PP::EscapedString;
+use Text::Xslate::PP::Type::Raw;
 use Text::Xslate::Util qw($DEBUG p);
+use Text::Xslate;
 
 use Carp ();
 
@@ -21,7 +22,10 @@ use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
 
 use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
                             : _PP_BOOSTER ? 'Booster'
-                            :               'Booster'; # default
+                            :               'Opcode'; # default
+
+use constant _DUMP_LOAD_TEMPLATE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
+
 
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
@@ -91,7 +95,7 @@ sub _assemble {
         $mtime    = time();
     }
 
-    $st->function({ %{$self->{ function }} });
+    $st->symbol({ %{$self->{ function }} });
 
     my $tmpl = [];
 
@@ -188,13 +192,13 @@ sub _assemble {
         # special cases
         if( $opnum == $OPS{ macro_begin } ) {
             my $name = $code->[ $i ]->{ arg };
-            if(!exists $st->function->{$name}) {
+            if(!exists $st->symbol->{$name}) {
                 require Text::Xslate::PP::Macro;
                 $macro = Text::Xslate::PP::Macro->new(
                     name => $name,
                     addr => $i,
                 );
-                $st->function->{ $name } = $macro;
+                $st->symbol->{ $name } = $macro;
             }
             else {
                 $macro = undef;
@@ -227,15 +231,25 @@ sub _assemble {
     package
         Text::Xslate::Util;
 
-    sub escaped_string {
-        my $str = $_[0];
-        bless \$str, 'Text::Xslate::EscapedString';
+    my $esc_class = 'Text::Xslate::Type::Raw';
+    sub escaped_string; *escaped_string = \&mark_raw;
+    sub mark_raw {
+        my($str) = @_;
+        return ref($str) eq $esc_class
+            ? $str
+            : bless \$str, $esc_class;
+    }
+    sub unmark_raw {
+        my($str) = @_;
+        return ref($str) eq $esc_class
+            ? ${$str}
+            : $str;
     }
 
     sub html_escape {
         my($s) = @_;
         return $s if
-            ref($s) eq 'Text::Xslate::EscapedString'
+            ref($s) eq $esc_class
             or !defined($s);
 
         $s =~ s/&/&amp;/g;
@@ -244,7 +258,7 @@ sub _assemble {
         $s =~ s/"/&quot;/g; # " for poor editors
         $s =~ s/'/&apos;/g; # ' for poor editors
 
-        return escaped_string($s);
+        return bless \$s, $esc_class;
     }
 }
 
@@ -302,9 +316,11 @@ sub tx_load_template {
 
     my $tmpl = $ttobj->{ $name };
 
-    my $cache_mtime = $tmpl->[ Text::Xslate::PP::TXo_MTIME ];
+    my $cache_mtime = $tmpl->[ TXo_MTIME ];
 
-    return $self->{ tmpl_st }->{ $name } unless $cache_mtime;
+    if(not defined $cache_mtime) { # cache => 2 (release mode)
+        return $self->{ tmpl_st }->{ $name };
+    }
 
     if( $retried > 0 or tx_all_deps_are_fresh( $tmpl, $cache_mtime ) ) {
         return $self->{ tmpl_st }->{ $name };
@@ -323,17 +339,22 @@ sub tx_all_deps_are_fresh {
     my ( $tmpl, $cache_mtime ) = @_;
     my $len = scalar @{$tmpl};
 
-    for ( my $i = Text::Xslate::PP::TXo_FULLPATH; $i < $len; $i++ ) {
+    for ( my $i = TXo_FULLPATH; $i < $len; $i++ ) {
         my $deppath = $tmpl->[ $i ];
 
         next unless defined $deppath;
 
-        if ( ( stat( $deppath ) )[9] > $cache_mtime ) {
-            my $main_cache = $tmpl->[ Text::Xslate::PP::TXo_CACHEPATH ];
-            if ( $i != Text::Xslate::PP::TXo_FULLPATH and $main_cache ) {
+        my $mtime = ( stat( $deppath ) )[9];
+        if ( $mtime > $cache_mtime ) {
+            my $main_cache = $tmpl->[ TXo_CACHEPATH ];
+            if ( $i != TXo_FULLPATH and $main_cache ) {
                 unlink $main_cache or warn $!;
             }
-            return;
+            if(_DUMP_LOAD_TEMPLATE) {
+                printf STDERR "  tx_all_depth_are_fresh: %s is too old (%d > %d)\n",
+                    $deppath, $mtime, $cache_mtime;
+            }
+            return 0;
         }
 
     }
@@ -436,15 +457,15 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1031.
+This document describes Text::Xslate::PP version 0.1032.
 
 =head1 DESCRIPTION
 
-This module implements L<Text::Xslate> runtime in pure Perl.
-Normally it will be loaded in Text::Xslate if needed. So you don't need
-to use this module in your applications.
+This module implements Text::Xslate runtime engine in pure Perl.
+Normally it will be loaded if it fails to load XS. So you don't need
+to use this module explicitly.
 
-    # Text::Xslate calls PP when it fails to load XS.
+    # Text::Xslate loads PP if needed
     use Text::Xslate;
     my $tx = Text::Xslate->new();
 
@@ -455,20 +476,23 @@ If you want to use Text::Xslate::PP, however, you can use it.
 
 XS/PP mode might be switched with C<< $ENV{XSLATE} = 'pp' or 'xs' >>.
 
-From 0.1024 on, two pure Perl engines are implemented.
-C<Text::Xslate::PP::Booster>, which is the default pure Perl engine,
+From 0.1024 on, there are two pure Perl engines.
+C<Text::Xslate::PP::Booster>, used with C<< $ENV{XSLATE} = 'pp=booster' >>,
 generates optimized Perl code from intermediate code.
-C<Text::Xlsate::PP::Opcode>, which is slower than PP::Booster but might be more
-stable, emulates the virtual machine in pure Perl,
-available with C<< $ENV{XSLATE} = 'pp=opcode' >>.
+C<Text::Xlsate::PP::Opcode>, used with C<< $ENV{XSLATE = 'pp=opcode' >>,
+execute intermediate code directly, emulating the virtual machine in pure Perl.
+
+PP::Booster is much faster than PP::Opcode, but it is less stable,
+so the default pure Perl engine is B<PP::Opcode>, but PP::Booster will be
+the default in a future if it is stable enough.
 
 =head1 SEE ALSO
+
+L<Text::Xslate>
 
 L<Text::Xslate::PP::Opcode>
 
 L<Text::Xslate::PP::Booster>
-
-L<Text::Xslate>
 
 =head1 AUTHOR
 
