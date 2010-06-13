@@ -6,7 +6,7 @@ use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP::Const;
-use Text::Xslate::Util qw($DEBUG p value_to_literal);
+use Text::Xslate::Util qw($DEBUG p value_to_literal p mark_raw unmark_raw html_escape);
 
 use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
@@ -279,7 +279,7 @@ $CODE_MANIP{ 'print' } = sub {
     $self->write_lines( sprintf( <<'CODE', $sv, $err, $err ) );
 # print
 $sv = %s;
-if ( ref($sv) eq 'Text::Xslate::EscapedString' ) {
+if ( ref($sv) eq 'Text::Xslate::Type::Raw' ) {
     if(defined ${$sv}) {
         $output .= $sv;
     }
@@ -438,13 +438,20 @@ $CODE_MANIP{ 'max_index' } = sub {
 };
 
 
-$CODE_MANIP{ 'builtin_raw' } = sub  {
+$CODE_MANIP{ 'builtin_mark_raw' } = sub  {
     my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( '_mark_raw( %s )', $self->sa ) );
     $self->optimize_to_print( 'raw' );
 };
 
 
-$CODE_MANIP{ 'builtin_html' } = sub  {
+$CODE_MANIP{ 'builtin_unmark_raw' } = sub  {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( '_unmark_raw( %s )', $self->sa ) );
+};
+
+
+$CODE_MANIP{ 'builtin_html_escape' } = sub  {
     my ( $self, $arg, $line ) = @_;
     $self->sa( sprintf( 'Text::Xslate::html_escape( %s )', $self->sa ) );
 };
@@ -487,6 +494,18 @@ $CODE_MANIP{ 'ge' } = sub {
 };
 
 
+$CODE_MANIP{ 'ncmp' } = sub {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( '( %s <=> %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
+};
+
+
+$CODE_MANIP{ 'scmp' } = sub {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( '( %s cmp %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
+};
+
+
 $CODE_MANIP{ 'macrocall' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $ops  = $self->ops;
@@ -500,8 +519,7 @@ $CODE_MANIP{ 'macrocall' } = sub {
 
     $self->sa( sprintf( '$macro{ %s }->( $st, %s )',
         value_to_literal($self->sa()),
-#        sprintf( 'push_pad( $pad, [ %s ] )', join( ', ', @{ pop @{ $self->SP } } )  )
-        sprintf( 'push_pad_for_macro( %s, $pad, [ %s ] )', $arg, join( ', ', @{ pop @{ $self->SP } } )  )
+        sprintf( 'push_pad( $pad, [ %s ] )', join( ', ', @{ pop @{ $self->SP } } )  ),
     ) );
 };
 
@@ -520,7 +538,7 @@ $CODE_MANIP{ 'macro_begin' } = sub {
 
     $self->write_lines( 'my ( $st, $pad, $f_l ) = @_;' );
     $self->write_lines( 'my $vars = $st->{ vars };' );
-    $self->write_lines( sprintf( 'my $mobj = $st->{ function }->{ %s };', $name ) );
+    $self->write_lines( sprintf( 'my $mobj = $st->symbol->{ %s };', $name ) );
     $self->write_lines( sprintf( 'my $output = q{};' ) );
     $self->write_code( "\n" );
 
@@ -556,7 +574,8 @@ $CODE_MANIP{ 'macro_end' } = sub {
     $self->write_lines( sprintf( '$depth--;' ) );
     $self->write_lines( sprintf( 'pop( @$pad );' ) );
     $self->write_code( "\n" );
-    $self->write_lines( sprintf( '$output;' ) );
+    # immediate macros?
+    $self->write_lines( $arg ? sprintf( '$output;' ) : sprintf( '_mark_raw($output);' ) );
 
     $self->indent_depth( $self->indent_depth - 1 );
 
@@ -592,7 +611,7 @@ $CODE_MANIP{ 'symbol' } = sub {
     }
 
     $self->sa(
-        sprintf('$st->symbol->{ %s }', value_to_literal($arg) )
+        sprintf('symbol( $st, %s, %s, %s )', value_to_literal($arg), $self->frame_and_line )
     );
 };
 
@@ -600,15 +619,12 @@ $CODE_MANIP{ 'symbol' } = sub {
 $CODE_MANIP{ 'funcall' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $args_str = join( ', ', @{ pop @{ $self->SP } } );
-use Data::Dumper;
 
     if ( exists $self->stash->{ macro_names }->{ $self->sa } ) { # this is optimization!
-        $self->optimize_to_print( 'macro' );
         $self->sa( sprintf( '$macro{ %s }->( $st, %s, [ %s ] )',
             value_to_literal( $self->sa() ),
             sprintf( 'push_pad( $pad, [ %s ] )', $args_str  ),
             join( ', ', $self->frame_and_line )
-#            sprintf( 'push_pad_for_macro( %s, $pad, [ %s ] )', $arg, $args_str )
         ) );
         return;
     }
@@ -942,6 +958,10 @@ CODE
         my $expr = $self->sa;
         $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
 
+        if ( _logic_is_sort( $ops, $i, $addr ) ) { # series of sort ops
+            return $self->sa( sprintf( '( %s %s %s )', $expr, $type, $st_true->sa ) );
+        }
+
         if ( $st_true->code ) { # Ah, if-style had gone..., but again write if-style!
             my $if_style = $type eq 'and' ? 'if' : 'unless';
             $self->write_lines( sprintf( <<'CODE', $if_style, $expr, $st_true->code ) );
@@ -960,10 +980,6 @@ CODE
         else {
         }
 
-#        $self->sa( sprintf( <<'CODE', $type, $expr, _rm_tailed_lf( $st_true->sa ) ) );
-#cond_%s( %s, sub { %s } )
-#CODE
-
     }
 
     $self->write_lines("# end $type [$i]");
@@ -976,6 +992,13 @@ sub _logic_is_max_min {
     and $ops->[ $i + 1 ]->[ 0 ] eq 'load_lvar_to_sb'
     and $ops->[ $i + 2 ]->[ 0 ] eq 'move_from_sb'
     and $arg == 2
+}
+
+
+sub _logic_is_sort {
+    my ( $ops, $i, $arg ) = @_;
+        $ops->[ $i - 1  ]->[ 0 ]        =~ /[sn]cmp/
+    and $ops->[ $i + $arg - 1 ]->[ 0 ]  =~ /[sn]cmp/
 }
 
 
@@ -1107,7 +1130,7 @@ sub call {
         elsif ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
             return bless \do {
                 $st->{ booster_macro }->{ $proc->[0] }->( $st, [ [ @args ] ], [ $frame, $line ] )
-            }, 'Text::Xslate::EscapedString';
+            }, 'Text::Xslate::Type::Raw';
         }
         else {
             $ret = eval { $proc->( @args ) };
@@ -1130,7 +1153,8 @@ my %builtin_method = (
     'array::size'    => \&Text::Xslate::PP::Method::_array_size,
     'array::join'    => \&Text::Xslate::PP::Method::_array_join,
     'array::reverse' => \&Text::Xslate::PP::Method::_array_reverse,
-    'array::sort'    => \&Text::Xslate::PP::Method::_array_sort,
+    'array::sort'    => \&_array_sort,
+    'array::map'     => \&_array_map,
 
     'hash::defined'  => \&Text::Xslate::PP::Method::_any_defined,
     'hash::size'     => \&Text::Xslate::PP::Method::_hash_size,
@@ -1138,6 +1162,7 @@ my %builtin_method = (
     'hash::values'   => \&Text::Xslate::PP::Method::_hash_values,
     'hash::kv'       => \&Text::Xslate::PP::Method::_hash_kv,
 );
+
 
 our @_f_l_for_methodcall;
 
@@ -1150,6 +1175,32 @@ our @_f_l_for_methodcall;
         return undef;
     }
 
+}
+
+
+sub _array_sort {
+    my( $array_ref, $callback ) = @_;
+    my ( $st, $frame, $line ) = @_f_l_for_methodcall;
+    return Text::Xslate::PP::Method::_bad_arg('sort') if !(@_ == 1 or @_ == 2);
+
+    if(@_ == 1) {
+        return [ sort @{ $array_ref } ];
+    }
+    else {
+        return [ sort {
+            proccall( $st, $callback, [ [ $a, $b ] ], [ $frame, $line ] );
+        } @{$array_ref} ];
+    }
+}
+
+
+sub _array_map {
+    my( $array_ref, $callback ) = @_;
+    my ( $st, $frame, $line ) = @_f_l_for_methodcall;
+    return Text::Xslate::PP::Method::_bad_arg('map') if @_ != 2;
+    return [ map {
+        proccall( $st, $callback, [ [ $_ ] ], [ $frame, $line ] );
+    } @{$array_ref} ];
 }
 
 
@@ -1177,11 +1228,8 @@ sub methodcall {
     local @_f_l_for_methodcall = ( $st, $frame, $line );
 
     if( my $body = $st->symbol->{ $fq_name } || $builtin_method{ $fq_name } ){
-        my $retval = eval { $body->($invocant, @args) };
-        if($@) {
-            _error( $st, $frame, $line, "%s", $@ );
-        }
-        return $retval;
+        my $pad = [ [ $invocant, @args ] ]; # re-pushmark
+        return proccall( $st, $body, $pad, [ $frame, $line ] );
     }
 
     if ( not defined $invocant ) {
@@ -1192,6 +1240,24 @@ sub methodcall {
     _error($st, $frame, $line, "Undefined method %s called for %s", $method, $invocant);
 
     return undef;
+}
+
+
+sub proccall {
+    my ( $st, $proc, $pad, $f_l ) = @_;
+    my $ret;
+
+    if ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
+        return bless \do {
+            $st->{ booster_macro }->{ $proc->[0] }->( $st, $pad, $f_l)
+        }, 'Text::Xslate::Type::Raw';
+    }
+    else {
+        $ret = eval { $proc->( @{ $pad->[ -1 ] } ) };
+        _error( $st, @$f_l, "%s\t...", $@) if $@;
+    }
+
+    return $ret;
 }
 
 
@@ -1301,20 +1367,6 @@ sub push_pad {
 }
 
 
-sub push_pad_for_macro {
-    my ( $lvars, $pad, $arrayref ) = @_;
-
-    push @{ $pad }, $arrayref;
-
-    # copies lexical variables from the old frame to the new one
-    if($lvars > 0) {
-        push @{ $pad->[ -1 ] }, @{ $pad->[ -2 ] };
-    }
-
-    return $pad;
-}
-
-
 sub localize_s {
     my( $st, $key, $newval ) = @_;
     my $vars       = $st->{vars};
@@ -1329,6 +1381,29 @@ sub localize_s {
     push @{ $st->{local_stack} ||= [] }, bless( $cleanup, 'Text::Xslate::PP::Booster::Guard' );
 
     $vars->{$key} = $newval;
+}
+
+
+sub symbol {
+    my ( $st, $name, $frame, $line ) = @_;
+
+    if ( !defined $st->symbol->{ $name } ) {
+        $st->{ pc } = $line;
+        $st->frame->[ $st->current_frame ]->[ Text::Xslate::PP::TXframe_NAME ] = $frame;
+        Carp::croak( sprintf( "Undefined symbol %s", $name ) );
+    }
+
+    return $st->symbol->{ $name };
+}
+
+
+sub _mark_raw {
+    defined $_[0] ? mark_raw( $_[0] ) : undef;
+}
+
+
+sub _unmark_raw {
+    defined $_[0] ? unmark_raw( $_[0] ) : undef;
 }
 
 

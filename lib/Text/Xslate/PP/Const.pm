@@ -78,20 +78,22 @@ our %OPS = (
     le               => 40,
     gt               => 41,
     ge               => 42,
-    symbol           => 43,
-    macro_end        => 44,
-    funcall          => 45,
-    methodcall_s     => 46,
-    make_array       => 47,
-    make_hash        => 48,
-    enter            => 49,
-    leave            => 50,
-    goto             => 51,
-    end              => 52,
-    depend           => 53,
-    macro_begin      => 54,
-    macro_nargs      => 55,
-    macro_outer      => 56,
+    ncmp             => 43,
+    scmp             => 44,
+    symbol           => 45,
+    macro_end        => 46,
+    funcall          => 47,
+    methodcall_s     => 48,
+    make_array       => 49,
+    make_hash        => 50,
+    enter            => 51,
+    leave            => 52,
+    goto             => 53,
+    end              => 54,
+    depend           => 55,
+    macro_begin      => 56,
+    macro_nargs      => 57,
+    macro_outer      => 58,
 ); # %OPS
 
 our @OPCODE = (
@@ -138,20 +140,22 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_le,                  # 40
     \&Text::Xslate::PP::Opcode::op_gt,                  # 41
     \&Text::Xslate::PP::Opcode::op_ge,                  # 42
-    \&Text::Xslate::PP::Opcode::op_symbol,              # 43
-    \&Text::Xslate::PP::Opcode::op_macro_end,           # 44
-    \&Text::Xslate::PP::Opcode::op_funcall,             # 45
-    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 46
-    \&Text::Xslate::PP::Opcode::op_make_array,          # 47
-    \&Text::Xslate::PP::Opcode::op_make_hash,           # 48
-    \&Text::Xslate::PP::Opcode::op_enter,               # 49
-    \&Text::Xslate::PP::Opcode::op_leave,               # 50
-    \&Text::Xslate::PP::Opcode::op_goto,                # 51
-    \&Text::Xslate::PP::Opcode::op_end,                 # 52
-    \&Text::Xslate::PP::Opcode::op_depend,              # 53
-    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 54
-    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 55
-    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 56
+    \&Text::Xslate::PP::Opcode::op_ncmp,                # 43
+    \&Text::Xslate::PP::Opcode::op_scmp,                # 44
+    \&Text::Xslate::PP::Opcode::op_symbol,              # 45
+    \&Text::Xslate::PP::Opcode::op_macro_end,           # 46
+    \&Text::Xslate::PP::Opcode::op_funcall,             # 47
+    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 48
+    \&Text::Xslate::PP::Opcode::op_make_array,          # 49
+    \&Text::Xslate::PP::Opcode::op_make_hash,           # 50
+    \&Text::Xslate::PP::Opcode::op_enter,               # 51
+    \&Text::Xslate::PP::Opcode::op_leave,               # 52
+    \&Text::Xslate::PP::Opcode::op_goto,                # 53
+    \&Text::Xslate::PP::Opcode::op_end,                 # 54
+    \&Text::Xslate::PP::Opcode::op_depend,              # 55
+    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 56
+    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 57
+    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 58
 ); # @OPCODE
 
 our @OPARGS = (
@@ -198,6 +202,8 @@ our @OPARGS = (
     0,             # le
     0,             # gt
     0,             # ge
+    0,             # ncmp
+    0,             # scmp
     TXCODE_W_KEY,  # symbol
     TXCODE_W_INT,  # macro_end
     0,             # funcall

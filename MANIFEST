@@ -7,8 +7,11 @@ benchmark/for.pl
 benchmark/function.pl
 benchmark/include.pl
 benchmark/interpolate.pl
+benchmark/json.pl
 benchmark/keys.pl
+benchmark/map.pl
 benchmark/others.pl
+benchmark/sort.pl
 benchmark/template/base.mt
 benchmark/template/base.tx
 benchmark/template/child.mt
@@ -84,7 +87,7 @@ t/010_internals/004_magic.t
 t/010_internals/005_load_file.t
 t/010_internals/006_errhandler.t
 t/010_internals/007_compile_errs.t
-t/010_internals/008_altparser.t
+t/010_internals/008_parser_option.t
 t/010_internals/009_myparser.t
 t/010_internals/010_files.t
 t/010_internals/011_goto_address.t
@@ -129,6 +132,8 @@ t/020_features/025_localize_vars.t
 t/020_features/026_objectliteral.t
 t/020_features/027_constant.t
 t/020_features/028_autobox.t
+t/020_features/029_autobox_w_cb.t
+t/020_features/030_lambda.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t

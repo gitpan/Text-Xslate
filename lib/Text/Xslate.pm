@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1032';
+our $VERSION = '0.1033';
 
 use Text::Xslate::Util qw($DEBUG
     mark_raw unmark_raw
@@ -66,6 +66,12 @@ my %compiler_option = (
     escape      => undef,
 );
 
+my %parser_option = (
+    line_start => undef,
+    tag_start  => undef,
+    tag_end    => undef,
+);
+
 sub compiler_class() { 'Text::Xslate::Compiler' }
 
 sub options { # overridable
@@ -85,8 +91,8 @@ sub options { # overridable
         warn_handler => undef,
         die_handler  => undef,
 
-        # compiler options
         %compiler_option,
+        %parser_option,
     };
 }
 
@@ -330,6 +336,7 @@ sub _load_compiled {
                 Carp::carp("Xslate: failed to stat $value (ignored): $!");
             }
             if($dep_mtime > $threshold_mtime){
+                close $in; # Win32 doesn't allow to remove opend files
                 unlink $cachepath
                     or $self->_error("LoadError: Cannot unlink $cachepath: $!");
 
@@ -361,19 +368,20 @@ sub _save_compiled {
 sub _magic {
     my($self, $fullpath) = @_;
 
-    my $compiler_options = join(',',
+    my $opt = join(',',
         ref($self->{compiler}) || $self->{compiler},
-        $self->_compiler_options,
+        $self->_extract_options(\%compiler_option),
+        $self->_extract_options(\%parser_option),
     );
 
     return sprintf $XSLATE_MAGIC,
-        $VERSION, $fullpath, $compiler_options;
+        $VERSION, $fullpath, $opt;
 }
 
-sub _compiler_options {
-    my($self) = @_;
+sub _extract_options {
+    my($self, $opt_ref) = @_;
     my @options;
-    foreach my $name(sort keys %compiler_option) {
+    foreach my $name(sort keys %{$opt_ref}) {
         if(defined($self->{$name})) {
             push @options, $name => $self->{$name};
         }
@@ -392,7 +400,10 @@ sub _compiler {
 
         $compiler = $compiler->new(
             engine => $self,
-            $self->_compiler_options,
+            $self->_extract_options(\%compiler_option),
+            parser_option => {
+                $self->_extract_options(\%parser_option),
+            },
         );
 
         $compiler->define_function(keys %{ $self->{function} });
@@ -428,7 +439,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1032.
+This document describes Text::Xslate version 0.1033.
 
 =head1 SYNOPSIS
 
@@ -482,8 +493,9 @@ This document describes Text::Xslate version 0.1032.
 
 =head1 DESCRIPTION
 
-B<Text::Xslate> is a template engine tuned for persistent applications.
-This engine introduces the virtual machine paradigm. That is, templates are
+B<Text::Xslate> (pronounced as /eks-leit/) is a high performance template engine
+tuned for persistent applications.
+This engine introduces the virtual machine paradigm. Templates are
 compiled into xslate intermediate code, and then executed by the xslate
 virtual machine.
 
@@ -544,7 +556,7 @@ This mechanism is also called as template inheritance.
 The Xslate virtual machine and the parser/compiler are completely separated
 so that one can use alternative parsers.
 
-For example, C<TTerse>, a Template-Toolkit-like parser, is supported as a
+For example, C<TTerse>, a Template-Toolkit compatible parser, is supported as a
 completely different syntax parser.
 
 =head1 INTERFACE
@@ -553,7 +565,7 @@ completely different syntax parser.
 
 =head3 B<< Text::Xslate->new(%options) :XslateEngine >>
 
-Creates a new xslate template engine.
+Creates a new xslate template engine with options.
 
 Possible options are:
 
@@ -584,15 +596,14 @@ You B<should> specify this option on productions.
 
 =item C<< function => \%functions >>
 
-Specifies functions, which may be called as C<f($arg)> or C<$arg | f>.
+Specifies a function map. A function C<f> may be called as C<f($arg)> or C<$arg | f>.
 
-Note that builtin methods are overridable, while builtin filters,
-namely C<raw>, C<html> and C<dump>, are not.
+There are a few builtin filters, but they are not overridable.
 
 =item C<< module => [$module => ?\@import_args, ...] >>
 
 Imports functions from I<$module>, which may be a function-based or bridge module.
-I<@import_args> is optional.
+Optional I<@import_args> are passed to C<import> as C<< $module->import(@import_args) >>.
 
 For example:
 
@@ -614,26 +625,13 @@ For example:
         { x => time() },
     );
 
-You can use function-based modules with the C<module> option, and also can
-invoke any object methods in templates. Thus, Xslate doesn't require the
+Because you can use function-based modules with the C<module> option, and
+also can invoke any object methods in templates, Xslate doesn't require
 specific namespaces for plugins.
 
 =item C<< input_layer => $perliolayers // ':utf8' >>
 
 Specifies PerlIO layers for reading templates.
-
-=item C<< syntax => $name // 'Kolon' >>
-
-Specifies the template syntax you want to use.
-
-I<$name> may be a short name (e.g. C<Kolon>), or a fully qualified name
-(e.g. C<Text::Xslate::Syntax::Kolon>).
-
-=item C<< escape => $mode // 'html' >>
-
-Specifies the escape mode, which is automatically applied to template expressions.
-
-Possible escape modes are B<html> and B<none>.
 
 =item C<< verbose => $level // 1 >>
 
@@ -650,19 +648,58 @@ If C<< $level >= 2 >>, all the possible errors will be warned.
 
 Specify the template suffix, which is used for template cascading.
 
+=item C<< syntax => $name // 'Kolon' >>
+
+Specifies the template syntax you want to use.
+
+I<$name> may be a short name (e.g. C<Kolon>), or a fully qualified name
+(e.g. C<Text::Xslate::Syntax::Kolon>).
+
+This option is passed to the compiler directly.
+
+=item C<< escape => $mode // 'html' >>
+
+Specifies the escape mode, which is automatically applied to template expressions.
+
+Possible escape modes are B<html> and B<none>.
+
+This option is passed to the compiler directly.
+
+=item C<< line_start => $token // $parser_defined >>
+
+Specify the token to start line code, which may be a string or a regular
+expression.
+
+This option is passed to the parser via the compiler.
+
+=item C<< tag_start => $str // $parser_defined >>
+
+Specify the token to start inline code, which may be a string or a
+regular expression.
+
+This option is passed to the parser via the compiler.
+
+=item C<< line_start => $str // $parser_defined >>
+
+Specify the token to end inline code, which may be a string or a
+regular expression.
+
+This option is passed to the parser via the compiler.
+
+
 =back
 
 =head3 B<< $tx->render($file, \%vars) :Str >>
 
 Renders a template file with variables, and returns the result.
-I<\%vars> can be omitted.
+I<\%vars> is optional.
 
 Note that I<$file> may be cached according to the cache level.
 
 =head3 B<< $tx->render_string($string, \%vars) :Str >>
 
 Renders a template string with variables, and returns the result.
-I<\%vars> can be omitted.
+I<\%vars> is optional.
 
 Note that I<$string> is never cached so that this method is suitable for testing.
 
@@ -759,7 +796,7 @@ There are common notes in Xslate.
 =head2 Nil/undef handling
 
 Note that nil (i.e. C<undef> in Perl) handling is different from Perl's.
-Basically it does nothing, but C<< verbose => 2 >> will produce warnings for it.
+Basically it does nothing, but C<< verbose => 2 >> will produce warnings on it.
 
 =over
 
@@ -839,7 +876,7 @@ L<Template::Benchmark>
 Thanks to lestrrat for the suggestion to the interface of C<render()> and
 the contribution of App::Xslate.
 
-Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug-finding.
+Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug finding.
 
 Thanks to gardejo for the proposal to the name B<template cascading>.
 

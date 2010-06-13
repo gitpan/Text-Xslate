@@ -46,6 +46,8 @@ TXC(lt);
 TXC(le);
 TXC(gt);
 TXC(ge);
+TXC(ncmp);
+TXC(scmp);
 TXC_w_key(symbol); /* find a symbol (function, macro, constant) */
 TXC_w_int(macro_end);
 TXC(funcall); /* call a function or a macro */
@@ -105,20 +107,22 @@ enum tx_opcode_t {
     TXOP_le, /* 40 */
     TXOP_gt, /* 41 */
     TXOP_ge, /* 42 */
-    TXOP_symbol, /* 43 */
-    TXOP_macro_end, /* 44 */
-    TXOP_funcall, /* 45 */
-    TXOP_methodcall_s, /* 46 */
-    TXOP_make_array, /* 47 */
-    TXOP_make_hash, /* 48 */
-    TXOP_enter, /* 49 */
-    TXOP_leave, /* 50 */
-    TXOP_goto, /* 51 */
-    TXOP_end, /* 52 */
-    TXOP_depend, /* 53 */
-    TXOP_macro_begin, /* 54 */
-    TXOP_macro_nargs, /* 55 */
-    TXOP_macro_outer, /* 56 */
+    TXOP_ncmp, /* 43 */
+    TXOP_scmp, /* 44 */
+    TXOP_symbol, /* 45 */
+    TXOP_macro_end, /* 46 */
+    TXOP_funcall, /* 47 */
+    TXOP_methodcall_s, /* 48 */
+    TXOP_make_array, /* 49 */
+    TXOP_make_hash, /* 50 */
+    TXOP_enter, /* 51 */
+    TXOP_leave, /* 52 */
+    TXOP_goto, /* 53 */
+    TXOP_end, /* 54 */
+    TXOP_depend, /* 55 */
+    TXOP_macro_begin, /* 56 */
+    TXOP_macro_nargs, /* 57 */
+    TXOP_macro_outer, /* 58 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -166,6 +170,8 @@ static const tx_exec_t tx_opcode[] = {
     TXCODE_le,
     TXCODE_gt,
     TXCODE_ge,
+    TXCODE_ncmp,
+    TXCODE_scmp,
     TXCODE_symbol,
     TXCODE_macro_end,
     TXCODE_funcall,
@@ -227,6 +233,8 @@ static const U8 tx_oparg[] = {
     0U, /* le */
     0U, /* gt */
     0U, /* ge */
+    0U, /* ncmp */
+    0U, /* scmp */
     TXCODE_W_KEY, /* symbol */
     TXCODE_W_INT, /* macro_end */
     0U, /* funcall */
@@ -288,6 +296,8 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(le), newSViv(TXOP_le));
     (void)hv_stores(ops, STRINGIFY(gt), newSViv(TXOP_gt));
     (void)hv_stores(ops, STRINGIFY(ge), newSViv(TXOP_ge));
+    (void)hv_stores(ops, STRINGIFY(ncmp), newSViv(TXOP_ncmp));
+    (void)hv_stores(ops, STRINGIFY(scmp), newSViv(TXOP_scmp));
     (void)hv_stores(ops, STRINGIFY(symbol), newSViv(TXOP_symbol));
     (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
