@@ -152,6 +152,8 @@ t/100_tterse/013_wrapper.t
 t/100_tterse/014_set.t
 t/100_tterse/015_while.t
 t/100_tterse/016_call.t
+t/100_tterse/017_filter.t
+t/100_tterse/018_process.t
 t/400_plugin/001_import_from.t
 t/400_plugin/002_import.t
 t/400_plugin/003_bridge.t
@@ -170,9 +172,14 @@ t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
 t/lib/Util.pm
 t/template/common.tx
+t/template/config.tt
 t/template/eg/base.tx
 t/template/eg/child.tx
+t/template/footer1.tt
+t/template/footer2.tt
 t/template/for.tx
+t/template/header1.tt
+t/template/header2.tt
 t/template/hello.tt
 t/template/hello.tx
 t/template/hello.tx.mod
@@ -187,7 +194,10 @@ t/template/myapp/base.tx.mod
 t/template/myapp/cbar.tx
 t/template/myapp/cfoo.tx
 t/template/myapp/derived.tx
+t/template/wrapper1.tt
+t/template/wrapper2.tt
 t/template/wrapping.tt
+test.tx
 tool/force-pp.pl
 tool/opcode.pl
 tool/opcode_for_pp.pl

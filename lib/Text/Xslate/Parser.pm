@@ -61,6 +61,12 @@ coerce $RegexpRefType =>
     from 'Str', via { qr/\Q$_\E/xms },
 ;
 
+has [qw(compiler engine)] => (
+    is       => 'rw',
+    required => 0,
+    weak_ref => 1,
+);
+
 has symbol_table => ( # the global symbol table
     is  => 'ro',
     isa => 'HashRef',
@@ -249,9 +255,11 @@ sub split :method {
 }
 
 sub preprocess {
-    my $parser = shift;
+    my($parser, $input) = @_;
 
-    my $tokens_ref = $parser->split(@_);
+    # tokenization
+
+    my $tokens_ref = $parser->split($input);
     my $code = '';
 
     my $shortcut_table = $parser->shortcut_table;
@@ -521,7 +529,7 @@ sub init_iterator_elements {
         is_last   => \&iterator_is_last,
         body      => \&iterator_body,
         size      => \&iterator_size,
-        max       => \&iterator_max,
+        max_index => \&iterator_max_index,
         peek_next => \&iterator_peek_next,
         peek_prev => \&iterator_peek_prev,
     });
@@ -1095,19 +1103,25 @@ sub nud_constant {
     );
 }
 
+my $lambda_id = 0;
+sub lambda {
+    my($parser, $proto) = @_;
+    my $name = $parser->symbol('(name)')->clone(
+        id => sprintf('lambda@%d', $lambda_id++),
+    );
+
+    return $proto->clone(
+        arity => 'proc',
+        id    => 'macro',
+        first => $name,
+    );
+}
+
 # -> $x { ... }
 sub nud_lambda {
     my($parser, $symbol) = @_;
 
-    my $unique_name = $parser->symbol('(name)')->clone(
-        id => sprintf('lambda@0x%x', Scalar::Util::refaddr($symbol)),
-    );
-
-    my $pointy = $symbol->clone(
-        arity => 'proc',
-        id    => 'macro',
-        first => $unique_name, # name
-    );
+    my $pointy = $parser->lambda($symbol);
 
     $parser->new_scope();
     my @params;
@@ -1549,8 +1563,8 @@ sub iterator_is_first {
 
 sub iterator_is_last {
     my($parser, $iterator) = @_;
-    # $~iterator == $~iterator.max
-    return $parser->binary('==', $iterator, $parser->iterator_max($iterator));
+    # $~iterator == $~iterator.max_index
+    return $parser->binary('==', $iterator, $parser->iterator_max_index($iterator));
 }
 
 sub iterator_body {
@@ -1563,11 +1577,11 @@ sub iterator_body {
 
 sub iterator_size {
     my($parser, $iterator) = @_;
-    # $~iterator.max + 1
-    return $parser->binary('+', $parser->iterator_max($iterator), 1);
+    # $~iterator.max_index + 1
+    return $parser->binary('+', $parser->iterator_max_index($iterator), 1);
 }
 
-sub iterator_max {
+sub iterator_max_index {
     my($parser, $iterator) = @_;
     # __builtin_max_index($~iterator.body)
     return $parser->symbol('max_index')->clone(

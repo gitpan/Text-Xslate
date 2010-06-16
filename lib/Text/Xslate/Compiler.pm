@@ -83,7 +83,6 @@ has lvar_id => ( # local varialbe id
     is  => 'rw',
     isa => 'Int',
 
-    default  => 0,
     init_arg => undef,
 );
 
@@ -105,16 +104,20 @@ has macro_table => (
     is  => 'rw',
     isa => 'HashRef',
 
-    init_arg => undef,
+    predicate => 'has_macro_table',
+    init_arg  => undef,
 );
 
-has engine => (
-    is  => 'ro',
-    isa => 'Object', # Text::Xslate
-
-    weak_ref => 1,
-
+has engine => ( # Xslate engine
+    is       => 'ro',
     required => 0,
+    weak_ref => 1,
+);
+
+has dependencies => (
+    is  => 'ro',
+    isa => 'ArrayRef',
+    init_arg => undef,
 );
 
 has escape_mode => (
@@ -130,7 +133,6 @@ has syntax => (
     is       => 'rw',
 
     default  => 'Kolon',
-    required => 0,
 );
 
 has parser_option => (
@@ -146,30 +148,38 @@ has parser => (
 
     handles => [qw(file line define_function)],
 
-    lazy    => 1,
-    default => sub {
-        my($self) = @_;
-        my $syntax = $self->syntax;
-        if(blessed($syntax)) {
-            return $syntax;
-        }
-        else {
-            my $parser_class = Any::Moose::load_first_existing_class(
-                "Text::Xslate::Syntax::" . $syntax,
-                $syntax,
-            );
-            return $parser_class->new($self->parser_option);
-        }
-    },
-
-    required => 0,
+    lazy     => 1,
+    builder  => '_build_parser',
+    init_arg => undef,
 );
 
-has cascade => (
-    is  => 'rw',
-    isa => 'Object',
+sub _build_parser {
+    my($self) = @_;
+    my $syntax = $self->syntax;
+    if(ref($syntax)) {
+        return $syntax;
+    }
+    else {
+        my $parser_class = Any::Moose::load_first_existing_class(
+            "Text::Xslate::Syntax::" . $syntax,
+            $syntax,
+        );
+        return $parser_class->new(
+            %{$self->parser_option},
+            engine   => $self->engine,
+            compiler => $self,
+        );
+    }
+}
 
+has cascade => (
+    is       => 'rw',
     init_arg => undef,
+);
+
+has [qw(header footer)] => (
+    is  => 'rw',
+    isa => 'ArrayRef',
 );
 
 sub lvar_use {
@@ -181,12 +191,16 @@ sub lvar_use {
 sub compile {
     my($self, $str, %args) = @_;
 
-    my %mtable;
-    local $self->{macro_table} = \%mtable;
+    # each compiling process is independent
+    local $self->{macro_table}  = {};
+    local $self->{lvar_id     } = 0;
+    local $self->{lvar}         = {};
+    local $self->{const}        = [];
+    local $self->{dependencies} = [];
     local $self->{cascade};
-    local $self->{lvar_id} = 0;
-    local $self->{lvar}    = {};
-    local $self->{const}   = [];
+    local $self->{header}  = $self->{header};
+    local $self->{footer}  = $self->{footer};
+    local $self->{wrapper} = $self->{wrapper};
 
     my $parser   = $self->parser;
     my $old_file = $parser->file;
@@ -204,9 +218,9 @@ sub compile {
     my $cascade = $self->cascade;
     if(defined $cascade) {
         $self->_process_cascade($cascade, \%args, \@code);
-    } # if defined $cascade
+    }
 
-    push @code, $self->_flush_macro_table() if %mtable;
+    push @code, $self->_flush_macro_table() if $self->has_macro_table;
 
     if($OPTIMIZE) {
         $self->_optimize_vmcode(\@code) for 1 .. 3;
@@ -217,6 +231,13 @@ sub compile {
             if _DUMP_ASM;
 
     $parser->file($old_file || '<input>'); # reset
+
+    {
+        my %uniq;
+        push @code,
+            map  { [ depend => $_ ] }
+            grep { !$uniq{$_}++ } @{$self->dependencies};
+    }
 
     return \@code;
 }
@@ -270,16 +291,14 @@ sub _process_cascade {
     if(defined $base) { # pure cascade
         $base_file = $self->_bare_to_file($base);
         $base_code = $engine->load_file($base_file);
-        unshift @{$base_code},
-            [ depend => $engine->find_file($base_file)->{fullpath} ];
+        $self->requires( $engine->find_file($base_file)->{fullpath} );
     }
     else { # overlay
         $base_file = $args->{file}; # only for error messages
         $base_code = $main_code;
 
         if(defined $args->{fullpath}) {
-            unshift @{$base_code},
-                [ depend => $args->{fullpath} ];
+            $self->requires( $args->{fullpath} );
         }
 
         push @{$main_code}, $self->_flush_macro_table();
@@ -311,7 +330,7 @@ sub _process_cascade {
             }
         }
 
-        unshift @{$base_code}, [ depend => $fullpath ];
+        $self->requires($fullpath);
         $self->_process_cascade_file($cfile, $base_code);
     }
 
@@ -512,7 +531,7 @@ sub _generate_cascade {
         $self->_error("Cannot cascade twice in a template", $node);
     }
     $self->cascade( $node );
-    return ();
+    return;
 }
 
 sub _compile_block {
@@ -1018,6 +1037,12 @@ sub _variable_to_value {
     my $name = $arg->id;
     $name =~ s/\$//;
     return $name;
+}
+
+sub requires {
+    my($self, @files) = @_;
+    push @{ $self->dependencies }, @files;
+    return;
 }
 
 # optimizatin stuff

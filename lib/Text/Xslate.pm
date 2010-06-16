@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1033';
+our $VERSION = '0.1034';
 
 use Text::Xslate::Util qw($DEBUG
     mark_raw unmark_raw
@@ -61,15 +61,25 @@ my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 # version-path-{compiler options}
 my $XSLATE_MAGIC    = qq{.xslate "%s-%s-{%s}"\n};
 
-my %compiler_option = (
-    syntax      => undef,
-    escape      => undef,
-);
-
 my %parser_option = (
     line_start => undef,
     tag_start  => undef,
     tag_end    => undef,
+);
+
+my %compiler_option = (
+    syntax     => undef,
+    escape     => undef,
+    header     => undef,
+    footer     => undef,
+);
+
+my %builtin = (
+    raw        => \&Text::Xslate::Util::mark_raw,
+    html       => \&Text::Xslate::Util::html_escape,
+    mark_raw   => \&Text::Xslate::Util::mark_raw,
+    unmark_raw => \&Text::Xslate::Util::unmark_raw,
+    dump       => \&Text::Xslate::Util::p,
 );
 
 sub compiler_class() { 'Text::Xslate::Compiler' }
@@ -77,22 +87,22 @@ sub compiler_class() { 'Text::Xslate::Compiler' }
 sub options { # overridable
     my($class) = @_;
     return {
-        # name => default
-        suffix      => '.tx',
-        path        => ['.'],
-        input_layer => ':utf8',
-        cache       => 1,
-        cache_dir   => _DEFAULT_CACHE_DIR,
-        module      => undef,
-        function    => undef,
-        compiler    => $class->compiler_class,
+        # name       => default
+        suffix       => '.tx',
+        path         => ['.'],
+        input_layer  => ':utf8',
+        cache        => 1,
+        cache_dir    => _DEFAULT_CACHE_DIR,
+        module       => undef,
+        function     => undef,
+        compiler     => $class->compiler_class,
 
         verbose      => 1,
         warn_handler => undef,
         die_handler  => undef,
 
-        %compiler_option,
         %parser_option,
+        %compiler_option,
     };
 }
 
@@ -117,6 +127,12 @@ sub new {
         warnings::warnif(misc => "$class: Unknown option(s): " . join ' ', @unknowns);
     }
 
+    if(!ref $args{path}) {
+        $args{path} = [$args{path}];
+    }
+
+    # function
+
     my %funcs;
     if(defined $args{module}) {
         %funcs = import_from(@{$args{module}});
@@ -130,24 +146,16 @@ sub new {
     }
 
     # the following functions are not overridable
-    foreach my $builtin(qw(raw html dump)) {
-        if(exists $funcs{$builtin}) {
+    foreach my $name(keys %builtin) {
+        if(exists $funcs{$name}) {
             warnings::warnif(redefine =>
-                "$class: You cannot redefine builtin function '$builtin',"
+                "$class: You cannot redefine builtin function '$name',"
                 . " because it is embeded in the engine");
         }
+        $funcs{$name} = $builtin{$name};
     }
-    $funcs{raw}         = \&Text::Xslate::Util::mark_raw;
-    $funcs{html}        = \&Text::Xslate::Util::html_escape;
-    $funcs{mark_raw}    = \&Text::Xslate::Util::mark_raw;
-    $funcs{unmark_raw}  = \&Text::Xslate::Util::unmark_raw;
-    $funcs{dump}        = \&Text::Xslate::Util::p;
 
     $args{function} = \%funcs;
-
-    if(!ref $args{path}) {
-        $args{path} = [$args{path}];
-    }
 
     # internal data
     $args{template} = {};
@@ -199,7 +207,7 @@ sub find_file {
         $self->_error("LoadError: Cannot find $file (path: @{$self->{path}})");
     }
 
-    print STDOUT "  find_file: $fullpath\n" if _DUMP_LOAD_FILE;
+    print STDOUT "  find_file: $fullpath (", ($cache_mtime || 0), ")\n" if _DUMP_LOAD_FILE;
 
     return {
         file        => $file,
@@ -229,11 +237,21 @@ sub load_file {
     # $cache_mtime == 0     : doesn't use caches
     my $cache_mtime;
     if($self->{cache} < 2) {
-        $cache_mtime = $fi->{cache_time} || 0;
+        $cache_mtime = $fi->{cache_mtime} || 0;
     }
 
     $self->_assemble($asm, $file, $fi->{fullpath}, $fi->{cachepath}, $cache_mtime);
     return $asm;
+}
+
+sub slurp {
+    my($self, $fullpath) = @_;
+
+    open my($source), '<' . $self->{input_layer}, $fullpath
+        or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
+    local $/;
+
+    return scalar <$source>;
 }
 
 sub _load_source {
@@ -241,13 +259,14 @@ sub _load_source {
     my $fullpath  = $fi->{fullpath};
     my $cachepath = $fi->{cachepath};
 
-    my $source;
-    {
-        open my($in), '<' . $self->{input_layer}, $fullpath
-            or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
-        local $/;
-        $source = <$in>;
+    # This routine is called when the cache is no longer valid (or not created yet)
+    # so it should be ensured that the cache, if exists, does not exist
+    if(-e $cachepath) {
+        unlink $cachepath
+            or Carp::carp("Xslate: cannot unlink $cachepath (ignored): $!");
     }
+
+    my $source = $self->slurp($fullpath);
 
     my $asm = $self->compile($source,
         file     => $fi->{file},
@@ -304,9 +323,6 @@ sub _load_compiled {
 
     if(scalar(<$in>) ne $self->_magic($fi->{fullpath})) {
         # magic token is not matched
-        close $in;
-        unlink $cachepath
-            or $self->_error("LoadError: Cannot unlink $cachepath: $!");
         return undef;
     }
 
@@ -336,10 +352,6 @@ sub _load_compiled {
                 Carp::carp("Xslate: failed to stat $value (ignored): $!");
             }
             if($dep_mtime > $threshold_mtime){
-                close $in; # Win32 doesn't allow to remove opend files
-                unlink $cachepath
-                    or $self->_error("LoadError: Cannot unlink $cachepath: $!");
-
                 printf "  _load_cache_compiled: %s(%s) is newer than %s(%s)\n",
                     $value,     scalar localtime($dep_mtime),
                     $cachepath, scalar localtime($threshold_mtime)
@@ -439,7 +451,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1033.
+This document describes Text::Xslate version 0.1034.
 
 =head1 SYNOPSIS
 
