@@ -36,6 +36,9 @@
 /* arbitrary initial buffer size */
 #define TX_HINT_SIZE 128
 
+/* max calling depth (execution/macrocall) */
+#define TX_MAX_DEPTH 100
+
 #define TXC(name) static void CAT2(TXCODE_, name)(pTHX_ tx_state_t* const txst)
 /* TXC_xxx macros provide the information of arguments, interpreted by tool/opcode.pl */
 #define TXC_w_sv(n)  TXC(n) /* has TX_op_arg as a SV */
@@ -64,6 +67,13 @@
 
 #define TX_current_framex(st) ((AV*)AvARRAY((st)->frame)[(st)->current_frame])
 #define TX_current_frame()    TX_current_framex(TX_st)
+
+#define TX_RUNOPS(st) STMT_START {                                 \
+        while((st)->pc < (st)->code_len) {                         \
+            CALL_FPTR((st)->code[(st)->pc].exec_code)(aTHX_ (st)); \
+        }                                                          \
+    } STMT_END
+
 
 /* template object, stored in $self->{template}{$file} */
 enum txtmplo_ix {

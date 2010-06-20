@@ -27,7 +27,7 @@ no_index:
     - xt
 requires:
   Any::Moose: 0.13
-  Mouse: 0.55
+  Mouse: 0.61
   MouseX::Getopt: 0.2601
   Scalar::Util: 1.23
   XSLoader: 0.1
@@ -36,4 +36,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.1034
+version: 0.1035

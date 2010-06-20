@@ -83,7 +83,7 @@ sub {
     my $output = q{};
     my $vars   = $st->{ vars };
 
-    $pad = [ [ ] ];
+    $st->{pad} = $pad = [ [ ] ];
 
 CODE
 
@@ -555,8 +555,10 @@ if ( @{$pad->[-1]} != $mobj->nargs ) {
 CODE
 
     $self->write_lines( sprintf( <<'CODE', $error ) );
-if ( $mobj->outer ) {
-    push @{$pad->[-1]}, @{$pad->[-2]};
+if ( my $outer = $mobj->outer ) {
+    my @temp = @{$pad->[-1]};
+    @{$pad->[-1]}[ 0 .. $outer - 1 ] = @{$pad->[-2]}[ 0 .. $outer - 1 ];
+    @{$pad->[-1]}[ $outer .. $outer + $mobj->nargs ] = @temp;
 }
 CODE
 
@@ -792,20 +794,17 @@ sub _check_logic {
     my ( $self, $type, $addr ) = @_;
     my $i = $self->current_line;
 
-    $self->write_lines("# $type [$i]");
-
     my $ops = $self->ops;
 
     my $next_opname = $ops->[ $i + $addr ]->[ 0 ] || '';
 
     if ( $next_opname =~ /and|or/ ) { # &&, ||
-        my $fmt = $type eq 'and'  ? ' && '
-                : $type eq 'dand' ? 'defined( %s )'
-                : $type eq 'or'   ? ' || '
-                : $type eq 'dor'  ? '!(defined( %s ))'
+        my $fmt = $type eq 'and'  ? '%s && %%s'
+                : $type eq 'dand' ? $] < 5.010 ? 'cond_dand( %s, sub { %%s } )' : '%s // %%s'
+                : $type eq 'or'   ? '%s || %%s '
+                : $type eq 'dor'  ? $] < 5.010 ? 'cond_dor( %s, sub { %%s } )'  : '%s // %%s'
                 : die $type;
-        my $pre_exprs = $self->exprs || '';
-        $self->exprs( $pre_exprs . $self->sa() . $fmt ); # store
+        $self->exprs( sprintf( $fmt, $self->sa() ) ); # store
         return;
     }
 
@@ -819,7 +818,7 @@ sub _check_logic {
             : die $type;
 
     if ( $opname eq 'goto' and $oparg > 0 ) { # if-else or ternary?
-        my $if_block_start   = $i + 1;                  # open if block
+        my $if_block_start   = $i + 1;                   # open if block
         my $if_block_end     = $i + $addr - 2;           # close if block - subtract goto line
         my $else_block_start = $i + $addr;               # open else block
         my $else_block_end   = $i + $addr + $oparg - 2;  # close else block - subtract goto line
@@ -856,20 +855,22 @@ sub _check_logic {
 
             my $st_2nd = $self->_spawn_child->_convert_opcode( $nested_ops );
 
-        $self->sa( sprintf(  <<'CODE', $self->sa, _rm_tailed_lf( $st_1st->sa ), _rm_tailed_lf( $st_2nd->sa ) ) );
-cond_ternary( %s, sub { %s; }, sub { %s; } )
-CODE
-
-            return;
+            return $self->sa(
+                sprintf( 'cond_ternary( %s, sub { %s; }, sub { %s; } )',
+                    sprintf( $fmt, $self->sa ),
+                    _rm_tailed_lf( $st_1st->sa ),
+                    _rm_tailed_lf( $st_2nd->sa ),
+                )
+            );
         }
 
         my $code = $st_1st->code;
 
         if ( $code and $code !~ /^\n+$/ ) {
             my $expr = $self->sa;
-            $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
+            $expr = sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ); # adding expr if exists
             $self->write_lines( sprintf( 'if ( %s ) {' , sprintf( $fmt, $expr ) ) );
-            $self->exprs( '' );
+            $self->exprs( undef );
             $self->write_lines( $code );
             $self->write_lines( sprintf( '}' ) );
         }
@@ -902,7 +903,7 @@ CODE
 
         if ( defined $sa_1st and defined $sa_2nd ) {
             my $expr = $self->sa;
-            $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
+            $expr = sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ); # adding expr if exists
             $self->sa( sprintf( '(%s ? %s : %s)', sprintf( $fmt, $expr ), $sa_1st, $sa_2nd ) );
         }
         else {
@@ -925,9 +926,9 @@ CODE
         );
 
         my $expr = $self->sa;
-        $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
+        $expr = sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ); # adding expr if exists
         $self->write_lines( sprintf( 'while ( %s ) {' , sprintf( $fmt, $expr ) ) );
-        $self->exprs( '' );
+        $self->exprs( undef );
         $self->write_lines( $st_wh->code );
         $self->write_lines( sprintf( '}' ) );
 
@@ -956,33 +957,29 @@ CODE
         );
 
         my $expr = $self->sa;
-        $expr = ( $self->exprs || '' ) . $expr; # adding expr if exists
+        $expr = sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ); # adding expr if exists
 
         if ( _logic_is_sort( $ops, $i, $addr ) ) { # series of sort ops
             return $self->sa( sprintf( '( %s %s %s )', $expr, $type, $st_true->sa ) );
         }
 
         if ( $st_true->code ) { # Ah, if-style had gone..., but again write if-style!
-            my $if_style = $type eq 'and' ? 'if' : 'unless';
-            $self->write_lines( sprintf( <<'CODE', $if_style, $expr, $st_true->code ) );
-%s ( %s ) {
-%s
-}
-CODE
-
+            my $cond_type = $type eq 'and'  ? 'if ( %s )'
+                          : $type eq 'or'   ? 'unless ( %s )'
+                          : $type eq 'dand' ? 'if ( defined( %s ) )'
+                          : $type eq 'dor'  ? 'unless ( defined( %s ) )'
+                          : die "invalid logic type" # can't reache here
+                          ;
+            $self->write_lines( sprintf( "%s {\n%s\n}\n", sprintf( $cond_type, $expr ), $st_true->code ) );
         }
         elsif ( $st_true->sa ) {
-            $self->sa( sprintf( <<'CODE', $type, $expr, _rm_tailed_lf( $st_true->sa ) ) );
-cond_%s( %s, sub { %s } )
-CODE
-
+            $self->sa( sprintf( 'cond_%s( %s, sub { %s } )', $type, $expr, _rm_tailed_lf( $st_true->sa ) ) );
         }
         else {
         }
 
     }
 
-    $self->write_lines("# end $type [$i]");
 }
 
 
@@ -1129,7 +1126,7 @@ sub call {
         }
         elsif ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
             return bless \do {
-                $st->{ booster_macro }->{ $proc->[0] }->( $st, [ [ @args ] ], [ $frame, $line ] )
+                $st->{ booster_macro }->{ $proc->[0] }->( $st, push_pad( $st->{pad}, [ @args ] ), [ $frame, $line ] )
             }, 'Text::Xslate::Type::Raw';
         }
         else {
@@ -1228,8 +1225,7 @@ sub methodcall {
     local @_f_l_for_methodcall = ( $st, $frame, $line );
 
     if( my $body = $st->symbol->{ $fq_name } || $builtin_method{ $fq_name } ){
-        my $pad = [ [ $invocant, @args ] ]; # re-pushmark
-        return proccall( $st, $body, $pad, [ $frame, $line ] );
+        return proccall( $st, $body, [ [ $invocant, @args ] ], [ $frame, $line ] );
     }
 
     if ( not defined $invocant ) {

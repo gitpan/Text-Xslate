@@ -17,6 +17,7 @@ use Scalar::Util ();
 #use constant _VERBOSE  => scalar($DEBUG =~ /\b verbose \b/xms);
 use constant _DUMP_ASM => scalar($DEBUG =~ /\b dump=asm \b/xms);
 use constant _DUMP_AST => scalar($DEBUG =~ /\b dump=ast \b/xms);
+use constant _DUMP_GEN => scalar($DEBUG =~ /\b dump=gen \b/xms);
 
 our $OPTIMIZE = scalar(($DEBUG =~ /\b optimize=(\d+) \b/xms)[0]);
 if(not defined $OPTIMIZE) {
@@ -189,7 +190,7 @@ sub lvar_use {
 }
 
 sub compile {
-    my($self, $str, %args) = @_;
+    my($self, $input, %args) = @_;
 
     # each compiling process is independent
     local $self->{macro_table}  = {};
@@ -200,16 +201,25 @@ sub compile {
     local $self->{cascade};
     local $self->{header}  = $self->{header};
     local $self->{footer}  = $self->{footer};
-    local $self->{wrapper} = $self->{wrapper};
 
     my $parser   = $self->parser;
     my $old_file = $parser->file;
 
     $args{file} ||= '<input>';
 
+    my $header = delete $self->{header};
+    my $footer = delete $self->{footer};
+
+    if($header) {
+        substr $input, 0, 0, $self->_cat_files($header);
+    }
+    if($footer) {
+        $input .= $self->_cat_files($footer);
+    }
+
     my @code; # main protocode
     {
-        my $ast = $parser->parse($str, %args);
+        my $ast = $parser->parse($input, %args);
         print STDERR p($ast) if _DUMP_AST;
         @code = $self->_compile_ast($ast);
         $self->_finish_main(\@code);
@@ -242,11 +252,25 @@ sub compile {
     return \@code;
 }
 
+sub _cat_files {
+    my($self, $files) = @_;
+    my $engine = $self->engine || $self->_error("No Xslate engine which header/footer requires");
+    my $s = '';
+    foreach my $file(@{$files}) {
+        my $fullpath = $engine->find_file($file)->{fullpath};
+        $s .= $engine->slurp( $fullpath );
+        $self->requires($fullpath);
+    }
+    return $s;
+}
+
 sub _finish_main {
     my($self, $main_code) = @_;
     push @{$main_code}, ['end'];
     return;
 }
+
+our $_lv = -1;
 
 sub _compile_ast {
     my($self, $ast) = @_;
@@ -257,9 +281,14 @@ sub _compile_ast {
     # TODO
     # $self->_optimize_ast($ast) if $self->optimize;
 
+    local $_lv = $_lv + 1 if _DUMP_GEN;
+
     my @code;
     foreach my $node(@{$ast}) {
         blessed($node) or Carp::confess("Oops: Not a node object: " . p($node));
+
+        printf STDERR "%s"."generate %s (%s)\n", "." x $_lv, $node->arity, $node->id if _DUMP_GEN;
+
         my $generator = $self->can('_generate_' . $node->arity)
             || Carp::confess("Oops: Unexpected node:  " . p($node));
 
@@ -311,6 +340,7 @@ sub _process_cascade {
         my $mtable   = $self->macro_table;
         my $macro;
         foreach my $c(@{$code}) {
+            # retrieve macros
             if($c->[0] eq 'macro_begin' .. $c->[0] eq 'macro_end') {
                 if($c->[0] eq 'macro_begin') {
                     $macro = [];
@@ -320,6 +350,12 @@ sub _process_cascade {
                         body  => [],
                     };
                     push @{ $mtable->{$c->[1]} ||= [] }, $macro;
+                }
+                elsif($c->[0] eq 'macro_nargs') {
+                    $macro->{nargs} = $c->[1];
+                }
+                elsif($c->[0] eq 'macro_outer') {
+                    $macro->{outer} = $c->[1];
                 }
                 elsif($c->[0] eq 'macro_end') {
                     $macro->{immediate} = $c->[1];
@@ -434,8 +470,8 @@ sub _flush_macro_table {
             push @code, [ macro_nargs => $macro->{nargs} ]
                 if $macro->{nargs};
 
-            push @code, [ macro_outer => $macro->{lvar_used} ]
-                if $macro->{lvar_used};
+            push @code, [ macro_outer => $macro->{outer} ]
+                if $macro->{outer};
 
             push @code, @{ $macro->{body} }, [ macro_end => $macro->{immediate} ];
         }
@@ -595,6 +631,9 @@ sub _generate_while {
     if(@{$vars} > 1) {
         $self->_error("A while-loop requires one or zero variable for each items", $node);
     }
+
+    (my $cond_op, undef, $expr) = $self->_prepare_cond_expr($expr);
+
     local $self->{lvar}  = { %{$self->lvar}  }; # new scope
     local $self->{const} = [ @{$self->const} ]; # new scope
 
@@ -613,7 +652,7 @@ sub _generate_while {
     local $self->{lvar_id} = $self->lvar_use(scalar @{$vars});
     my @block_code = $self->_compile_block($block);
     return @code,
-        [ and  => scalar(@block_code) + 2, undef, "while" ],
+        [ $cond_op => scalar(@block_code) + 2, undef, "while" ],
         @block_code,
         [ goto => -(scalar(@block_code) + scalar(@code) + 1), undef, "end while" ];
 
@@ -630,14 +669,14 @@ sub _generate_proc { # definition of macro, block, before, around, after
     local $self->{lvar}  = { %{$self->lvar}  }; # new scope
     local $self->{const} = [ @{$self->const} ]; # new scope
 
-    my $arg_ix = 0;
+    my $lvar_used = $self->lvar_id;
+    my $arg_ix    = 0;
     foreach my $arg(@args) {
         # to fetch ST(ix)
         # Note that arg_ix must be start from 1
-        $self->lvar->{$arg} = $arg_ix++;
+        $self->lvar->{$arg} = $lvar_used + $arg_ix++;
     }
 
-    my $lvar_used = $self->lvar_id;
     local $self->{lvar_id} = $self->lvar_use($arg_ix);
 
     my %macro = (
@@ -646,13 +685,16 @@ sub _generate_proc { # definition of macro, block, before, around, after
         body      => [ $self->_compile_ast($block) ],
         line      => $node->line,
         file      => $self->file,
-        lvar_used => $lvar_used, # outer lexical variables
+        outer     => $lvar_used,
         immediate => 0,
     );
 
     if(any_in($type, qw(macro block))) {
         if(exists $self->macro_table->{$name}) {
-            $self->_error("Redefinition of $type $name is forbidden", $node);
+            my $m = $self->macro_table->{$name};
+            if(p(\%macro) ne p($m)) {
+                $self->_error("Redefinition of $type $name is forbidden", $node);
+            }
         }
         if($type eq 'block') {
             $macro{immediate} = 1;
@@ -675,8 +717,34 @@ sub _generate_lambda {
 
     my $macro = $node->first;
     $self->_compile_ast([$macro]);
-
     return [ symbol => $macro->first->id, $node->line, 'lambda' ];
+}
+
+sub _prepare_cond_expr {
+    my($self, $expr) = @_;
+    my $t = "and";
+    my $f = "or";
+
+    while(any_in($expr->id, "!", "not")) {
+        $expr    = $expr->first;
+        ($t, $f) = ($f, $t);
+    }
+
+    if($expr->is_logical and any_in($expr->id, qw(== !=))) {
+        my $rhs = $expr->second;
+        if($rhs->arity eq "literal" and $rhs->id eq "nil") {
+            # add prefix 'd' (i.e. "and" to "dand", "or" to "dor")
+            substr $t, 0, 0, 'd';
+            substr $f, 0, 0, 'd';
+
+            if($expr->id eq "==") {
+                ($t, $f) = ($f, $t);
+            }
+            $expr = $expr->first;
+        }
+    }
+
+    return($t, $f, $expr);
 }
 
 sub _generate_if {
@@ -685,16 +753,11 @@ sub _generate_if {
     my $second = $node->second;
     my $third  = $node->third;
 
-    if($OPTIMIZE) {
-        while(any_in($first->id, "!", "no")) {
-            $first            = $first->first;
-            ($second, $third) = ($third, $second);
-        }
-    }
+    my($cond_true, $cond_false, $expr) = $self->_prepare_cond_expr($first);
 
     local $self->{lvar}  = { %{$self->lvar}  }; # new scope
     local $self->{const} = [ @{$self->const} ]; # new scope
-    my @cond  = $self->_expr($first);
+    my @cond  = $self->_expr($expr);
 
     my @then = do {
         local $self->{lvar}  = { %{$self->lvar}  }; # new scope
@@ -722,7 +785,7 @@ sub _generate_if {
     if( (@then and @else) or !$OPTIMIZE) {
         return(
             @cond,
-            [ and  => scalar(@then) + 2, undef, $node->id . ' (then)' ],
+            [ $cond_true => scalar(@then) + 2, undef, $node->id . ' (then)' ],
             @then,
             [ goto => scalar(@else) + 1, undef, $node->id . ' (else)' ],
             @else,
@@ -731,14 +794,14 @@ sub _generate_if {
     elsif(!@else) { # no @else
         return(
             @cond,
-            [ and => scalar(@then) + 1, undef, $node->id . ' (then/no-else)' ],
+            [ $cond_true => scalar(@then) + 1, undef, $node->id . ' (then/no-else)' ],
             @then,
         );
     }
     else { # no @then
         return(
             @cond,
-            [ or => scalar(@else) + 1, undef, $node->id . ' (else/no-then)'],
+            [ $cond_false => scalar(@else) + 1, undef, $node->id . ' (else/no-then)'],
             @else,
         );
     }
@@ -927,7 +990,6 @@ sub _generate_call {
         [ pushmark => undef, undef, "funcall " . $callable->id ],
         (map { $self->_expr($_), [ 'push' ] } @{$args}),
         $self->_expr($callable),
-        # lvar_used inidicates how many number of lexical variables refers
         [ funcall => undef, $node->line ],
     );
 }
@@ -993,12 +1055,11 @@ sub _generate_constant {
     my $lhs     = $node->first;
     my $rhs     = $node->second;
 
-    my $lvar      = $self->lvar;
-    my $lvar_name = $lhs->id;
-
     my @expr = $self->_expr($rhs);
 
+    my $lvar            = $self->lvar;
     my $lvar_id         = $self->lvar_id;
+    my $lvar_name       = $lhs->id;
     $lvar->{$lvar_name} = $lvar_id;
     $self->{lvar_id}    = $self->lvar_use(1); # don't use local()
 

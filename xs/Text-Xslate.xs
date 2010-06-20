@@ -158,8 +158,8 @@ static AV*
 tx_push_frame(pTHX_ tx_state_t* const st) {
     AV* newframe;
 
-    if(st->current_frame > 100) {
-        croak("Macro call is too deep (> 100)");
+    if(st->current_frame > TX_MAX_DEPTH) {
+        croak("Macro call is too deep (> %d)", TX_MAX_DEPTH);
     }
     /* local $st->{current_frame} = $st->{current_frame} + 1 */
     SAVEI32(st->current_frame);
@@ -432,10 +432,7 @@ tx_proccall(pTHX_ tx_state_t* const txst, SV* const proc, const char* const name
         U32 const save_pc = TX_st->pc;
         tx_macro_enter(aTHX_ TX_st, (AV*)SvRV(proc), TX_st->code_len /* retaddr */);
 
-        /* execute */
-        while(TX_st->pc < TX_st->code_len) {
-            CALL_FPTR(TX_st->code[TX_st->pc].exec_code)(aTHX_ TX_st);
-        }
+        TX_RUNOPS(TX_st);
         /* after tx_macro_end */
 
         TX_st->pc = save_pc;
@@ -924,10 +921,11 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr)
     sv_setpvs(tmp, "");
     SvUTF8_on(tmp); /* sv_utf8_upgrade(tmp); */
 
+    i = 0;
     if(outer > 0) { /* refers outer lexical variales */
         /* copies lexical variables from the old frame to the new one */
         AV* const oframe = (AV*)AvARRAY(TX_st->frame)[TX_st->current_frame-1];
-        for(i = 0; i < outer; i++) {
+        for(NOOP; i < outer; i++) {
             UV const real_ix = i + TXframe_START_LVAR;
             av_store(cframe, real_ix , SvREFCNT_inc_NN(AvARRAY(oframe)[real_ix]));
         }
@@ -936,11 +934,9 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr)
     if(items > 0) { /* has arguments */
         dORIGMARK;
         MARK++;
-        i = 0; /* must start zero */
-        while(MARK <= SP) {
+        for(NOOP; MARK <= SP; i++) {
             sv_setsv(TX_lvar(i), *MARK);
             MARK++;
-            i++;
         }
         SP = ORIGMARK;
         PUTBACK;
@@ -1102,25 +1098,15 @@ tx_execute(pTHX_ tx_state_t* const base, SV* const output, HV* const hv) {
     SAVEVPTR(MY_CXT.current_st);
     MY_CXT.current_st = &st;
 
-    if(MY_CXT.depth > 100) {
-        croak("Execution is too deep (> 100)");
+    if(MY_CXT.depth > TX_MAX_DEPTH) {
+        croak("Execution is too deep (> %d)", TX_MAX_DEPTH);
     }
 
     /* local $depth = $depth + 1 */
     SAVEI32(MY_CXT.depth);
     MY_CXT.depth++;
 
-    while(st.pc < st.code_len) {
-#ifdef DEBUGGING
-        Size_t const old_pc = st.pc;
-#endif
-        CALL_FPTR(st.code[st.pc].exec_code)(aTHX_ &st);
-#ifdef DEBUGGING
-        if(UNLIKELY(old_pc == st.pc)) {
-            croak("Oops: pogram counter has not been changed on [%d]", (int)st.pc);
-        }
-#endif
-    }
+    TX_RUNOPS(&st);
 
     /* clear temporary buffers */
     sv_setsv(st.targ, &PL_sv_undef);

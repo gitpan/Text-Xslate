@@ -194,10 +194,8 @@ t/template/myapp/base.tx.mod
 t/template/myapp/cbar.tx
 t/template/myapp/cfoo.tx
 t/template/myapp/derived.tx
-t/template/wrapper1.tt
-t/template/wrapper2.tt
-t/template/wrapping.tt
-test.tx
+t/template/wrapper.tt
+t/template/wrapper_div.tt
 tool/force-pp.pl
 tool/opcode.pl
 tool/opcode_for_pp.pl

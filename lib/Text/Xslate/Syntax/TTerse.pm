@@ -10,53 +10,14 @@ sub _build_line_start { qr/%%/xms   }
 sub _build_tag_start  { qr/\Q[%/xms }
 sub _build_tag_end    { qr/\Q%]/xms }
 
-around split => sub {
-    my $super = shift;
+around trim_code => sub {
+    my($super, $self, $code) = @_;
 
-    my $tokens_ref = $super->(@_);
-
-    foreach my $t(@{$tokens_ref}) {
-        my($type, $value) = @{$t};
-        if($type eq 'code' && $value =~ /^#/) { # multiline comments
-            $t->[1] = '';
-        }
+    if($code =~ /^\#/) { # multiline comments
+        return '';
     }
 
-    return $tokens_ref;
-};
-
-around parse => sub {
-    my $super = shift;
-    my($parser, $input, %args) = @_;
-
-    my $compiler = $parser->compiler or return $super->(@_);
-    my $engine   = $parser->engine   or return $super->(@_);
-
-    my $header = delete $compiler->{header};
-    my $footer = delete $compiler->{footer};
-
-    if($header) {
-        my $s = '';
-        foreach my $file(@{$header}) {
-            my $fullpath = $engine->find_file($file)->{fullpath};
-            $s .= $engine->slurp( $fullpath );
-            $compiler->requires($fullpath);
-        }
-        substr $input, 0, 0, $s;
-    }
-
-    if($footer) {
-        my $s = '';
-        foreach my $file(@{$footer}) {
-            my $fullpath = $engine->find_file($file)->{fullpath};
-            $s .= $engine->slurp( $fullpath );
-            $compiler->requires($fullpath);
-        }
-        $input .= $s;
-    }
-    my $ast = $super->($parser, $input, %args);
-
-    return $ast;
+    return $super->($self, $code);
 };
 
 sub init_symbols {
@@ -196,7 +157,7 @@ sub led_dot {
 sub led_concat {
     my($parser, $symbol, $left) = @_;
 
-    return $parser->SUPER::led_infix($symbol->clone(id => '~'), $left);
+    return $parser->led_infix($symbol->clone(id => '~'), $left);
 }
 
 sub led_assignment {
@@ -572,11 +533,6 @@ Text::Xslate::Syntax::TTerse - An alternative syntax compatible with Template To
     # PRE_PROCESS/POST_PROCESS/WRAPPER
     $tx = Text::Xslate->new(
         syntax => 'TTerse',
-
-        # those options are passed directly to TTerse
-        header  => ['header.tt'],
-        footer  => ['footer.tt'],
-        wrapper => ['wrapper.tt'],
     );
 
 =head1 DESCRIPTION
@@ -586,22 +542,6 @@ using C<< [% ... %] >> tags and C<< %% ... >> line code.
 
 (TODO: I should concentrate on the difference between Template-Toolkit 2 and
 TTerse)
-
-=head1 OPTIONS
-
-There are options which are specific to TTerse.
-
-=head2 C<< header => \@templates >>
-
-Specify the header template files, which are inserted to the head of each template.
-
-This option corresponds to Template-Toolkit's C<PRE_PROCESS> option.
-
-=head2 C<< footer => \@templates >>
-
-Specify the footer template files, which are inserted to the head of each template.
-
-This option corresponds to Template-Toolkit's C<POST_PROCESS> option.
 
 =head1 SYNTAX
 
