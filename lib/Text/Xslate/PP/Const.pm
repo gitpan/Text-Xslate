@@ -89,11 +89,11 @@ our %OPS = (
     enter            => 51,
     leave            => 52,
     goto             => 53,
-    end              => 54,
-    depend           => 55,
-    macro_begin      => 56,
-    macro_nargs      => 57,
-    macro_outer      => 58,
+    depend           => 54,
+    macro_begin      => 55,
+    macro_nargs      => 56,
+    macro_outer      => 57,
+    end              => 58,
 ); # %OPS
 
 our @OPCODE = (
@@ -151,11 +151,11 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_enter,               # 51
     \&Text::Xslate::PP::Opcode::op_leave,               # 52
     \&Text::Xslate::PP::Opcode::op_goto,                # 53
-    \&Text::Xslate::PP::Opcode::op_end,                 # 54
-    \&Text::Xslate::PP::Opcode::op_depend,              # 55
-    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 56
-    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 57
-    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 58
+    \&Text::Xslate::PP::Opcode::op_depend,              # 54
+    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 55
+    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 56
+    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 57
+    \&Text::Xslate::PP::Opcode::op_end,                 # 58
 ); # @OPCODE
 
 our @OPARGS = (
@@ -213,11 +213,11 @@ our @OPARGS = (
     0,             # enter
     0,             # leave
     TXCODE_GOTO,   # goto
-    0,             # end
     TXCODE_W_SV,   # depend
     TXCODE_W_KEY,  # macro_begin
     TXCODE_W_INT,  # macro_nargs
     TXCODE_W_INT,  # macro_outer
+    0,             # end
 ); # @OPARGS
 
 1;

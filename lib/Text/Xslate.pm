@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1035';
+our $VERSION = '0.1036';
 
 use Text::Xslate::Util qw($DEBUG
     mark_raw unmark_raw
@@ -163,6 +163,22 @@ sub new {
     return bless \%args, $class;
 }
 
+sub register_function {
+    my $self = shift;
+    my $function = $self->{function};
+    while(my($name, $body) = splice @_, 0, 2) {
+        $function->{$name} = $body;
+    }
+    $self->flush_cache();
+    return;
+}
+
+sub flush_cache {
+    my($self) = @_;
+    %{$self->{template}} = ();
+    return;
+}
+
 sub load_string { # for <input>
     my($self, $string) = @_;
     if(not defined $string) {
@@ -290,7 +306,7 @@ sub _load_source {
                  unlink $cachepath;
             }
             else {
-                $self->{cache_mtime} = ( stat $cachepath )[_ST_MTIME];
+                $fi->{cache_mtime} = ( stat $cachepath )[_ST_MTIME];
             }
         }
         else {
@@ -299,9 +315,8 @@ sub _load_source {
     }
 
     if(_DUMP_LOAD_FILE) {
-        print STDERR "  _load_source: cache(",
-            defined($self->{cache_mtime}) ? $self->{cache_mtime} : 'undef',
-            ")\n";
+        printf STDERR "  _load_source: cache(%s)\n",
+            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
     }
 
     return $asm;
@@ -365,7 +380,8 @@ sub _load_compiled {
     }
 
     if(_DUMP_LOAD_FILE) {
-        print STDERR "  _load_cache_compiled: cache(", $self->{cache_mtime}, ")\n";
+        printf STDERR "  _load_cache_compiled: cache(%s)\n",
+            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
     }
 
     return \@asm;
@@ -382,7 +398,7 @@ sub _magic {
 
     my $opt = join(',',
         ref($self->{compiler}) || $self->{compiler},
-        $self->_extract_options(\%compiler_option),
+        (map { ref $_ ? "[@{$_}]" : $_ } $self->_extract_options(\%compiler_option)),
         $self->_extract_options(\%parser_option),
     );
 
@@ -451,7 +467,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1035.
+This document describes Text::Xslate version 0.1036.
 
 =head1 SYNOPSIS
 
@@ -534,26 +550,26 @@ Here is a result of F<benchmark/others.pl> to compare various template engines.
 
     $ perl -Mblib benchmark/others.pl include 100
     Perl/5.10.1 i686-linux
-    Text::Xslate/0.1025
+    Text::Xslate/0.1036
     Text::MicroTemplate/0.11
     Template/2.22
     Text::ClearSilver/0.10.5.4
-    HTML::Template::Pro/0.94
+    HTML::Template::Pro/0.9501
     1..4
     ok 1 - TT: Template-Toolkit
     ok 2 - MT: Text::MicroTemplate
     ok 3 - TCS: Text::ClearSilver
     ok 4 - HT: HTML::Template::Pro
     Benchmarks with 'include' (datasize=100)
-             Rate     TT     MT    TCS     HT Xslate
-    TT      313/s     --   -55%   -88%   -89%   -97%
-    MT      697/s   123%     --   -72%   -75%   -93%
-    TCS    2512/s   702%   260%     --    -9%   -74%
-    HT     2759/s   781%   296%    10%     --   -71%
-    Xslate 9489/s  2931%  1261%   278%   244%     --
+              Rate     TT     MT    TCS     HT Xslate
+    TT       313/s     --   -55%   -87%   -89%   -97%
+    MT       697/s   123%     --   -72%   -75%   -94%
+    TCS     2488/s   695%   257%     --   -11%   -78%
+    HT      2791/s   791%   300%    12%     --   -75%
+    Xslate 11270/s  3500%  1516%   353%   304%     --
 
-You can see Xslate is 3 times faster than HTML::Template::Pro and Text::ClearSilver,
-which are implemented in XS.
+You can see Xslate is 36 times faster than Template-Toolkit, and 4 times faster
+than HTML::Template::Pro and Text::ClearSilver, which are implemented in XS.
 
 =head3 High extensibility
 
@@ -676,22 +692,19 @@ This option is passed to the compiler directly.
 
 =item C<< line_start => $token // $parser_defined >>
 
-Specify the token to start line code, which may be a string or a regular
-expression.
+Specify the token to start line code as a string, which C<quotemeta> will be applied to.
 
 This option is passed to the parser via the compiler.
 
 =item C<< tag_start => $str // $parser_defined >>
 
-Specify the token to start inline code, which may be a string or a
-regular expression.
+Specify the token to start inline code as a string, which C<quotemeta> will be applied to.
 
 This option is passed to the parser via the compiler.
 
 =item C<< line_start => $str // $parser_defined >>
 
-Specify the token to end inline code, which may be a string or a
-regular expression.
+Specify the token to end inline code as a string, which C<quotemeta> will be applied to.
 
 This option is passed to the parser via the compiler.
 
@@ -721,7 +734,12 @@ Note that I<$file> may be cached according to the cache level.
 Renders a template string with variables, and returns the result.
 I<\%vars> is optional.
 
-Note that I<$string> is never cached so that this method is suitable for testing.
+Note that I<$string> is never cached.
+
+=head3 B<< Text::Xslate->engine :XslateEngine >>
+
+Returns the Xslate engine while executing. Otherwise, returns C<undef>.
+This method is significant when it is called by template functions and methods.
 
 =head3 B<< $tx->load_file($file) :Void >>
 

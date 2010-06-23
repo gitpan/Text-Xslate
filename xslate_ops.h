@@ -57,11 +57,11 @@ TXC(make_hash);
 TXC(enter);
 TXC(leave);
 TXC_goto(goto);
-TXC(end);
 TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC_w_key(macro_begin);
 TXC_w_int(macro_nargs);
 TXC_w_int(macro_outer);
+TXC(end);
 
 enum tx_opcode_t {
     TXOP_noop, /* 0 */
@@ -118,76 +118,13 @@ enum tx_opcode_t {
     TXOP_enter, /* 51 */
     TXOP_leave, /* 52 */
     TXOP_goto, /* 53 */
-    TXOP_end, /* 54 */
-    TXOP_depend, /* 55 */
-    TXOP_macro_begin, /* 56 */
-    TXOP_macro_nargs, /* 57 */
-    TXOP_macro_outer, /* 58 */
+    TXOP_depend, /* 54 */
+    TXOP_macro_begin, /* 55 */
+    TXOP_macro_nargs, /* 56 */
+    TXOP_macro_outer, /* 57 */
+    TXOP_end, /* 58 */
     TXOP_last
 }; /* enum tx_opcode_t */
-
-static const tx_exec_t tx_opcode[] = {
-    TXCODE_noop,
-    TXCODE_move_to_sb,
-    TXCODE_move_from_sb,
-    TXCODE_save_to_lvar,
-    TXCODE_load_lvar,
-    TXCODE_load_lvar_to_sb,
-    TXCODE_localize_s,
-    TXCODE_push,
-    TXCODE_pushmark,
-    TXCODE_nil,
-    TXCODE_literal,
-    TXCODE_literal_i,
-    TXCODE_fetch_s,
-    TXCODE_fetch_field,
-    TXCODE_fetch_field_s,
-    TXCODE_print,
-    TXCODE_print_raw,
-    TXCODE_print_raw_s,
-    TXCODE_include,
-    TXCODE_for_start,
-    TXCODE_for_iter,
-    TXCODE_add,
-    TXCODE_sub,
-    TXCODE_mul,
-    TXCODE_div,
-    TXCODE_mod,
-    TXCODE_concat,
-    TXCODE_and,
-    TXCODE_dand,
-    TXCODE_or,
-    TXCODE_dor,
-    TXCODE_not,
-    TXCODE_minus,
-    TXCODE_max_index,
-    TXCODE_builtin_mark_raw,
-    TXCODE_builtin_unmark_raw,
-    TXCODE_builtin_html_escape,
-    TXCODE_eq,
-    TXCODE_ne,
-    TXCODE_lt,
-    TXCODE_le,
-    TXCODE_gt,
-    TXCODE_ge,
-    TXCODE_ncmp,
-    TXCODE_scmp,
-    TXCODE_symbol,
-    TXCODE_macro_end,
-    TXCODE_funcall,
-    TXCODE_methodcall_s,
-    TXCODE_make_array,
-    TXCODE_make_hash,
-    TXCODE_enter,
-    TXCODE_leave,
-    TXCODE_goto,
-    TXCODE_end,
-    TXCODE_depend,
-    TXCODE_macro_begin,
-    TXCODE_macro_nargs,
-    TXCODE_macro_outer,
-    NULL
-}; /* tx_opcode[] */
 
 static const U8 tx_oparg[] = {
     0U, /* noop */
@@ -244,11 +181,11 @@ static const U8 tx_oparg[] = {
     0U, /* enter */
     0U, /* leave */
     TXCODE_GOTO, /* goto */
-    0U, /* end */
     TXCODE_W_SV, /* depend */
     TXCODE_W_KEY, /* macro_begin */
     TXCODE_W_INT, /* macro_nargs */
     TXCODE_W_INT, /* macro_outer */
+    0U, /* end */
 }; /* tx_oparg[] */
 
 static void
@@ -307,9 +244,215 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(enter), newSViv(TXOP_enter));
     (void)hv_stores(ops, STRINGIFY(leave), newSViv(TXOP_leave));
     (void)hv_stores(ops, STRINGIFY(goto), newSViv(TXOP_goto));
-    (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
     (void)hv_stores(ops, STRINGIFY(depend), newSViv(TXOP_depend));
     (void)hv_stores(ops, STRINGIFY(macro_begin), newSViv(TXOP_macro_begin));
     (void)hv_stores(ops, STRINGIFY(macro_nargs), newSViv(TXOP_macro_nargs));
     (void)hv_stores(ops, STRINGIFY(macro_outer), newSViv(TXOP_macro_outer));
+    (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
 } /* tx_register_ops() */
+
+#ifndef TX_DIRECT_THREADED_CODE
+#define dTX_optable dNOOP
+static const tx_exec_t tx_optable[] = {
+    TXCODE_noop,
+    TXCODE_move_to_sb,
+    TXCODE_move_from_sb,
+    TXCODE_save_to_lvar,
+    TXCODE_load_lvar,
+    TXCODE_load_lvar_to_sb,
+    TXCODE_localize_s,
+    TXCODE_push,
+    TXCODE_pushmark,
+    TXCODE_nil,
+    TXCODE_literal,
+    TXCODE_literal_i,
+    TXCODE_fetch_s,
+    TXCODE_fetch_field,
+    TXCODE_fetch_field_s,
+    TXCODE_print,
+    TXCODE_print_raw,
+    TXCODE_print_raw_s,
+    TXCODE_include,
+    TXCODE_for_start,
+    TXCODE_for_iter,
+    TXCODE_add,
+    TXCODE_sub,
+    TXCODE_mul,
+    TXCODE_div,
+    TXCODE_mod,
+    TXCODE_concat,
+    TXCODE_and,
+    TXCODE_dand,
+    TXCODE_or,
+    TXCODE_dor,
+    TXCODE_not,
+    TXCODE_minus,
+    TXCODE_max_index,
+    TXCODE_builtin_mark_raw,
+    TXCODE_builtin_unmark_raw,
+    TXCODE_builtin_html_escape,
+    TXCODE_eq,
+    TXCODE_ne,
+    TXCODE_lt,
+    TXCODE_le,
+    TXCODE_gt,
+    TXCODE_ge,
+    TXCODE_ncmp,
+    TXCODE_scmp,
+    TXCODE_symbol,
+    TXCODE_macro_end,
+    TXCODE_funcall,
+    TXCODE_methodcall_s,
+    TXCODE_make_array,
+    TXCODE_make_hash,
+    TXCODE_enter,
+    TXCODE_leave,
+    TXCODE_goto,
+    TXCODE_depend,
+    TXCODE_macro_begin,
+    TXCODE_macro_nargs,
+    TXCODE_macro_outer,
+    TXCODE_end,
+    NULL
+}; /* tx_optable[] */
+
+#else /* TX_DIRECT_THREADED_CODE */
+#define dTX_optable void const* const* const tx_optable \
+                    = tx_runops(aTHX_ NULL)
+#define LABEL(x)     CAT2(TX_DTC_, x)
+#define LABEL_PTR(x) &&LABEL(x)
+static void const* const*
+tx_runops(pTHX_ tx_state_t* const st) {
+    static const void* const ops_address_table[] = {
+        LABEL_PTR(noop),
+        LABEL_PTR(move_to_sb),
+        LABEL_PTR(move_from_sb),
+        LABEL_PTR(save_to_lvar),
+        LABEL_PTR(load_lvar),
+        LABEL_PTR(load_lvar_to_sb),
+        LABEL_PTR(localize_s),
+        LABEL_PTR(push),
+        LABEL_PTR(pushmark),
+        LABEL_PTR(nil),
+        LABEL_PTR(literal),
+        LABEL_PTR(literal_i),
+        LABEL_PTR(fetch_s),
+        LABEL_PTR(fetch_field),
+        LABEL_PTR(fetch_field_s),
+        LABEL_PTR(print),
+        LABEL_PTR(print_raw),
+        LABEL_PTR(print_raw_s),
+        LABEL_PTR(include),
+        LABEL_PTR(for_start),
+        LABEL_PTR(for_iter),
+        LABEL_PTR(add),
+        LABEL_PTR(sub),
+        LABEL_PTR(mul),
+        LABEL_PTR(div),
+        LABEL_PTR(mod),
+        LABEL_PTR(concat),
+        LABEL_PTR(and),
+        LABEL_PTR(dand),
+        LABEL_PTR(or),
+        LABEL_PTR(dor),
+        LABEL_PTR(not),
+        LABEL_PTR(minus),
+        LABEL_PTR(max_index),
+        LABEL_PTR(builtin_mark_raw),
+        LABEL_PTR(builtin_unmark_raw),
+        LABEL_PTR(builtin_html_escape),
+        LABEL_PTR(eq),
+        LABEL_PTR(ne),
+        LABEL_PTR(lt),
+        LABEL_PTR(le),
+        LABEL_PTR(gt),
+        LABEL_PTR(ge),
+        LABEL_PTR(ncmp),
+        LABEL_PTR(scmp),
+        LABEL_PTR(symbol),
+        LABEL_PTR(macro_end),
+        LABEL_PTR(funcall),
+        LABEL_PTR(methodcall_s),
+        LABEL_PTR(make_array),
+        LABEL_PTR(make_hash),
+        LABEL_PTR(enter),
+        LABEL_PTR(leave),
+        LABEL_PTR(goto),
+        LABEL_PTR(depend),
+        LABEL_PTR(macro_begin),
+        LABEL_PTR(macro_nargs),
+        LABEL_PTR(macro_outer),
+        LABEL_PTR(end)
+    }; /* end of ops_address_table */
+    if(UNLIKELY(st == NULL)) {
+        return ops_address_table;
+    }
+
+    goto *(st->pc->exec_code); /* start */
+
+    /* dispatch */
+    LABEL(noop                ): TXCODE_noop                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(move_to_sb          ): TXCODE_move_to_sb          (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(move_from_sb        ): TXCODE_move_from_sb        (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(save_to_lvar        ): TXCODE_save_to_lvar        (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(load_lvar           ): TXCODE_load_lvar           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(load_lvar_to_sb     ): TXCODE_load_lvar_to_sb     (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(localize_s          ): TXCODE_localize_s          (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(push                ): TXCODE_push                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(pushmark            ): TXCODE_pushmark            (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(nil                 ): TXCODE_nil                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(literal             ): TXCODE_literal             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(literal_i           ): TXCODE_literal_i           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(fetch_s             ): TXCODE_fetch_s             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(fetch_field         ): TXCODE_fetch_field         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(fetch_field_s       ): TXCODE_fetch_field_s       (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(print               ): TXCODE_print               (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(print_raw           ): TXCODE_print_raw           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(print_raw_s         ): TXCODE_print_raw_s         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(include             ): TXCODE_include             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(for_start           ): TXCODE_for_start           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(for_iter            ): TXCODE_for_iter            (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(add                 ): TXCODE_add                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(sub                 ): TXCODE_sub                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(mul                 ): TXCODE_mul                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(div                 ): TXCODE_div                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(mod                 ): TXCODE_mod                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(concat              ): TXCODE_concat              (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(and                 ): TXCODE_and                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(dand                ): TXCODE_dand                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(or                  ): TXCODE_or                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(dor                 ): TXCODE_dor                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(not                 ): TXCODE_not                 (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(minus               ): TXCODE_minus               (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(max_index           ): TXCODE_max_index           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(builtin_mark_raw    ): TXCODE_builtin_mark_raw    (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(builtin_unmark_raw  ): TXCODE_builtin_unmark_raw  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(builtin_html_escape ): TXCODE_builtin_html_escape (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(eq                  ): TXCODE_eq                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(ne                  ): TXCODE_ne                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(lt                  ): TXCODE_lt                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(le                  ): TXCODE_le                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(gt                  ): TXCODE_gt                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(ge                  ): TXCODE_ge                  (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(ncmp                ): TXCODE_ncmp                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(scmp                ): TXCODE_scmp                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(symbol              ): TXCODE_symbol              (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(macro_end           ): TXCODE_macro_end           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(funcall             ): TXCODE_funcall             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(methodcall_s        ): TXCODE_methodcall_s        (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(make_array          ): TXCODE_make_array          (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(make_hash           ): TXCODE_make_hash           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(enter               ): TXCODE_enter               (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(leave               ): TXCODE_leave               (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(goto                ): TXCODE_goto                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(depend              ): TXCODE_depend              (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(macro_begin         ): TXCODE_macro_begin         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(macro_nargs         ): TXCODE_macro_nargs         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(macro_outer         ): TXCODE_macro_outer         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(end): TXCODE_end(aTHX_ st);
+    return NULL;
+} /* end of tx_runops() */
+#undef LABEL
+#undef LABEL_PTR
+#endif /* TX_DIRECT_THREADED_CODE */
+

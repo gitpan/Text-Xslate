@@ -43,17 +43,9 @@ for(my $i = 0; $i < @ops; $i++) {
 print code <<'H';
 #    TXOP_last
 #}; /* enum tx_opcode_t */
-#
-#static const tx_exec_t tx_opcode[] = {
 H
 
-for(my $i = 0; $i < @ops; $i++) {
-    say "    TXCODE_$ops[$i][0],";
-}
-
 print code <<'H';
-#    NULL
-#}; /* tx_opcode[] */
 #
 #static const U8 tx_oparg[] = {
 H
@@ -84,4 +76,67 @@ for(my $i = 0; $i < @ops; $i++) {
 
 print code <<'H';
 #} /* tx_register_ops() */
+H
+
+print code <<'H';
+#
+##ifndef TX_DIRECT_THREADED_CODE
+##define dTX_optable dNOOP
+#static const tx_exec_t tx_optable[] = {
+H
+
+for(my $i = 0; $i < @ops; $i++) {
+    say "    TXCODE_$ops[$i][0],";
+}
+
+print code <<'H';
+#    NULL
+#}; /* tx_optable[] */
+H
+
+print code <<'H';
+#
+##else /* TX_DIRECT_THREADED_CODE */
+##define dTX_optable void const* const* const tx_optable \
+#                    = tx_runops(aTHX_ NULL)
+##define LABEL(x)     CAT2(TX_DTC_, x)
+##define LABEL_PTR(x) &&LABEL(x)
+#static void const* const*
+#tx_runops(pTHX_ tx_state_t* const st) {
+#    static const void* const ops_address_table[] = {
+H
+
+pop @ops; # "end"
+
+foreach my $op(@ops) {
+    say "        LABEL_PTR($op->[0]),";
+}
+
+print code <<'H';
+#        LABEL_PTR(end)
+#    }; /* end of ops_address_table */
+#    if(UNLIKELY(st == NULL)) {
+#        return ops_address_table;
+#    }
+#
+#    goto *(st->pc->exec_code); /* start */
+#
+#    /* dispatch */
+H
+
+foreach my $op(@ops) {
+    print code sprintf <<'H', @{$op};
+#    LABEL(%1$-20s): TXCODE_%1$-20s(aTHX_ st); goto *(st->pc->exec_code);
+H
+}
+
+
+print code << 'H';
+#    LABEL(end): TXCODE_end(aTHX_ st);
+#    return NULL;
+#} /* end of tx_runops() */
+##undef LABEL
+##undef LABEL_PTR
+##endif /* TX_DIRECT_THREADED_CODE */
+
 H

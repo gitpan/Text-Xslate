@@ -80,7 +80,7 @@ static tx_state_t*
 tx_load_template(pTHX_ SV* const self, SV* const name);
 
 static void
-tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr);
+tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, tx_pc_t const retaddr);
 
 static const char*
 tx_file(pTHX_ const tx_state_t* const st) {
@@ -90,7 +90,7 @@ tx_file(pTHX_ const tx_state_t* const st) {
 
 static int
 tx_line(pTHX_ const tx_state_t* const st) {
-    return (int)st->lines[ st->pc ];
+    return (int)st->lines[ TX_PC2POS(st, st->pc) ];
 }
 
 const char*
@@ -108,7 +108,7 @@ tx_neat(pTHX_ SV* const sv) {
 
 static IV
 tx_verbose(pTHX_ tx_state_t* const st) {
-    HV* const hv = (HV*)SvRV(st->self);
+    HV* const hv = (HV*)SvRV(st->engine);
     SV* const sv = *hv_fetchs(hv, "verbose", TRUE);
     return SvIV(sv);
 }
@@ -197,10 +197,11 @@ tx_funcall(pTHX_ tx_state_t* const st, SV* const func, const char* const name) {
     SvGETMAGIC(func);
 
     if(UNLIKELY(!SvOK(func))) {
-        tx_code_t* const c = &(st->code[ st->pc - 1 ]);
+        dTX_optable;
+        tx_code_t* const c = st->pc - 1;
         (void)POPMARK;
         tx_error(aTHX_ st, "Undefined function%s is called on %s",
-            c->exec_code == TXCODE_fetch_s
+            c->exec_code == tx_optable[TXOP_fetch_s]
                 ? form(" %"SVf"()", c->arg)
                 : "", name);
         retval = NULL;
@@ -429,9 +430,13 @@ tx_sv_is_macro(pTHX_ SV* const sv) {
 SV*
 tx_proccall(pTHX_ tx_state_t* const txst, SV* const proc, const char* const name) {
     if(tx_sv_is_macro(aTHX_ proc)) {
-        U32 const save_pc = TX_st->pc;
-        tx_macro_enter(aTHX_ TX_st, (AV*)SvRV(proc), TX_st->code_len /* retaddr */);
+        dTX_optable;
+        tx_pc_t const save_pc = TX_st->pc;
+        tx_code_t proc_end;
 
+        proc_end.exec_code = tx_optable[ TXOP_end ];
+        proc_end.arg = NULL;
+        tx_macro_enter(aTHX_ TX_st, (AV*)SvRV(proc), &proc_end);
         TX_RUNOPS(TX_st);
         /* after tx_macro_end */
 
@@ -452,16 +457,16 @@ tx_proccall(pTHX_ tx_state_t* const txst, SV* const proc, const char* const name
  *********************/
 
 TXC(noop) {
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(move_to_sb) {
     TX_st_sb = TX_st_sa;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(move_from_sb) {
     TX_st_sa = TX_st_sb;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_var(save_to_lvar) {
@@ -469,17 +474,17 @@ TXC_w_var(save_to_lvar) {
     sv_setsv(sv, TX_st_sa);
     TX_st_sa = sv;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_var(load_lvar) {
     TX_st_sa = TX_lvar_get(SvIVX(TX_op_arg));
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_var(load_lvar_to_sb) {
     TX_st_sb = TX_lvar_get(SvIVX(TX_op_arg));
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 /* local $vars->{$key} = $val */
@@ -504,7 +509,7 @@ TXC_w_key(localize_s) {
     }
     sv_setsv(*svp, newval);
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(push) {
@@ -512,26 +517,26 @@ TXC(push) {
     XPUSHs(sv_mortalcopy(TX_st_sa));
     PUTBACK;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(pushmark) {
     dSP;
     PUSHMARK(SP);
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(nil) {
     TX_st_sa = &PL_sv_undef;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_sv(literal) {
     TX_st_sa = TX_op_arg;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 /* the same as literal, but make sure its argument is an integer */
@@ -543,7 +548,7 @@ TXC_w_key(fetch_s) { /* fetch a field from the top */
 
     TX_st_sa = he ? hv_iterval(vars, he) : &PL_sv_undef;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(fetch_field) { /* fetch a field from a variable (bin operator) */
@@ -551,7 +556,7 @@ TXC(fetch_field) { /* fetch a field from a variable (bin operator) */
     SV* const key = TX_st_sa;
 
     TX_st_sa = tx_fetch(aTHX_ TX_st, var, key);
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
@@ -559,7 +564,7 @@ TXC_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
     SV* const key = TX_op_arg;
 
     TX_st_sa = tx_fetch(aTHX_ TX_st, var, key);
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(print) {
@@ -582,7 +587,7 @@ TXC(print) {
         /* does nothing */
     }
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(print_raw) {
@@ -594,23 +599,23 @@ TXC(print_raw) {
     else {
         tx_warn(aTHX_ TX_st, "Use of nil to print");
     }
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_sv(print_raw_s) {
     sv_catsv_nomg(TX_st->output, TX_op_arg);
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(include) {
-    tx_state_t* const st = tx_load_template(aTHX_ TX_st->self, TX_st_sa);
+    tx_state_t* const st = tx_load_template(aTHX_ TX_st->engine, TX_st_sa);
 
     ENTER;
     tx_execute(aTHX_ st, TX_st->output, TX_st->vars);
     LEAVE;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_var(for_start) {
@@ -633,7 +638,7 @@ TXC_w_var(for_start) {
     sv_setiv(TX_lvar(id+1), -1); /* (re)set iterator */
     sv_setsv(TX_lvar(id+2), avref);
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_goto(for_iter) {
@@ -654,16 +659,14 @@ TXC_goto(for_iter) {
     if(LIKELY(!SvRMAGICAL(av))) {
         if(++SvIVX(i) <= AvFILLp(av)) {
             sv_setsv(item, AvARRAY(av)[SvIVX(i)]);
-            TX_st->pc++;
-            return;
+            TX_RETURN_NEXT();
         }
     }
     else { /* magical variables */
         if(++SvIVX(i) <= av_len(av)) {
             SV** const itemp = av_fetch(av, SvIVX(i), FALSE);
             sv_setsv(item, itemp ? *itemp : &PL_sv_undef);
-            TX_st->pc++;
-            return;
+            TX_RETURN_NEXT();
         }
     }
 
@@ -675,7 +678,7 @@ TXC_goto(for_iter) {
         sv_setsv(avref, nil);
     }
 
-    TX_st->pc = SvUVX(TX_op_arg); /* goto */
+    TX_RETURN_PC( SvUVX(TX_op_arg) );
 }
 
 
@@ -686,30 +689,30 @@ TXC(add) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) + SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(sub) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) - SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(mul) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) * SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(div) {
     sv_setnv(TX_st->targ, SvNVx(TX_st_sb) / SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(mod) {
     sv_setiv(TX_st->targ, SvIVx(TX_st_sb) % SvIVx(TX_st_sa));
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_sv(concat) {
@@ -719,15 +722,15 @@ TXC_w_sv(concat) {
 
     TX_st_sa = sv;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_goto(and) {
     if(sv_true(TX_st_sa)) {
-        TX_st->pc++;
+        TX_RETURN_NEXT();
     }
     else {
-        TX_st->pc = SvUVX(TX_op_arg);
+        TX_RETURN_PC( SvUVX(TX_op_arg) );
     }
 }
 
@@ -735,19 +738,19 @@ TXC_goto(dand) {
     SV* const sv = TX_st_sa;
     SvGETMAGIC(sv);
     if(SvOK(sv)) {
-        TX_st->pc++;
+        TX_RETURN_NEXT();
     }
     else {
-        TX_st->pc = SvUVX(TX_op_arg);
+        TX_RETURN_PC( SvUVX(TX_op_arg) );
     }
 }
 
 TXC_goto(or) {
     if(!sv_true(TX_st_sa)) {
-        TX_st->pc++;
+        TX_RETURN_NEXT();
     }
     else {
-        TX_st->pc = SvUVX(TX_op_arg);
+        TX_RETURN_PC( SvUVX(TX_op_arg) );
     }
 }
 
@@ -755,24 +758,24 @@ TXC_goto(dor) {
     SV* const sv = TX_st_sa;
     SvGETMAGIC(sv);
     if(!SvOK(sv)) {
-        TX_st->pc++;
+        TX_RETURN_NEXT();
     }
     else {
-        TX_st->pc = SvUVX(TX_op_arg);
+        TX_RETURN_PC( SvUVX(TX_op_arg) );
     }
 }
 
 TXC(not) {
     TX_st_sa = boolSV( !sv_true(TX_st_sa) );
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(minus) { /* unary minus */
     sv_setnv(TX_st->targ, -SvNVx(TX_st_sa));
     sv_2iv(TX_st->targ); /* IV please */
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(max_index) {
@@ -785,51 +788,51 @@ TXC(max_index) {
 
     sv_setiv(TX_st->targ, av_len((AV*)SvRV(avref)));
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(builtin_mark_raw) {
     TX_st_sa = tx_mark_raw(aTHX_ TX_st_sa);
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(builtin_unmark_raw) {
     TX_st_sa = tx_unmark_raw(aTHX_ TX_st_sa);
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(builtin_html_escape) {
     TX_st_sa = tx_html_escape(aTHX_ TX_st_sa);
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(eq) {
     TX_st_sa = boolSV(  tx_sv_eq(aTHX_ TX_st_sa, TX_st_sb) );
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(ne) {
     TX_st_sa = boolSV( !tx_sv_eq(aTHX_ TX_st_sa, TX_st_sb) );
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(lt) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) < SvNVx(TX_st_sa) );
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(le) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) <= SvNVx(TX_st_sa) );
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(gt) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) > SvNVx(TX_st_sa) );
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 TXC(ge) {
     TX_st_sa = boolSV( SvNVx(TX_st_sb) >= SvNVx(TX_st_sa) );
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(ncmp) {
@@ -847,19 +850,18 @@ TXC(ncmp) {
     }
     else {
         TX_st_sa = &PL_sv_undef;
-        TX_st->pc++;
-        return;
+        TX_RETURN_NEXT();
     }
 
     sv_setiv(TX_st->targ, value);
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(scmp) {
     sv_setiv(TX_st->targ, sv_cmp(TX_st_sb, TX_st_sa));
     TX_st_sa = TX_st->targ;
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_w_key(symbol) { /* find a symbol (function, macro, constant) */
@@ -873,35 +875,27 @@ TXC_w_key(symbol) { /* find a symbol (function, macro, constant) */
         croak("Undefined symbol %s", tx_neat(aTHX_ name));
     }
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 static void
-tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr) {
+tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, tx_pc_t const retaddr) {
     dSP;
     dMARK;
-    I32 const items = SP - MARK;
-    SV* const name  = AvARRAY(macro)[TXm_NAME];
-    U32 const addr  = (U32)SvUVX(AvARRAY(macro)[TXm_ADDR]);
-    IV const nargs  = SvIVX(AvARRAY(macro)[TXm_NARGS]);
-    UV const outer  = SvUVX(AvARRAY(macro)[TXm_OUTER]);
+    I32 const items    = SP - MARK;
+    SV* const name     = AvARRAY(macro)[TXm_NAME];
+    tx_pc_t const addr = INT2PTR(tx_pc_t, SvUVX(AvARRAY(macro)[TXm_ADDR]));
+    IV const nargs     = SvIVX(AvARRAY(macro)[TXm_NARGS]);
+    UV const outer     = SvUVX(AvARRAY(macro)[TXm_OUTER]);
     AV* cframe; /* new frame */
     UV i;
     SV* tmp;
-
-    assert( addr < TX_st->code_len );
-    assert( TX_st->code[addr].exec_code != NULL );
-
-    if(TX_st->code[addr].exec_code != TXCODE_macro_begin) {
-        croak("Oops: Invalid macro address: %u", (unsigned)addr);
-    }
 
     if(items != nargs) {
         tx_error(aTHX_ TX_st, "Wrong number of arguments for %"SVf" (%d %c %d)",
             name, (int)items, items > nargs ? '>' : '<', (int)nargs);
         TX_st->sa = &PL_sv_undef;
-        TX_st->pc++;
-        return;
+        TX_RETURN_NEXT();
     }
 
     /* create a new frame */
@@ -910,7 +904,7 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr)
 
     /* setup frame info: name, retaddr and output buffer */
     sv_setsv(*av_fetch(cframe, TXframe_NAME,    TRUE), name);
-    sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), retaddr);
+    sv_setuv(*av_fetch(cframe, TXframe_RETADDR, TRUE), PTR2UV(retaddr));
 
     /* swap TXframe_OUTPUT and TX_st->output.
        I know it's ugly. Any ideas?
@@ -941,8 +935,7 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, U32 const retaddr)
         SP = ORIGMARK;
         PUTBACK;
     }
-
-    TX_st->pc = addr;
+    TX_RETURN_PC(addr);
 }
 
 TXC_w_int(macro_end) {
@@ -966,8 +959,7 @@ TXC_w_int(macro_end) {
     TX_st->output                     = tmp;
 
     LEAVE; /* to retrieve saved current_frame */
-
-    TX_st->pc = SvUVX(retaddr);
+    TX_RETURN_PC( SvUVX(retaddr) );
 }
 
 TXC(funcall) { /* call a function or a macro */
@@ -980,14 +972,14 @@ TXC(funcall) { /* call a function or a macro */
     }
     else {
         TX_st_sa = tx_funcall(aTHX_ TX_st, TX_st_sa, "function call");
-        TX_st->pc++;
+        TX_RETURN_NEXT();
     }
 }
 
 TXC_w_key(methodcall_s) {
     TX_st_sa = tx_methodcall(aTHX_ TX_st, TX_op_arg);
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(make_array) {
@@ -1013,7 +1005,7 @@ TXC(make_array) {
 
     TX_st_sa = avref;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(make_hash) {
@@ -1045,30 +1037,25 @@ TXC(make_hash) {
 
     TX_st_sa = hvref;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(enter) {
     ENTER;
     SAVETMPS;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC(leave) {
     FREETMPS;
     LEAVE;
 
-    TX_st->pc++;
+    TX_RETURN_NEXT();
 }
 
 TXC_goto(goto) {
-    TX_st->pc = SvUVX(TX_op_arg);
-}
-
-TXC(end) {
-    assert(TX_st->current_frame == 0);
-    TX_st->pc = TX_st->code_len;
+    TX_RETURN_PC( SvUVX(TX_op_arg) );
 }
 
 /* opcode markers (noop) */
@@ -1077,6 +1064,11 @@ TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC_w_key(macro_begin);
 TXC_w_int(macro_nargs);
 TXC_w_int(macro_outer);
+
+/* "end" must be here (the last opcode) */
+TXC(end) {
+    assert(TX_st->current_frame == 0);
+}
 
 /* End of opcodes */
 
@@ -1150,7 +1142,7 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     SvREFCNT_dec(st->symbol);
     SvREFCNT_dec(st->frame);
     SvREFCNT_dec(st->targ);
-    SvREFCNT_dec(st->self);
+    SvREFCNT_dec(st->engine);
 
     PERL_UNUSED_ARG(sv);
 
@@ -1188,7 +1180,7 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
     st->symbol   = (HV*)tx_sv_dup_inc(aTHX_ (SV*)st->symbol, param);
     st->frame    = (AV*)tx_sv_dup_inc(aTHX_ (SV*)st->frame,    param);
     st->targ     =      tx_sv_dup_inc(aTHX_ st->targ, param);
-    st->self     =      tx_sv_dup_inc(aTHX_ st->self, param);
+    st->engine   =      tx_sv_dup_inc(aTHX_ st->engine, param);
 #else
     PERL_UNUSED_ARG(mg);
     PERL_UNUSED_ARG(param);
@@ -1416,6 +1408,7 @@ CODE:
 {
     dMY_CXT;
     MAGIC* mg;
+    dTX_optable;
     HV* const ops = get_hv("Text::Xslate::OPS", GV_ADD);
     U32 const len = av_len(proto) + 1;
     U32 i;
@@ -1460,9 +1453,9 @@ CODE:
     sv_setsv(*av_fetch(tmpl, TXo_CACHEPATH, TRUE),  cachepath);
     sv_setsv(*av_fetch(tmpl, TXo_FULLPATH,  TRUE),  fullpath);
 
-    st.tmpl = tmpl;
-    st.self = newRV_inc((SV*)self);
-    sv_rvweaken(st.self);
+    st.tmpl   = tmpl;
+    st.engine = newRV_inc((SV*)self);
+    sv_rvweaken(st.engine);
 
     st.hint_size = TX_HINT_SIZE;
 
@@ -1484,6 +1477,7 @@ CODE:
     Newxz(st.code, len, tx_code_t);
 
     st.code_len = len;
+    st.pc       = &st.code[0];
 
     mg = sv_magicext((SV*)tmpl, NULL, PERL_MAGIC_ext, &xslate_vtbl, (char*)&st, sizeof(st));
     mg->mg_flags |= MGf_DUP;
@@ -1503,7 +1497,7 @@ CODE:
             }
 
             opnum                = SvIVx(hv_iterval(ops, he));
-            st.code[i].exec_code = tx_opcode[ opnum ];
+            st.code[i].exec_code = tx_optable[opnum];
             if(tx_oparg[opnum] & TXARGf_SV) {
                 if(!arg) {
                     croak("Oops: Opcode %"SVf" must have an argument on [%d]", opname, (int)i);
@@ -1519,12 +1513,13 @@ CODE:
 
                     if(tx_oparg[opnum] & TXARGf_GOTO) {
                         /* calculate relational addresses to absolute addresses */
-                        UV const abs_addr = (UV)(i + SvIVX(st.code[i].arg));
-                        if(abs_addr >= (UV)len) {
+                        UV const abs_pos       = (UV)(i + SvIVX(st.code[i].arg));
+
+                        if(abs_pos >= (UV)len) {
                             croak("Oops: goto address %"IVdf" is out of range (must be 0 <= addr <= %"IVdf")",
                                 SvIVX(st.code[i].arg), (IV)len);
                         }
-                        sv_setuv(st.code[i].arg, abs_addr);
+                        sv_setuv(st.code[i].arg, PTR2UV(TX_POS2PC(&st, abs_pos)));
                     }
                     SvREADONLY_on(st.code[i].arg);
                 }
@@ -1562,7 +1557,7 @@ CODE:
 
                     (void)av_store(macro, TXm_OUTER, newSViv(0));
                     (void)av_store(macro, TXm_NARGS, newSViv(0));
-                    (void)av_store(macro, TXm_ADDR,  newSViv(i));
+                    (void)av_store(macro, TXm_ADDR,  newSVuv(PTR2UV(TX_POS2PC(&st, i))));
                     (void)av_store(macro, TXm_NAME,  name);
                     st.code[i].arg = NULL;
                 }
@@ -1659,6 +1654,16 @@ CODE:
 }
 
 void
+engine(klass)
+CODE:
+{
+    dMY_CXT;
+    tx_state_t* const st = MY_CXT.current_st;
+    ST(0) = st ? st->engine : &PL_sv_undef;
+    XSRETURN(1);
+}
+
+void
 _warn(SV* msg)
 ALIAS:
     _warn = 0
@@ -1682,7 +1687,7 @@ CODE:
         PL_diehook  = NULL;
         croak("Not in $xslate->render()");
     }
-    self   = st->self;
+    self   = st->engine;
 
     cframe = TX_current_framex(st);
     name   = AvARRAY(cframe)[TXframe_NAME];
@@ -1706,7 +1711,7 @@ CODE:
 
     prefix = form("Xslate(%s:%d &%"SVf"[%d]): ",
             tx_file(aTHX_ st), tx_line(aTHX_ st),
-            name, (int)st->pc);
+            name, (int)TX_PC2POS(st, st->pc));
 
     if(instr(SvPV_nolen_const(msg), prefix)) {
         full_message = msg; /* msg has the prefix */

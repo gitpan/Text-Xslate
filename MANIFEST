@@ -53,7 +53,6 @@ inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Bridge.pm
 lib/Text/Xslate/Compiler.pm
-lib/Text/Xslate/EscapedString.pm
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
 lib/Text/Xslate/PP/Booster.pm
@@ -62,9 +61,6 @@ lib/Text/Xslate/PP/Macro.pm
 lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
-lib/Text/Xslate/PP/Type/Array.pm
-lib/Text/Xslate/PP/Type/EscapedString.pm
-lib/Text/Xslate/PP/Type/Hash.pm
 lib/Text/Xslate/PP/Type/Pair.pm
 lib/Text/Xslate/PP/Type/Raw.pm
 lib/Text/Xslate/Symbol.pm
@@ -101,6 +97,7 @@ t/010_internals/018_deps_file2.t
 t/010_internals/019_no_vars.t
 t/010_internals/020_util.t
 t/010_internals/021_cached.t
+t/010_internals/022_register_function.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -178,6 +175,7 @@ t/template/eg/child.tx
 t/template/footer1.tt
 t/template/footer2.tt
 t/template/for.tx
+t/template/func.tx
 t/template/header1.tt
 t/template/header2.tt
 t/template/hello.tt
