@@ -4,16 +4,16 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1036';
+our $VERSION = '0.1037';
+
+use Carp       ();
+use File::Spec ();
+use Exporter   ();
 
 use Text::Xslate::Util qw($DEBUG
     mark_raw unmark_raw
     html_escape escaped_string
 );
-
-use Carp       ();
-use File::Spec ();
-use Exporter   ();
 
 our @ISA = qw(Text::Xslate::Engine Exporter);
 
@@ -22,7 +22,8 @@ our @EXPORT_OK = qw(
     escaped_string html_escape
 );
 
-if(!__PACKAGE__->can('render')) { # The backend (which is maybe PP.pm) has been loaded
+# load backend (XS or PP)
+if(!__PACKAGE__->can('render')) { # The backend is already loaded
     if($DEBUG !~ /\b pp \b/xms) {
         eval {
             require XSLoader;
@@ -84,7 +85,7 @@ my %builtin = (
 
 sub compiler_class() { 'Text::Xslate::Compiler' }
 
-sub options { # overridable
+sub options {
     my($class) = @_;
     return {
         # name       => default
@@ -169,11 +170,11 @@ sub register_function {
     while(my($name, $body) = splice @_, 0, 2) {
         $function->{$name} = $body;
     }
-    $self->flush_cache();
+    $self->flush_memory_cache();
     return;
 }
 
-sub flush_cache {
+sub flush_memory_cache {
     my($self) = @_;
     %{$self->{template}} = ();
     return;
@@ -266,7 +267,6 @@ sub slurp {
     open my($source), '<' . $self->{input_layer}, $fullpath
         or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
     local $/;
-
     return scalar <$source>;
 }
 
@@ -313,7 +313,6 @@ sub _load_source {
             Carp::carp("Xslate: Cannot open $cachepath for writing (ignored): $!");
         }
     }
-
     if(_DUMP_LOAD_FILE) {
         printf STDERR "  _load_source: cache(%s)\n",
             defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
@@ -336,26 +335,33 @@ sub _load_compiled {
     open my($in), '<' . $self->{input_layer}, $cachepath
         or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
 
-    if(scalar(<$in>) ne $self->_magic($fi->{fullpath})) {
-        # magic token is not matched
+    if(scalar(<$in>) ne $self->_magic_token($fi->{fullpath})) {
         return undef;
     }
 
     # parse assembly
     my @asm;
-    while(defined(my $line = <$in>)) {
-        next if $line =~ m{\A [ \t]* (?: \# | // )}xms; # comments
-        chomp $line;
+    while(defined(my $s = <$in>)) {
+        next if $s =~ m{\A [ \t]* (?: \# | // )}xms; # comments
+        chomp $s;
 
-        my($name, $value, $line) = $line =~ m{
+        # See ::Compiler::as_assembly()
+        # "$opname $arg #$line:$file *$symbol // $comment"
+
+        my($name, $value, $line, $file, $symbol) = $s =~ m{
             \A
                 [ \t]*
                 ($IDENT)                        # an opname
-                (?: [ \t]+ ($STRING|$NUMBER) )? # an operand   (optional)
-                (?:\#($NUMBER))?                # line number  (optional)
-                [^\n]*                          # any comments (optional)
+
+                # the following components are optional
+                (?: [ \t]+ ($STRING|$NUMBER) )? # operand
+                (?: [ \t]+ \#($NUMBER)          # line number
+                    (?: [:] ($STRING))?         # file name
+                )?
+                (?: [ \t]+ \*($STRING) )?       # symbol name
+                (?: [ \t]* // [^\n]*)?          # comments (anything)
             \z
-        }xmsog or $self->_error("LoadError: Cannot parse assembly (line $.): $line");
+        }xmsog or $self->_error("LoadError: Cannot parse assembly (line $.): $s");
 
         $value = literal_to_value($value);
 
@@ -367,7 +373,7 @@ sub _load_compiled {
                 Carp::carp("Xslate: failed to stat $value (ignored): $!");
             }
             if($dep_mtime > $threshold_mtime){
-                printf "  _load_cache_compiled: %s(%s) is newer than %s(%s)\n",
+                printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
                     $value,     scalar localtime($dep_mtime),
                     $cachepath, scalar localtime($threshold_mtime)
                         if _DUMP_LOAD_FILE;
@@ -376,11 +382,11 @@ sub _load_compiled {
             }
         }
 
-        push @asm, [ $name, $value, $line ];
+        push @asm, [ $name, $value, $line, $file, $symbol ];
     }
 
     if(_DUMP_LOAD_FILE) {
-        printf STDERR "  _load_cache_compiled: cache(%s)\n",
+        printf STDERR "  _load_compiled: cache(%s)\n",
             defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
     }
 
@@ -389,11 +395,11 @@ sub _load_compiled {
 
 sub _save_compiled {
     my($self, $out, $asm, $fullpath) = @_;
-    print $out $self->_magic($fullpath), $self->_compiler->as_assembly($asm);
+    print $out $self->_magic_token($fullpath), $self->_compiler->as_assembly($asm);
     return;
 }
 
-sub _magic {
+sub _magic_token {
     my($self, $fullpath) = @_;
 
     my $opt = join(',',
@@ -467,7 +473,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1036.
+This document describes Text::Xslate version 0.1037.
 
 =head1 SYNOPSIS
 
@@ -486,8 +492,7 @@ This document describes Text::Xslate version 0.1036.
         books => [
             { title => 'Islands in the stream' },
             { title => 'Programming Perl'      },
-            { title => 'River out of Eden'     },
-            { title => 'Beautiful code'        },
+            # ...
         ],
     );
 

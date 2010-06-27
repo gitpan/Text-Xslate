@@ -2,11 +2,13 @@ package Text::Xslate::Parser;
 use Any::Moose;
 
 use Scalar::Util ();
+
 use Text::Xslate::Symbol;
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
     is_int any_in
     value_to_literal
+    literal_to_value
     p
 );
 
@@ -435,10 +437,11 @@ sub init_basic_operators {
     $parser->infix('>',  160)->is_logical(1);
     $parser->infix('>=', 160)->is_logical(1);
 
-    $parser->infix('==', 150)->is_logical(1);
-    $parser->infix('!=', 150)->is_logical(1);
+    $parser->infix('==',  150)->is_logical(1);
+    $parser->infix('!=',  150)->is_logical(1);
     $parser->infix('<=>', 150);
     $parser->infix('cmp', 150);
+    $parser->infix('~~',  150);
 
     $parser->infix('|',  140, \&led_bar);
 
@@ -620,6 +623,8 @@ sub advance {
 
     print STDOUT "[$arity => $value]\n" if _DUMP_TOKEN;
 
+    my @extra;
+
     if($arity eq "name") {
         $proto = $parser->find($value);
         $arity = $proto->arity;
@@ -633,6 +638,7 @@ sub advance {
     elsif($arity eq "string" or $arity eq "number") {
         $proto = $symtab->{"(literal)"};
         $arity = "literal";
+        push @extra, value => $parser->parse_literal($value);
     }
 
     if(not defined $proto) {
@@ -643,7 +649,13 @@ sub advance {
         id    => $value,
         arity => $arity,
         line  => $parser->line,
+        @extra,
      ) );
+}
+
+sub parse_literal {
+    my($parser, $literal) = @_;
+    return literal_to_value($literal);
 }
 
 sub default_nud {
@@ -794,12 +806,27 @@ sub led_fetch {
     return $fetch;
 }
 
+sub call {
+    my($parser, $proto, $function, @args) = @_;
+    if(not ref $function) {
+        $function = $proto->clone(
+            arity => 'name',
+            id    => $function,
+        );
+    }
+
+    return $proto->clone(
+        arity => 'call',
+        first => $function,
+        second => \@args,
+    );
+}
+
 sub led_call {
     my($parser, $symbol, $left) = @_;
 
     my $call = $symbol->clone(arity => 'call');
     $call->first($left);
-
     $call->second( $parser->expression_list() );
     $parser->advance(")");
 
@@ -808,13 +835,8 @@ sub led_call {
 
 sub led_bar { # filter
     my($parser, $symbol, $left) = @_;
-
-    my $call = $symbol->clone(arity => 'call');
-
-    $call->first($parser->expression($call->lbp));
-    $call->second([$left]);
-
-    return $call;
+    # a | b -> b(a)
+    return $parser->call($symbol, $parser->expression($symbol->lbp), $left);
 }
 
 
@@ -1313,11 +1335,7 @@ sub std_macro_block {
 
     my $macro = $parser->std_proc($symbol);
 
-    my $call  = $symbol->clone(
-        arity  => 'call',
-        first  => $macro->first, # name
-        second => [],            # args
-    );
+    my $call  = $parser->call($symbol, $macro->first);
 
     # The "block" keyword defines raw macros.
     # see _generate_proc()
@@ -1397,8 +1415,7 @@ sub std_given {
 
         if(defined(my $test = $when->first)) { # when
             if(!$test->is_logical) {
-                # XXX: should implement smart match?
-                $when->first( $parser->binary('==', $topic, $test) );
+                $when->first( $parser->binary('~~', $topic, $test) );
             }
         }
         else { # default
@@ -1479,12 +1496,12 @@ sub barename {
     # "string" is ok
     if($t->arity eq 'literal') {
         $parser->advance();
-        return $t->id;
+        return $t;
     }
 
     # package::name
     my @parts;
-    push @parts, $t->id;
+    push @parts, $t;
     $parser->advance();
 
     while(1) {
@@ -1497,7 +1514,7 @@ sub barename {
                 $parser->_unexpected("a name", $t);
             }
 
-            push @parts, $t->id;
+            push @parts, $t;
             $parser->advance();
         }
         else {

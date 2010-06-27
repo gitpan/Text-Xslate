@@ -2,6 +2,7 @@ benchmark/cascade.pl
 benchmark/demo-mt.pl
 benchmark/demo-tt.pl
 benchmark/expr.pl
+benchmark/expr_eq.pl
 benchmark/fib.pl
 benchmark/for.pl
 benchmark/function.pl
@@ -98,6 +99,7 @@ t/010_internals/019_no_vars.t
 t/010_internals/020_util.t
 t/010_internals/021_cached.t
 t/010_internals/022_register_function.t
+t/010_internals/023_opinfo.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -131,6 +133,7 @@ t/020_features/027_constant.t
 t/020_features/028_autobox.t
 t/020_features/029_autobox_w_cb.t
 t/020_features/030_lambda.t
+t/020_features/031_smartmatch.t
 t/020_features/100_program.t
 t/020_features/200_error.t
 t/100_tterse/001_parse.t
@@ -192,6 +195,8 @@ t/template/myapp/base.tx.mod
 t/template/myapp/cbar.tx
 t/template/myapp/cfoo.tx
 t/template/myapp/derived.tx
+t/template/oi/bad_base.tx
+t/template/oi/bad_component.tx
 t/template/wrapper.tt
 t/template/wrapper_div.tt
 tool/force-pp.pl
@@ -199,6 +204,7 @@ tool/opcode.pl
 tool/opcode_for_pp.pl
 xs/Text-Xslate.xs
 xs/xslate_methods.xs
+xs/xslate_opcode.inc
 xslate.h
 xslate_ops.h
 xt/01_podspell.t

@@ -40,6 +40,7 @@ TXC(max_index);
 TXC(builtin_mark_raw);
 TXC(builtin_unmark_raw);
 TXC(builtin_html_escape);
+TXC(match);
 TXC(eq);
 TXC(ne);
 TXC(lt);
@@ -61,6 +62,7 @@ TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC_w_key(macro_begin);
 TXC_w_int(macro_nargs);
 TXC_w_int(macro_outer);
+TXC(set_opinfo);
 TXC(end);
 
 enum tx_opcode_t {
@@ -101,28 +103,30 @@ enum tx_opcode_t {
     TXOP_builtin_mark_raw, /* 34 */
     TXOP_builtin_unmark_raw, /* 35 */
     TXOP_builtin_html_escape, /* 36 */
-    TXOP_eq, /* 37 */
-    TXOP_ne, /* 38 */
-    TXOP_lt, /* 39 */
-    TXOP_le, /* 40 */
-    TXOP_gt, /* 41 */
-    TXOP_ge, /* 42 */
-    TXOP_ncmp, /* 43 */
-    TXOP_scmp, /* 44 */
-    TXOP_symbol, /* 45 */
-    TXOP_macro_end, /* 46 */
-    TXOP_funcall, /* 47 */
-    TXOP_methodcall_s, /* 48 */
-    TXOP_make_array, /* 49 */
-    TXOP_make_hash, /* 50 */
-    TXOP_enter, /* 51 */
-    TXOP_leave, /* 52 */
-    TXOP_goto, /* 53 */
-    TXOP_depend, /* 54 */
-    TXOP_macro_begin, /* 55 */
-    TXOP_macro_nargs, /* 56 */
-    TXOP_macro_outer, /* 57 */
-    TXOP_end, /* 58 */
+    TXOP_match, /* 37 */
+    TXOP_eq, /* 38 */
+    TXOP_ne, /* 39 */
+    TXOP_lt, /* 40 */
+    TXOP_le, /* 41 */
+    TXOP_gt, /* 42 */
+    TXOP_ge, /* 43 */
+    TXOP_ncmp, /* 44 */
+    TXOP_scmp, /* 45 */
+    TXOP_symbol, /* 46 */
+    TXOP_macro_end, /* 47 */
+    TXOP_funcall, /* 48 */
+    TXOP_methodcall_s, /* 49 */
+    TXOP_make_array, /* 50 */
+    TXOP_make_hash, /* 51 */
+    TXOP_enter, /* 52 */
+    TXOP_leave, /* 53 */
+    TXOP_goto, /* 54 */
+    TXOP_depend, /* 55 */
+    TXOP_macro_begin, /* 56 */
+    TXOP_macro_nargs, /* 57 */
+    TXOP_macro_outer, /* 58 */
+    TXOP_set_opinfo, /* 59 */
+    TXOP_end, /* 60 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -164,6 +168,7 @@ static const U8 tx_oparg[] = {
     0U, /* builtin_mark_raw */
     0U, /* builtin_unmark_raw */
     0U, /* builtin_html_escape */
+    0U, /* match */
     0U, /* eq */
     0U, /* ne */
     0U, /* lt */
@@ -185,6 +190,7 @@ static const U8 tx_oparg[] = {
     TXCODE_W_KEY, /* macro_begin */
     TXCODE_W_INT, /* macro_nargs */
     TXCODE_W_INT, /* macro_outer */
+    0U, /* set_opinfo */
     0U, /* end */
 }; /* tx_oparg[] */
 
@@ -227,6 +233,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(builtin_mark_raw), newSViv(TXOP_builtin_mark_raw));
     (void)hv_stores(ops, STRINGIFY(builtin_unmark_raw), newSViv(TXOP_builtin_unmark_raw));
     (void)hv_stores(ops, STRINGIFY(builtin_html_escape), newSViv(TXOP_builtin_html_escape));
+    (void)hv_stores(ops, STRINGIFY(match), newSViv(TXOP_match));
     (void)hv_stores(ops, STRINGIFY(eq), newSViv(TXOP_eq));
     (void)hv_stores(ops, STRINGIFY(ne), newSViv(TXOP_ne));
     (void)hv_stores(ops, STRINGIFY(lt), newSViv(TXOP_lt));
@@ -248,6 +255,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(macro_begin), newSViv(TXOP_macro_begin));
     (void)hv_stores(ops, STRINGIFY(macro_nargs), newSViv(TXOP_macro_nargs));
     (void)hv_stores(ops, STRINGIFY(macro_outer), newSViv(TXOP_macro_outer));
+    (void)hv_stores(ops, STRINGIFY(set_opinfo), newSViv(TXOP_set_opinfo));
     (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
 } /* tx_register_ops() */
 
@@ -291,6 +299,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_builtin_mark_raw,
     TXCODE_builtin_unmark_raw,
     TXCODE_builtin_html_escape,
+    TXCODE_match,
     TXCODE_eq,
     TXCODE_ne,
     TXCODE_lt,
@@ -312,6 +321,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_macro_begin,
     TXCODE_macro_nargs,
     TXCODE_macro_outer,
+    TXCODE_set_opinfo,
     TXCODE_end,
     NULL
 }; /* tx_optable[] */
@@ -361,6 +371,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(builtin_mark_raw),
         LABEL_PTR(builtin_unmark_raw),
         LABEL_PTR(builtin_html_escape),
+        LABEL_PTR(match),
         LABEL_PTR(eq),
         LABEL_PTR(ne),
         LABEL_PTR(lt),
@@ -382,6 +393,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(macro_begin),
         LABEL_PTR(macro_nargs),
         LABEL_PTR(macro_outer),
+        LABEL_PTR(set_opinfo),
         LABEL_PTR(end)
     }; /* end of ops_address_table */
     if(UNLIKELY(st == NULL)) {
@@ -428,6 +440,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(builtin_mark_raw    ): TXCODE_builtin_mark_raw    (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_unmark_raw  ): TXCODE_builtin_unmark_raw  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_html_escape ): TXCODE_builtin_html_escape (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(match               ): TXCODE_match               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(eq                  ): TXCODE_eq                  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(ne                  ): TXCODE_ne                  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(lt                  ): TXCODE_lt                  (aTHX_ st); goto *(st->pc->exec_code);
@@ -449,6 +462,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(macro_begin         ): TXCODE_macro_begin         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_nargs         ): TXCODE_macro_nargs         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_outer         ): TXCODE_macro_outer         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(set_opinfo          ): TXCODE_set_opinfo          (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(end): TXCODE_end(aTHX_ st);
     return NULL;
 } /* end of tx_runops() */
