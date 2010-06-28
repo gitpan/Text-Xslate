@@ -239,7 +239,7 @@ sub split :method {
             }
         }
         elsif(s/$lex_text//xms) {
-            push @tokens, [ text => $1 ] if length($1);
+            push @tokens, [ text => $1 ];
         }
         else {
             confess "Oops: Unreached code, near" . p($_);
@@ -292,7 +292,7 @@ sub preprocess {
                 }
             }
 
-            $code .= qq{print_raw "$s";};
+            $code .= qq{print_raw "$s";} if length($s);
             $code .= qq{\n} if $nl;
         }
         elsif($type eq 'code') {
@@ -807,17 +807,18 @@ sub led_fetch {
 }
 
 sub call {
-    my($parser, $proto, $function, @args) = @_;
+    my($parser, $function, @args) = @_;
     if(not ref $function) {
-        $function = $proto->clone(
+        $function = $parser->symbol('(name)')->clone(
             arity => 'name',
             id    => $function,
+            line  => $parser->line,
         );
     }
 
-    return $proto->clone(
-        arity => 'call',
-        first => $function,
+    return $parser->symbol('(call)')->clone(
+        arity  => 'call',
+        first  => $function,
         second => \@args,
     );
 }
@@ -836,7 +837,7 @@ sub led_call {
 sub led_bar { # filter
     my($parser, $symbol, $left) = @_;
     # a | b -> b(a)
-    return $parser->call($symbol, $parser->expression($symbol->lbp), $left);
+    return $parser->call($parser->expression($symbol->lbp), $left);
 }
 
 
@@ -1013,7 +1014,8 @@ sub finish_statement {
 sub statement { # process one or more statements
     my($parser) = @_;
     my $t = $parser->token;
-    while($t->id eq ";"){
+
+    if($t->id eq ";"){
         $parser->advance(); # ";"
         return;
     }
@@ -1022,7 +1024,7 @@ sub statement { # process one or more statements
         $parser->reserve($t);
         $parser->advance();
 
-        # std() returns a list of nodes
+        # std() can return a list of nodes
         return $t->std($parser);
     }
 
@@ -1030,7 +1032,7 @@ sub statement { # process one or more statements
     $parser->finish_statement();
 
     if($expr->is_statement) {
-        # expressions can produce statements (e.g. assignment)
+        # expressions can produce pure statements (e.g. assignment)
         return $expr;
     }
     else {
@@ -1145,14 +1147,16 @@ sub nud_constant {
 my $lambda_id = 0;
 sub lambda {
     my($parser, $proto) = @_;
-    my $name = $parser->symbol('(name)')->clone(
-        id => sprintf('lambda@%d', $lambda_id++),
+    $proto ||= $parser->symbol('(lambda)');
+    my $name = $proto->clone(
+        id   => sprintf('lambda@%d', $lambda_id++),
     );
 
     return $proto->clone(
         arity => 'proc',
         id    => 'macro',
         first => $name,
+        line  => $parser->line,
     );
 }
 
@@ -1314,36 +1318,82 @@ sub std_while {
     return $proc;
 }
 
+# macro name -> { ... }
 sub std_proc {
     my($parser, $symbol) = @_;
 
     my $macro = $symbol->clone(arity => "proc");
     my $name  = $parser->token;
+
     if($name->arity ne "name") {
         $parser->_unexpected("a name", $name);
     }
 
     $parser->define_function($name->id);
-    $macro->first( $parser->symbol($name->id)->nud($parser) );
+    $macro->first($name);
     $parser->advance();
     $parser->pointy($macro);
     return $macro;
 }
 
+# block name -> { ... }
+# Note that the "block" keyword defines "immediate" macros, which
+# returns a normal string, instead of a raw string.
+# see _generate_proc()
+
 sub std_macro_block {
     my($parser, $symbol) = @_;
 
-    my $macro = $parser->std_proc($symbol);
+    my $macro = $symbol->clone(arity => "proc");
+    my $name  = $parser->token;
 
-    my $call  = $parser->call($symbol, $macro->first);
+    if($name->arity ne "name") {
+        $parser->_unexpected("a name", $name);
+    }
 
-    # The "block" keyword defines raw macros.
-    # see _generate_proc()
-    my $print = $parser->symbol('print_raw')->clone(
+    # auto filters
+    my @filters;
+    my $t = $parser->advance();
+    while($t->id eq "|") {
+        $t = $parser->advance();
+
+        if($t->arity ne "name") {
+            $parser->_unexpected("a name", $name);
+        }
+        my $filter = $t->clone();
+        $t = $parser->advance();
+
+        my $args;
+        if($t->id eq "(") {
+            $parser->advance();
+            $args = $parser->expression_list();
+            $t = $parser->advance(")");
+        }
+        push @filters, $args
+            ? $parser->call($filter, @{$args})
+            : $filter;
+    }
+
+    $parser->define_function($name->id);
+    $macro->first($name);
+    $parser->pointy($macro);
+
+    my $call = $parser->call($macro->first);
+    my $command;
+    if(@filters) {
+        foreach my $filter(@filters) { # apply filters
+            $call = $parser->call($filter, $call);
+        }
+        $command = 'print'; # need to explicit 'raw' filter for security
+    }
+    else {
+        $command = 'print_raw';
+    }
+    my $print = $parser->symbol($command)->clone(
         arity => 'command',
         first => [$call],
     );
-    # std() returns a list
+    # std() can return a list
     return( $macro, $print );
 }
 
@@ -1390,28 +1440,61 @@ sub std_if {
 sub std_given {
     my($parser, $symbol) = @_;
 
-    my $proc = $symbol->clone(arity => 'given');
-    $proc->first( $parser->expression(0) );
+    my $given = $symbol->clone(arity => 'given');
+    $given->first( $parser->expression(0) );
 
     local $parser->{in_given} = 1;
-    $parser->pointy($proc);
+    $parser->pointy($given);
 
-    if(!(defined $proc->second && @{$proc->second})) { # if no vars given
-        $proc->second([
+    if(!(defined $given->second && @{$given->second})) { # if no topic vars
+        $given->second([
             $parser->symbol('($_)')->clone(arity => 'variable' )
         ]);
     }
-    my($topic) = @{$proc->second};
 
-    # make if-elsif-else from given-when
+    $parser->build_given_body($given, "when");
+    return $given;
+}
+
+# when/default
+sub std_when {
+    my($parser, $symbol) = @_;
+
+    if(!$parser->in_given) {
+        $parser->_error("You cannot use $symbol blocks outside given blocks");
+    }
+    my $proc = $symbol->clone(arity => 'when');
+    if($symbol->id eq "when") {
+        $proc->first( $parser->expression(0) );
+    }
+    $proc->second( $parser->block() );
+    return $proc;
+}
+
+sub _is_literal_ws {
+    my($s) = @_;
+    return  $s->arity eq "literal"
+         && $s->value =~ m{\A [ \t\r\n]* \z}xms
+}
+
+sub build_given_body {
+    my($parser, $given, $expect) = @_;
+    my($topic) = @{$given->second};
+
+    # make if-elsif-else chain from given-when
     my $if;
     my $elsif;
     my $else;
-    foreach my $when(@{$proc->third}) {
-        if($when->arity ne "when") {
-            $parser->_unexpected("when blocks", $when);
+    foreach my $when(@{$given->third}) {
+        if($when->arity ne $expect) {
+            # ignore white space
+            if($when->id eq "print_raw"
+                    && !grep { !_is_literal_ws($_) } @{$when->first}) {
+                next;
+            }
+            $parser->_unexpected("$expect blocks", $when);
         }
-        $when->arity("if");
+        $when->arity("if"); # change the arity
 
         if(defined(my $test = $when->first)) { # when
             if(!$test->is_logical) {
@@ -1441,23 +1524,8 @@ sub std_given {
             $if = $else; # only default
         }
     }
-    $proc->third(defined $if ? [$if] : undef);
-    return $proc;
-}
-
-# when/default
-sub std_when {
-    my($parser, $symbol) = @_;
-
-    if(!$parser->in_given) {
-        $parser->_error("You cannot use $symbol blocks outside given blocks");
-    }
-    my $proc = $symbol->clone(arity => 'when');
-    if($symbol->id eq "when") {
-        $proc->first( $parser->expression(0) );
-    }
-    $proc->second( $parser->block() );
-    return $proc;
+    $given->third(defined $if ? [$if] : undef);
+    return;
 }
 
 sub std_include {

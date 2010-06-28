@@ -79,6 +79,10 @@ typedef struct {
        but stored here for performance */
     SV* warn_handler;
     SV* die_handler;
+
+    /* original error handlers */
+    SV* orig_warn_handler;
+    SV* orig_die_handler;
 } my_cxt_t;
 START_MY_CXT
 
@@ -584,8 +588,13 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, tx_pc_t const reta
         /* copies lexical variables from the old frame to the new one */
         AV* const oframe = (AV*)AvARRAY(TX_st->frame)[TX_st->current_frame-1];
         for(NOOP; i < outer; i++) {
-            UV const real_ix = i + TXframe_START_LVAR;
-            av_store(cframe, real_ix , SvREFCNT_inc_NN(AvARRAY(oframe)[real_ix]));
+            IV const real_ix = i + TXframe_START_LVAR;
+            /* XXX: macros can refer to unallocated lvars */
+            SV* const sv     = AvFILLp(oframe) >= real_ix
+                ? AvARRAY(oframe)[real_ix]
+                : &PL_sv_undef;
+            av_store(cframe, real_ix , sv);
+            SvREFCNT_inc_simple_void_NN(sv);
         }
     }
 
@@ -973,25 +982,27 @@ CODE:
         mtime    = sv_2mortal(newSViv( time(NULL) ));
     }
 
+    /* fetch the template object from $self->{template}{$name} */
     tobj = hv_iterval((HV*)SvRV(*svp),
          hv_fetch_ent((HV*)SvRV(*svp), name, TRUE, 0U)
     );
 
+    tmpl = newAV();
+    /* store the template object to $self->{template}{$name} */
+    sv_setsv(tobj, sv_2mortal(newRV_noinc((SV*)tmpl)));
+    av_extend(tmpl, TXo_least_size - 1);
+
+    sv_setsv(*av_fetch(tmpl, TXo_MTIME,     TRUE),  mtime);
+    sv_setsv(*av_fetch(tmpl, TXo_CACHEPATH, TRUE),  cachepath);
+    sv_setsv(*av_fetch(tmpl, TXo_FULLPATH,  TRUE),  fullpath);
+
+    /* prepare function table */
     svp = hv_fetchs(self, "function", FALSE);
     if(!( SvROK(*svp) && SvTYPE(SvRV(*svp)) == SVt_PVHV )) {
         croak("Function table must be a HASH reference");
     }
     st.symbol = newHVhv((HV*)SvRV(*svp)); /* must be copied */
     tx_register_builtin_methods(aTHX_ st.symbol);
-
-    tmpl = newAV();
-    sv_setsv(tobj, sv_2mortal(newRV_noinc((SV*)tmpl)));
-    av_extend(tmpl, TXo_least_size - 1);
-
-    sv_setsv(*av_fetch(tmpl, TXo_NAME,      TRUE),  name);
-    sv_setsv(*av_fetch(tmpl, TXo_MTIME,     TRUE),  mtime);
-    sv_setsv(*av_fetch(tmpl, TXo_CACHEPATH, TRUE),  cachepath);
-    sv_setsv(*av_fetch(tmpl, TXo_FULLPATH,  TRUE),  fullpath);
 
     st.tmpl   = tmpl;
     st.engine = newRV_inc((SV*)self);
@@ -1188,11 +1199,13 @@ CODE:
 
     /* local $SIG{__WARN__} = \&warn_handler */
     SAVESPTR(PL_warnhook);
-    PL_warnhook = MY_CXT.warn_handler;
+    MY_CXT.orig_warn_handler = PL_warnhook;
+    PL_warnhook              = MY_CXT.warn_handler;
 
     /* local $SIG{__DIE__}  = \&die_handler */
     SAVESPTR(PL_diehook);
-    PL_diehook = MY_CXT.die_handler;
+    MY_CXT.orig_die_handler = PL_diehook;
+    PL_diehook              = MY_CXT.die_handler;
 
     RETVAL = sv_newmortal();
     sv_grow(RETVAL, st->hint_size + TX_HINT_SIZE);
@@ -1276,7 +1289,7 @@ CODE:
     ENTER;
     if(ix == 0) { /* warn */
         SAVESPTR(PL_warnhook);
-        PL_warnhook = NULL;
+        PL_warnhook = MY_CXT.orig_warn_handler;
 
         /* handler can ignore warnings */
         if(handler) {
@@ -1291,7 +1304,7 @@ CODE:
     }
     else {
         SAVESPTR(PL_diehook);
-        PL_diehook = NULL;
+        PL_diehook = MY_CXT.orig_die_handler;
 
         /* unroll the stack frame */
         /* to fix TXframe_OUTPUT */

@@ -96,7 +96,7 @@ Relational operators (C<< == != < <= > >= >>):
 
 Note that C<==> and C<!=> are similar to Perl's C<eq> and C<ne> except that
 C<$var == nil> is true B<iff> I<$var> is uninitialized, while other
-relational operators are numerical operators.
+relational operators are numerical.
 
 Arithmetic operators (C<< + - * / % min max >>):
 
@@ -228,8 +228,8 @@ C<given-when>(also known as B<switch statement>):
     :   when "foo" {
             it is foo.
     :   }
-    :   when "bar" {
-            it is bar.
+    :   when ["bar", "baz" ] {
+            it is either bar or baz.
     :   }
     :   default {
             it is not foo nor bar.
@@ -243,7 +243,7 @@ You can specify the topic variable.
             it is foo.
     :   }
     :   when $it == "bar" or $it == "baz" {
-            it is bar or baz.
+            it is either bar or baz.
     :   }
     : }
 
@@ -253,7 +253,7 @@ You can register functions via C<function> or C<module> options for
 C<< Text::Xslate->new() >>.
 
 Once you have registered functions, you can call them with the C<()> operator.
-The C<|> operator is also supported as a syntactic sugar to C<()>.
+C<< infix:<|> >> is also supported as a syntactic sugar to C<()>.
 
     : f()        # without args
     : f(1, 2, 3) # with args
@@ -291,7 +291,7 @@ NOTE: C<mark_raw> and C<html> might be optimized away while compiling.
 
 =head2 Methods
 
-When I<$var> is an object instance, you can call its methods with the C<.>
+When I<$var> is an object instance, you can call its methods with the dot
 operator.
 
     <: $var.method() :>
@@ -500,6 +500,21 @@ only strings.
 
     <: -> $x, $y { $x + $y }(1, 2) # => 3 :>
 
+The C<block> keyword is also used to make a group of template code,
+and you can apply filters to that block with C<< infix:<|> >>.
+Here is an example to embed HTML source code into templates.
+
+Template:
+    : block source | html -> {
+        <em>Hello, world!</em>
+    : }
+
+Output:
+        &lt;em&gt;Hello, world!&lt;/em&gt;
+
+See also L<Text::Xslate::Cookbook/"How to use FillInForm with Xslate"> for
+another example to use C<FillInForm> with this block filter syntax.
+
 =head2 Comments
 
 Comments start from C<#> to a new line or semicolon.
@@ -516,5 +531,7 @@ Comments start from C<#> to a new line or semicolon.
 =head1 SEE ALSO
 
 L<Text::Xslate>
+
+L<Text::Xslate::Cookbook>
 
 =cut

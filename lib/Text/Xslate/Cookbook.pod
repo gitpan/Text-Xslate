@@ -1,0 +1,187 @@
+
+=head1 NAME
+
+Text::Xslate::Cookbook - How to cook Xslate templates
+
+=head1 DESCRIPTION
+
+The Xslate cookbook is a set of recipes showing Xslate features.
+
+=head1 RECIPES
+
+=head2 How to manage HTML forms
+
+Managing HTML forms is an important issue on web applications.
+you'd better to use modules that manage HTML forms, rather than do something
+with templates. There are two basic solutions in Xslate.
+
+=head3 Using FillInForm
+
+One solution to manage HTML forms is to use FillInForm modules with
+the block filter syntax and the C<raw> filter.
+
+Example code using C<HTML::FillInForm>:
+
+    #!perl -w
+    use strict;
+
+    use Text::Xslate;
+    use HTML::FillInForm;
+
+    sub fillinform {
+        my($q) = @_;
+
+        return sub {
+            my($html) = @_;
+            return HTML::FillInForm->fill(\$html, $q);
+        };
+    }
+
+    my $tx  = Text::Xslate->new(
+        function => {
+            fillinform => \&fillinform,
+        },
+    );
+
+    my %vars = (
+        q => { foo => "<filled value>" },
+    );
+    print $tx->render_string(<<'T', \%vars);
+    FillInForm:
+    : block form | fillinform($q) | raw -> {
+    <form>
+    <input type="text" name="foo" />
+    </form>
+    : }
+    T
+
+Output:
+
+    FillInForm:
+    <form>
+    <input type="text" name="foo" value="&lt;filled value&gt;" />
+    </form>
+
+Note that the C<raw> filter is required to render HTML components.
+
+See also L<HTML::FillInForm> or L<HTML::FillInForm::Lite> for details.
+
+=head3 Using HTML form builders
+
+Another solution to manage HTML forms is to use form builders.
+All you have to do is to apply the C<raw> filter to the result form builders
+renders.
+
+Example code using C<HTML::Shakan>:
+
+    #!psgi
+    use strict;
+
+    use Text::Xslate;
+    use HTML::Shakan;
+    use Plack::Request;
+
+    my $tx = Text::Xslate->new();
+
+    sub app {
+        my($env) = @_;
+        my $req  = Plack::Request->new($env);
+
+        my $form = HTML::Shakan->new(
+            request => $req,
+            fields  => [ TextField(name => 'name', label => 'Your name: ') ],
+        );
+
+        my $res = $req->new_response(200);
+
+        $res->body( $tx->render_string(<<'T', { form => $form }) );
+    <!doctype html>
+    <html>
+    <head><title>Building form</title></head>
+    <body>
+    <form>
+    <p>
+    Form:<br />
+    <: $form.render() | raw :>
+    </p>
+    </body>
+    </html>
+    T
+        return $res->finalize();
+
+    }
+
+    return \&app;
+
+Output:
+
+    <!doctype html>
+    <html>
+    <head><title>Building form</title></head>
+    <body>
+    <form>
+    <p>
+    Form:<br />
+    <label for="id_name">Your name</label>
+    <input id="id_name" name="name" type="text" value="&lt;Xslate&gt;" />
+    </p>
+    </body>
+    </html>
+
+See also L<HTML::Shakan> for details.
+
+=head2 How to apply uri escape to template expressions
+
+Use C<URI::Escape> or C<URI::Escape::XS>.
+
+Code using C<URI::Escape>:
+
+    #!perl -w
+    use strict;
+
+    use Text::Xslate;
+
+    my $tx  = Text::Xslate->new(
+        module => ['URI::Escape'],
+    );
+
+    print $tx->render_string(<<'T', { app_param => "foo & bar" });
+    <a href="http://example.com/app/<:
+        $app_param | uri_escape_utf8 :>">something</a>
+    T
+
+Output:
+
+    <a href="http://example.com/app/foo%20%26%20bar">something</a>
+
+See also L<URI::Escape> or L<URI::Escape::XS>.
+
+=head2 How to use Template Toolkit's WRAPPER feature in Kolon
+
+Use template cascading, which is a super-set of the C<WRAPPER> directive.
+
+F<wrapper.tx>:
+
+    <div class="wrapper">
+    block content -> { }
+    </div>
+
+F<content.tx>
+
+    : cascade wrapper
+
+    : override content -> {
+        Hello, world!
+    : }
+
+Output:
+
+    <div class="wrapper">
+        Hello, world!
+    </div>
+
+=head1 SEE ALSO
+
+L<Text::Xslate>
+
+=cut
