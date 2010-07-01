@@ -7,8 +7,9 @@ use Text::Xslate::Symbol;
 use Text::Xslate::Util qw(
     $NUMBER $STRING $DEBUG
     is_int any_in
-    value_to_literal
+    neat
     literal_to_value
+    make_error
     p
 );
 
@@ -45,6 +46,7 @@ my $OPERATOR_TOKEN = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     { }
     [ ]
     ;
+    `
 ), ',');
 
 my %shortcut_table = (
@@ -169,13 +171,11 @@ has near_token => (
 
 has file => (
     is       => 'rw',
-    isa      => 'Str',
     required => 0,
 );
 
 has line => (
     is       => 'rw',
-    isa      => 'Int',
     required => 0,
 );
 
@@ -222,8 +222,13 @@ sub split :method {
                 }
             }
             else {
-                $parser->near_token((split /\n/, $_)[0]);
-                $parser->_error("Malformed templates");
+                # calculate line number
+                my $orig_src = $_[0];
+                substr $orig_src, -length($_), length($_), '';
+                my $line = ($orig_src =~ tr/\n/\n/);
+                $parser->_error("Malformed templates detected",
+                    p((split /\n/, $_)[0]), $line + 1,
+                );
             }
         }
         # not $in_tag
@@ -329,7 +334,7 @@ sub preprocess {
 sub parse {
     my($parser, $input, %args) = @_;
 
-    $parser->file( $args{file} || '<input>' );
+    $parser->file( $args{file} || \$input );
     $parser->line( $args{line} || 1 );
     $parser->init_scope();
     $parser->in_given(0);
@@ -346,7 +351,7 @@ sub parse {
     my $ast = $parser->statements();
 
     if($parser->input ne '') {
-        $parser->_error("Syntax error", $parser->token, $parser->input);
+        $parser->_error("Syntax error", $parser->token);
     }
 
     return $ast;
@@ -598,7 +603,7 @@ sub advance {
 
     my $t = $parser->token;
     if(defined($id) && $t->id ne $id) {
-        $parser->_unexpected(value_to_literal($id), $t);
+        $parser->_unexpected(neat($id), $t);
     }
 
     $parser->near_token($t);
@@ -1782,7 +1787,7 @@ sub iterator_cycle {
 sub _unexpected {
     my($parser, $expected, $got) = @_;
     if(defined($got) && $got ne ";") {
-        $parser->_error("Expected $expected, but got $got");
+        $parser->_error("Expected $expected, but got " . neat("$got"));
      }
      else {
         $parser->_error("Expected $expected");
@@ -1790,18 +1795,14 @@ sub _unexpected {
 }
 
 sub _error {
-    my($parser, $message, $near) = @_;
+    my($parser, $message, $near, $line) = @_;
 
     $near ||= $parser->near_token || ";";
     if($near ne ";") {
-        $near = sprintf ', near %s', $near->id, $near->arity
-            if ref($near);
+        $message .= ", near $near";
     }
-    else {
-        $near = '';
-    }
-    Carp::croak(sprintf 'Xslate::Parser(%s:%d): %s%s while parsing templates',
-        $parser->file, $parser->line, $message, $near);
+    die make_error($parser, $message . " while parsing templates",
+        $parser->file, $line || $parser->line);
 }
 
 no Any::Moose;

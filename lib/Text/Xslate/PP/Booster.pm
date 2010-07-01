@@ -1,12 +1,17 @@
 package Text::Xslate::PP::Booster;
 # to output perl code, set "XSLATE=pp=dump"
-
 use Any::Moose;
+extends qw(Text::Xslate::PP::State);
+
 use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP::Const;
-use Text::Xslate::Util qw($DEBUG p value_to_literal p mark_raw unmark_raw html_escape);
+use Text::Xslate::Util qw(
+    $DEBUG p neat
+    value_to_literal
+    mark_raw unmark_raw html_escape
+);
 
 use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
@@ -45,15 +50,6 @@ has SP => ( is => 'rw', default => sub { []; } ); # stack
 has is_completed => ( is => 'rw', default => 1 );
 
 has stash => ( is => 'rw', default => sub { {}; } ); # store misc data
-
-our %html_escape = (
-    '&' => '&amp;',
-    '<' => '&lt;',
-    '>' => '&gt;',
-    '"' => '&quot;',
-    "'" => '&apos;',
-);
-our $html_unsafe_chars = sprintf '[%s]', join '', map { quotemeta } keys %html_escape;
 
 #
 # public APIs
@@ -141,7 +137,7 @@ $CODE_MANIP{ 'localize_s' } = sub {
     my $key    = $arg;
     my $newval = $self->sa;
 
-    $self->write_lines( sprintf( 'localize_s( $st, "%s", %s );', $key, $newval ) );
+    $self->write_lines( sprintf( '$st->localize( %s => %s );', value_to_literal($key), $newval ) );
     $self->write_code( "\n" );
 };
 
@@ -221,7 +217,7 @@ $CODE_MANIP{ 'fetch_lvar' } = sub {
 $CODE_MANIP{ 'fetch_field' } = sub {
     my ( $self, $arg, $line ) = @_;
 
-    $self->sa( sprintf( 'fetch( $st, %s, %s, %s, %s )', $self->sb(), $self->sa(), $self->frame_and_line ) );
+    $self->sa( sprintf( '$st->fetch( %s, %s, [%s, %s] )', $self->sb(), $self->sa(), $self->frame_and_line ) );
 };
 
 
@@ -229,7 +225,7 @@ $CODE_MANIP{ 'fetch_field_s' } = sub {
     my ( $self, $arg, $line ) = @_;
     my $sv = $self->sa();
 
-    $self->sa( sprintf( 'fetch( $st, %s, %s, %s, %s )', $sv, value_to_literal( $arg ), $self->frame_and_line ) );
+    $self->sa( sprintf( '$st->fetch( %s, %s, [%s, %s] )', $sv, value_to_literal( $arg ), $self->frame_and_line ) );
 };
 
 
@@ -288,7 +284,7 @@ if ( ref($sv) eq 'Text::Xslate::Type::Raw' ) {
     }
 }
 elsif ( defined $sv ) {
-    $sv =~ s/($html_unsafe_chars)/$html_escape{$1}/xmsgeo;
+    $sv =~ s/($Text::Xslate::PP::html_metachars)/$Text::Xslate::PP::html_escape{$1}/xmsgeo;
     $output .= $sv;
 }
 else {
@@ -301,10 +297,11 @@ CODE
 
 $CODE_MANIP{ 'include' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->write_lines( sprintf( <<'CODE', $self->sa ) );
+    $self->write_lines( sprintf( <<'CODE', $self->sa, $self->current_line ) );
 # include
 {
-    my $st2 = Text::Xslate::PP::tx_load_template( $st->engine, %s );
+    $st->{pc} = %2$s; # for error messages
+    my $st2 = Text::Xslate::PP::tx_load_template( $st->engine, %1$s );
     $output .= Text::Xslate::PP::tx_execute( $st2, $vars );
 }
 CODE
@@ -458,19 +455,19 @@ $CODE_MANIP{ 'builtin_html_escape' } = sub  {
 
 $CODE_MANIP{ 'match' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'Text::Xslate::Util::match( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
+    $self->sa( sprintf( 'Text::Xslate::PP::tx_match( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'eq' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'cond_eq( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
+    $self->sa( sprintf( 'Text::Xslate::PP::tx_sv_eq( %s, %s )', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
 $CODE_MANIP{ 'ne' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '(!cond_eq( %s, %s ))', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
+    $self->sa( sprintf( '(!Text::Xslate::PP::tx_sv_eq( %s, %s ))', _rm_tailed_lf( $self->sb() ), _rm_tailed_lf( $self->sa() ) ) );
 };
 
 
@@ -602,7 +599,7 @@ $CODE_MANIP{ 'macro' } = sub {
 };
 
 
-$CODE_MANIP{ 'symbol' } = sub {
+$CODE_MANIP{ 'fetch_symbol' } = sub {
     my ( $self, $arg, $line ) = @_;
 
     # macro
@@ -618,7 +615,7 @@ $CODE_MANIP{ 'symbol' } = sub {
     }
 
     $self->sa(
-        sprintf('symbol( $st, %s, %s, %s )', value_to_literal($arg), $self->frame_and_line )
+        sprintf('$st->fetch_symbol(%s, [%s, %s])', value_to_literal($arg), $self->frame_and_line )
     );
 };
 
@@ -648,9 +645,10 @@ $CODE_MANIP{ 'funcall' } = sub {
 
 $CODE_MANIP{ 'methodcall_s' } = sub {
     my ( $self, $arg, $line ) = @_;
+    require Text::Xslate::PP::Method;
 
     $self->sa(
-        sprintf('methodcall( $st, %s, %s, %s, %s )', $self->frame_and_line,
+        sprintf('Text::Xslate::PP::Method::tx_methodcall( $st, [%s, %s], %s, %s )', $self->frame_and_line,
             value_to_literal($arg), join( ', ', @{ pop @{ $self->SP } } ) )
     );
 };
@@ -878,7 +876,7 @@ sub _check_logic {
             );
         }
 
-        my $code = $st_1st->code;
+        my $code = $st_1st->get_code;
 
         if ( $code and $code !~ /^\n+$/ ) {
             my $expr = $self->sa;
@@ -903,7 +901,7 @@ sub _check_logic {
                 [ @{ $ops }[ $else_block_start .. $else_block_end ] ]
             );
 
-            my $code = $st_2nd->code;
+            my $code = $st_2nd->get_code;
             if ( $code and $code !~ /^\n+$/ ) {
                 $self->write_lines( sprintf( 'else {' ) );
                 $self->write_lines( $code );
@@ -943,7 +941,7 @@ sub _check_logic {
         $expr = sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ); # adding expr if exists
         $self->write_lines( sprintf( 'while ( %s ) {' , sprintf( $fmt, $expr ) ) );
         $self->exprs( undef );
-        $self->write_lines( $st_wh->code );
+        $self->write_lines( $st_wh->get_code );
         $self->write_lines( sprintf( '}' ) );
 
         $self->write_code( "\n" );
@@ -977,14 +975,14 @@ sub _check_logic {
             return $self->sa( sprintf( '( %s %s %s )', $expr, $type, $st_true->sa ) );
         }
 
-        if ( $st_true->code ) { # Ah, if-style had gone..., but again write if-style!
+        if ( my $code = $st_true->get_code ) { # Ah, if-style had gone..., but again write if-style!
             my $cond_type = $type eq 'and'  ? 'if ( %s )'
                           : $type eq 'or'   ? 'unless ( %s )'
                           : $type eq 'dand' ? 'if ( defined( %s ) )'
                           : $type eq 'dor'  ? 'unless ( defined( %s ) )'
                           : die "invalid logic type" # can't reache here
                           ;
-            $self->write_lines( sprintf( "%s {\n%s\n}\n", sprintf( $cond_type, $expr ), $st_true->code ) );
+            $self->write_lines( sprintf( "%s {\n%s\n}\n", sprintf( $cond_type, $expr ), $code ) );
         }
         elsif ( $st_true->sa ) {
             $self->sa( sprintf( 'cond_%s( %s, sub { %s } )', $type, $expr, _rm_tailed_lf( $st_true->sa ) ) );
@@ -1030,7 +1028,7 @@ sub indent {
 }
 
 
-sub code {
+sub get_code {
     join( '', grep { defined $_ } @{ $_[0]->lines } );
 }
 
@@ -1097,22 +1095,6 @@ sub optimize_to_print {
 # functions called in booster code
 #
 
-sub neat {
-    my($s) = @_;
-    if ( defined $s ) {
-        if ( ref($s) || Scalar::Util::looks_like_number($s) ) {
-            return $s;
-        }
-        else {
-            return qq{'$s'};
-        }
-    }
-    else {
-        return 'nil';
-    }
-}
-
-
 sub call {
     my ( $st, $frame, $line, $method_call, $proc, @args ) = @_;
     my $ret;
@@ -1125,7 +1107,7 @@ sub call {
         }
         else {
             $ret = eval { $obj->$proc( @args ) };
-            #_error( $st, $frame, $line, "%s\t...", $@) if $@;
+            $st->error( [$frame, $line], "%s\t...", $@) if $@;
         }
     }
     else { # function call
@@ -1152,130 +1134,24 @@ sub call {
     return $ret;
 }
 
-
-use Text::Xslate::PP::Method;
-
-our %builtin_method = %Text::Xslate::PP::Method::builtin_method;
-$builtin_method{'array::sort'} = \&_array_sort;
-$builtin_method{'array::map'}  = \&_array_map;
-
-our @_f_l_for_methodcall;
-
-
-sub _array_sort {
-    my( $array_ref, $callback ) = @_;
-    my ( $st, $frame, $line ) = @_f_l_for_methodcall;
-    return $st->bad_arg([$frame, $line], 'sort') if !(@_ == 1 or @_ == 2);
-
-    if(@_ == 1) {
-        return [ sort @{ $array_ref } ];
-    }
-    else {
-        return [ sort {
-            proccall( $st, $callback, [ [ $a, $b ] ], [ $frame, $line ] ) + 0;
-        } @{$array_ref} ];
-    }
-}
-
-
-sub _array_map {
-    my( $array_ref, $callback ) = @_;
-    my ( $st, $frame, $line ) = @_f_l_for_methodcall;
-    return $st->bad_arg([$frame, $line], 'map') if @_ != 2;
-    return [ map {
-        proccall( $st, $callback, [ [ $_ ] ], [ $frame, $line ] );
-    } @{$array_ref} ];
-}
-
-
-sub methodcall {
-    my ( $st, $frame, $line, $method, $invocant, @args ) = @_;
-
-    if(Scalar::Util::blessed($invocant)) {
-        if($invocant->can($method)) {
-            my $retval = eval { $invocant->$method(@args) };
-            if($@) {
-                $st->error( [$frame, $line], "%s" . "\t...", $@ );
-            }
-            return $retval;
-        }
-        $st->error( [$frame, $line], "Undefined method %s called for %s",
-            $method, $invocant);
-    }
-
-    my $type = ref($invocant) eq 'ARRAY' ? 'array'
-             : ref($invocant) eq 'HASH'  ? 'hash'
-             : defined($invocant)        ? 'scalar'
-             :                             'nil';
-    my $fq_name = $type . "::" . $method;
-
-    local @_f_l_for_methodcall = ( $st, $frame, $line );
-
-    if( my $body = $st->symbol->{ $fq_name } || $builtin_method{ $fq_name } ){
-        return proccall( $st, $body, [ [ $invocant, @args ] ], [ $frame, $line ] );
-    }
-
-    if ( not defined $invocant ) {
-        $st->warn( [$frame, $line], "Use of nil to invoke method %s", $method);
-        return undef;
-    }
-
-    $st->error( [$frame, $line], "Undefined method %s called for %s", $method, $invocant);
-
-    return undef;
-}
-
-
 sub proccall {
-    my ( $st, $proc, $pad, $f_l ) = @_;
+    my ( $st, $proc, $context ) = @_;
+    my $args = pop @{$st->{SP}};
     my $ret;
 
     if ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
+        my @pad = ($args);
         return bless \do {
-            $st->{ booster_macro }->{ $proc->[0] }->( $st, $pad, $f_l)
+            $st->{ booster_macro }->{ $proc->[0] }->( $st, \@pad, $context)
         }, 'Text::Xslate::Type::Raw';
     }
     else {
-        $ret = eval { $proc->( @{ $pad->[ -1 ] } ) };
-        $st->error( $f_l, "%s\t...", $@) if $@;
+        $ret = eval { $proc->( @{$args} ) };
+        $st->error( $context, "%s\t...", $@) if $@;
     }
 
     return $ret;
 }
-
-
-sub fetch {
-    my ( $st, $var, $key, $frame, $line ) = @_;
-
-    if ( Scalar::Util::blessed($var) ) {
-        return call( $st, $frame, $line, 1, $key, $var );
-    }
-    elsif ( ref $var eq 'HASH' ) {
-        if ( defined $key ) {
-            return $var->{ $key };
-        }
-        else {
-            $st->warn( [$frame, $line], "Use of nil as a field key" );
-        }
-    }
-    elsif ( ref $var eq 'ARRAY' ) {
-        if ( Scalar::Util::looks_like_number($key) ) {
-            return $var->[ $key ];
-        }
-        else {
-            $st->warn( [$frame, $line], "Use of %s as an array index", neat( $key ) );
-        }
-    }
-    elsif ( defined $var ) {
-        $st->error( [$frame, $line], "Cannot access %s (%s is not a container)", neat($key), neat($var) );
-    }
-    else {
-        $st->warn( [$frame, $line], "Use of nil to access %s", neat( $key ) );
-    }
-
-    return;
-}
-
 
 sub check_itr_ar {
     my ( $st, $ar, $frame, $line ) = @_;
@@ -1324,50 +1200,9 @@ sub cond_dor {
 }
 
 
-sub cond_eq {
-    my ( $sa, $sb ) = @_;
-    if ( defined $sa ) {
-        return defined $sb && $sa eq $sb;
-    }
-    else {
-        return !defined $sb;
-    }
-}
-
-
 sub push_pad {
     push @{ $_[0] }, $_[1];
     $_[0];
-}
-
-
-sub localize_s {
-    my( $st, $key, $newval ) = @_;
-    my $vars       = $st->{vars};
-    my $preeminent = exists $vars->{$key};
-    my $oldval     = delete $vars->{$key};
-
-    my $cleanup = $preeminent
-            ? sub {  $vars->{$key} = $oldval; return }
-            : sub { delete $vars->{$key};     return }
-    ;
-
-    push @{ $st->{local_stack} ||= [] }, bless( $cleanup, 'Text::Xslate::PP::Booster::Guard' );
-
-    $vars->{$key} = $newval;
-}
-
-
-sub symbol {
-    my ( $st, $name, $frame, $line ) = @_;
-
-    if ( !defined $st->symbol->{ $name } ) {
-        $st->{ pc } = $line;
-        $st->frame->[ $st->current_frame ]->[ Text::Xslate::PP::TXframe_NAME ] = $frame;
-        Carp::croak( sprintf( "Undefined symbol %s", $name ) );
-    }
-
-    return $st->symbol->{ $name };
 }
 
 
@@ -1389,15 +1224,6 @@ sub _macro_args_error {
         'Wrong number of arguments for %s (%d %s %d)', $macro->name, $args,  $args > $nargs ? '>' : '<', $nargs
     );
 }
-
-
-{
-    package
-        Text::Xslate::PP::Booster::Guard;
-
-    sub DESTROY { $_[0]->() }
-}
-
 
 no Any::Moose;
 __PACKAGE__->meta->make_immutable;

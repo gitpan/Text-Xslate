@@ -182,6 +182,10 @@ t/template/common.tx
 t/template/config.tt
 t/template/eg/base.tx
 t/template/eg/child.tx
+t/template/error/bad_include.tx
+t/template/error/bad_method.tx
+t/template/error/bad_syntax.tx
+t/template/error/bad_tags.tx
 t/template/footer1.tt
 t/template/footer2.tt
 t/template/for.tx

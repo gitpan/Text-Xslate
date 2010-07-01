@@ -49,7 +49,7 @@ TXC(gt);
 TXC(ge);
 TXC(ncmp);
 TXC(scmp);
-TXC_w_key(symbol); /* find a symbol (function, macro, constant) */
+TXC_w_key(fetch_symbol); /* functions, macros, constants */
 TXC_w_int(macro_end);
 TXC(funcall); /* call a function or a macro */
 TXC_w_key(methodcall_s);
@@ -112,7 +112,7 @@ enum tx_opcode_t {
     TXOP_ge, /* 43 */
     TXOP_ncmp, /* 44 */
     TXOP_scmp, /* 45 */
-    TXOP_symbol, /* 46 */
+    TXOP_fetch_symbol, /* 46 */
     TXOP_macro_end, /* 47 */
     TXOP_funcall, /* 48 */
     TXOP_methodcall_s, /* 49 */
@@ -177,7 +177,7 @@ static const U8 tx_oparg[] = {
     0U, /* ge */
     0U, /* ncmp */
     0U, /* scmp */
-    TXCODE_W_KEY, /* symbol */
+    TXCODE_W_KEY, /* fetch_symbol */
     TXCODE_W_INT, /* macro_end */
     0U, /* funcall */
     TXCODE_W_KEY, /* methodcall_s */
@@ -242,7 +242,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(ge), newSViv(TXOP_ge));
     (void)hv_stores(ops, STRINGIFY(ncmp), newSViv(TXOP_ncmp));
     (void)hv_stores(ops, STRINGIFY(scmp), newSViv(TXOP_scmp));
-    (void)hv_stores(ops, STRINGIFY(symbol), newSViv(TXOP_symbol));
+    (void)hv_stores(ops, STRINGIFY(fetch_symbol), newSViv(TXOP_fetch_symbol));
     (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
     (void)hv_stores(ops, STRINGIFY(methodcall_s), newSViv(TXOP_methodcall_s));
@@ -308,7 +308,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_ge,
     TXCODE_ncmp,
     TXCODE_scmp,
-    TXCODE_symbol,
+    TXCODE_fetch_symbol,
     TXCODE_macro_end,
     TXCODE_funcall,
     TXCODE_methodcall_s,
@@ -380,7 +380,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(ge),
         LABEL_PTR(ncmp),
         LABEL_PTR(scmp),
-        LABEL_PTR(symbol),
+        LABEL_PTR(fetch_symbol),
         LABEL_PTR(macro_end),
         LABEL_PTR(funcall),
         LABEL_PTR(methodcall_s),
@@ -449,7 +449,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(ge                  ): TXCODE_ge                  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(ncmp                ): TXCODE_ncmp                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(scmp                ): TXCODE_scmp                (aTHX_ st); goto *(st->pc->exec_code);
-    LABEL(symbol              ): TXCODE_symbol              (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(fetch_symbol        ): TXCODE_fetch_symbol        (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_end           ): TXCODE_macro_end           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(funcall             ): TXCODE_funcall             (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(methodcall_s        ): TXCODE_methodcall_s        (aTHX_ st); goto *(st->pc->exec_code);

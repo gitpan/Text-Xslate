@@ -1,13 +1,16 @@
 package Text::Xslate::PP::Opcode;
 
-use strict;
-use warnings;
+use Any::Moose;
+extends qw(Text::Xslate::PP::State);
 
 use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP::Const;
-use Text::Xslate::Util qw(p mark_raw unmark_raw html_escape);
+use Text::Xslate::Util qw(
+    p neat
+    mark_raw unmark_raw html_escape
+);
 
 use constant TXframe_NAME       => Text::Xslate::PP::TXframe_NAME;
 use constant TXframe_OUTPUT     => Text::Xslate::PP::TXframe_OUTPUT;
@@ -23,16 +26,6 @@ use constant _FOR_ARRAY => 2;
 no warnings 'recursion';
 
 our @CARP_NOT = qw(Text::Xslate);
-
-
-my %html_escape = (
-    '&' => '&amp;',
-    '<' => '&lt;',
-    '>' => '&gt;',
-    '"' => '&quot;',
-    "'" => '&apos;',
-);
-my $html_unsafe_chars = sprintf '[%s]', join '', map { quotemeta } keys %html_escape;
 
 our $_current_frame;
 
@@ -71,31 +64,13 @@ sub op_load_lvar_to_sb {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-{
-    package
-        Text::Xslate::PP::Opcode::Guard;
-
-    sub DESTROY { $_[0]->() }
-}
-
 sub op_localize_s {
     my($st) = @_;
-    my $vars   = $st->{vars};
     my $key    = $st->op_arg;
-    my $preeminent
-               = exists $vars->{$key};
-    my $oldval = delete $vars->{$key};
     my $newval = $st->{sa};
+    $st->localize($key, $newval);
 
-    my $cleanup = $preeminent
-        ? sub { $vars->{$key} = $oldval; return }
-        : sub { delete $vars->{$key};    return };
-    push @{ $_[0]->{local_stack} ||= [] },
-        bless($cleanup, 'Text::Xslate::PP::Opcode::Guard');
-
-    $vars->{$key} = $newval;
-
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 sub op_push {
@@ -134,18 +109,20 @@ sub op_fetch_s {
 }
 
 sub op_fetch_field {
-    my $var = $_[0]->{sb};
-    my $key = $_[0]->{sa};
-    $_[0]->{sa} = tx_fetch( $_[0], $var, $key );
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    my($st) = @_;
+    my $var = $st->{sb};
+    my $key = $st->{sa};
+    $st->{sa} = $st->fetch($var, $key);
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 
 sub op_fetch_field_s {
-    my $var = $_[0]->{sa};
-    my $key = $_[0]->op_arg;
-    $_[0]->{sa} = tx_fetch( $_[0], $var, $key );
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    my($st) = @_;
+    my $var = $st->{sa};
+    my $key = $st->op_arg;
+    $st->{sa} = $st->fetch($var, $key);
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 
@@ -162,7 +139,7 @@ sub op_print {
         }
     }
     elsif ( defined $sv ) {
-        $sv =~ s/($html_unsafe_chars)/$html_escape{$1}/xmsgeo;
+        $sv =~ s/($Text::Xslate::PP::html_metachars)/$Text::Xslate::PP::html_escape{$1}/xmsgeo;
         $st->{ output } .= $sv;
     }
     else {
@@ -207,7 +184,7 @@ sub op_for_start {
 
     unless ( $ar and ref $ar eq 'ARRAY' ) {
         if ( defined $ar ) {
-            $st->error( undef, "Iterator variables must be an ARRAY reference, not %s", tx_neat( $ar ) );
+            $st->error( undef, "Iterator variables must be an ARRAY reference, not %s", neat( $ar ) );
         }
         else {
             $st->warn( undef, "Use of nil to iterate" );
@@ -250,36 +227,31 @@ sub op_for_iter {
 
 
 sub op_add {
-    $_[0]->{targ} = $_[0]->{sb} + $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = $_[0]->{sb} + $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_sub {
-    $_[0]->{targ} = $_[0]->{sb} - $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = $_[0]->{sb} - $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_mul {
-    $_[0]->{targ} = $_[0]->{sb} * $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = $_[0]->{sb} * $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_div {
-    $_[0]->{targ} = $_[0]->{sb} / $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = $_[0]->{sb} / $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_mod {
-    $_[0]->{targ} = $_[0]->{sb} % $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = $_[0]->{sb} % $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -336,23 +308,13 @@ sub op_dor {
 
 }
 
-
 sub op_not {
     $_[0]->{sa} = ! $_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-
-sub op_plus {
-    $_[0]->{targ} = + $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
-}
-
-
 sub op_minus {
-    $_[0]->{targ} = - $_[0]->{sa};
-    $_[0]->{sa} = $_[0]->{targ};
+    $_[0]->{sa} = -$_[0]->{sa};
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -376,29 +338,19 @@ sub op_builtin_html_escape{
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-sub _sv_eq {
-    my($x, $y) = @_;
-    if ( defined $x ) {
-        return defined $y && $x eq $y;
-    }
-    else {
-        return !defined $y;
-    }
-}
-
 sub op_match {
-    $_[0]->{sa} = Text::Xslate::Util::match($_[0]->{sb}, $_[0]->{sa});
+    $_[0]->{sa} = Text::Xslate::PP::tx_match($_[0]->{sb}, $_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 sub op_eq {
-    $_[0]->{sa} =  _sv_eq($_[0]->{sb}, $_[0]->{sa});
+    $_[0]->{sa} = Text::Xslate::PP::tx_sv_eq($_[0]->{sb}, $_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 
 sub op_ne {
-    $_[0]->{sa} = !_sv_eq($_[0]->{sb}, $_[0]->{sa});
+    $_[0]->{sa} = !Text::Xslate::PP::tx_sv_eq($_[0]->{sb}, $_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
@@ -432,18 +384,10 @@ sub op_scmp {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-sub op_symbol {
+sub op_fetch_symbol {
     my($st) = @_;
     my $name = $st->op_arg;
-
-    if ( my $func = $st->symbol->{ $name } ) {
-        $st->{sa} = $func;
-    }
-    else {
-        Carp::croak("Undefined symbol $name");
-        #$st->error( undef, "Undefined symbol %s", $name );
-        #$st->{sa} = undef;
-    }
+    $st->{sa} = $st->fetch_symbol($name);
 
     goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
@@ -470,12 +414,12 @@ sub tx_macro_enter {
     $cframe->[ TXframe_OUTPUT ]  = $st->{ output };
     $cframe->[ TXframe_NAME ]    = $name;
 
-    $_[0]->{ output } = '';
+    $st->{ output } = '';
 
     my $i = 0;
     if($outer > 0) {
         # copies lexical variables from the old frame to the new one
-        my $oframe = $_[0]->frame->[ $_[0]->current_frame - 1 ];
+        my $oframe = $st->frame->[ $st->current_frame - 1 ];
         for(; $i < $outer; $i++) {
             my $real_ix = $i + TXframe_START_LVAR;
             $cframe->[$real_ix] = $oframe->[$real_ix];
@@ -483,10 +427,10 @@ sub tx_macro_enter {
     }
 
     for my $val (@{$args}) {
-        tx_access_lvar( $_[0], $i++, $val );
+        tx_access_lvar( $st, $i++, $val );
     }
 
-    $_[0]->{ pc } = $addr;
+    $st->{ pc } = $addr;
     return;
 }
 
@@ -497,13 +441,11 @@ sub op_macro_end {
     my $cframe   = $frames->[ $st->current_frame( $st->current_frame - 1 ) ]; # pop frame
 
     if($st->op_arg) { # immediate macros
-        $st->{targ} = $st->{ output };
+        $st->{sa} = $st->{ output };
     }
     else {
-        $st->{targ} = mark_raw( $st->{ output } );
+        $st->{sa} = mark_raw( $st->{ output } );
     }
-
-    $st->{sa} = $st->{targ};
 
     $st->{ output } = $oldframe->[ TXframe_OUTPUT ];
     $st->{ pc }     = $oldframe->[ TXframe_RETADDR ];
@@ -524,9 +466,11 @@ sub op_funcall {
 }
 
 sub op_methodcall_s {
+    my($st) = @_;
     require Text::Xslate::PP::Method;
-    $_[0]->{sa} = Text::Xslate::PP::Method::tx_methodcall($_[0], $_[0]->op_arg);
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    $st->{sa} = Text::Xslate::PP::Method::tx_methodcall(
+        $st, undef, $st->op_arg, @{ pop @{ $st->{SP} } });
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 sub op_make_array {
@@ -604,7 +548,7 @@ sub tx_funcall {
     return $ret;
 }
 
-sub tx_proccall {
+sub proccall {
     my($st, $proc) = @_;
     if(ref $proc eq 'Text::Xslate::PP::Macro') {
         local $st->{pc} = $st->{pc};
@@ -618,57 +562,8 @@ sub tx_proccall {
     }
 }
 
-sub tx_fetch {
-    my ( $st, $var, $key ) = @_;
-    my $ret;
-
-    if ( Scalar::Util::blessed($var) ) {
-        $ret = eval { $var->$key() };
-        $st->error(undef, "%s", $@) if $@;
-    }
-    elsif ( ref $var eq 'HASH' ) {
-        if ( defined $key ) {
-            $ret = $var->{ $key };
-        }
-        else {
-            $st->warn( undef, "Use of nil as a field key" );
-        }
-    }
-    elsif ( ref $var eq 'ARRAY' ) {
-        if ( Scalar::Util::looks_like_number($key) ) {
-            $ret = $var->[ $key ];
-        }
-        else {
-            $st->warn( undef, "Use of %s as an array index", tx_neat( $key ) );
-        }
-    }
-    elsif ( $var ) {
-        $st->error( undef, "Cannot access %s (%s is not a container)", tx_neat($key), tx_neat($var) );
-    }
-    else {
-        $st->warn( undef, "Use of nil to access %s", tx_neat( $key ) );
-    }
-
-    return $ret;
-}
-
-sub tx_neat {
-    my($s) = @_;
-    if ( defined $s ) {
-        if ( ref($s) || Scalar::Util::looks_like_number($s) ) {
-            return $s;
-        }
-        else {
-            return "'$s'";
-        }
-    }
-    else {
-        return 'nil';
-    }
-}
-
-
-1;
+no Any::Moose;
+__PACKAGE__->meta->make_immutable();
 __END__
 
 =head1 NAME

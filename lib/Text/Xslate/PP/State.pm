@@ -8,6 +8,7 @@ our @CARP_NOT = qw(
     Text::Xslate::PP::Method
 );
 
+use Text::Xslate::Util qw(neat);
 use Text::Xslate::PP::Const ();
 
 has vars => (
@@ -52,6 +53,76 @@ has local_stack => (
     is => 'rw',
 );
 
+sub fetch {
+    my ( $st, $var, $key, $context ) = @_;
+    my $ret;
+
+    if ( Scalar::Util::blessed($var) ) {
+        $ret = eval { $var->$key() };
+        $st->error( $context, "%s", $@ ) if $@;
+    }
+    elsif ( ref $var eq 'HASH' ) {
+        if ( defined $key ) {
+            $ret = $var->{ $key };
+        }
+        else {
+            $st->warn( $context, "Use of nil as a field key" );
+        }
+    }
+    elsif ( ref $var eq 'ARRAY' ) {
+        if ( Scalar::Util::looks_like_number($key) ) {
+            $ret = $var->[ $key ];
+        }
+        else {
+            $st->warn( $context, "Use of %s as an array index", neat( $key ) );
+        }
+    }
+    elsif ( $var ) {
+        $st->error( $context, "Cannot access %s (%s is not a container)", neat($key), neat($var) );
+    }
+    else {
+        $st->warn( $context, "Use of nil to access %s", neat( $key ) );
+    }
+
+    return $ret;
+}
+
+sub fetch_symbol {
+    my ( $st, $name, $context ) = @_;
+
+    my $symbol_table = $st->symbol;
+    if ( !exists $symbol_table->{ $name } ) {
+        if(defined $context) {
+            my($frame, $line) = @{$context};
+            if ( defined $line ) {
+                $st->{ pc } = $line;
+                $st->frame->[ $st->current_frame ]->[ Text::Xslate::PP::TXframe_NAME ] = $frame;
+            }
+        }
+        Carp::croak( sprintf( "Undefined symbol %s", $name ) );
+    }
+
+    return $symbol_table->{ $name };
+}
+
+sub localize {
+    my($st, $key, $newval) = @_;
+    my $vars       = $st->vars;
+    my $preeminent = exists $vars->{$key};
+    my $oldval     = delete $vars->{$key};
+
+    my $cleanup = $preeminent
+        ? sub { $vars->{$key} = $oldval; return }
+        : sub { delete $vars->{$key};    return };
+
+    push @{ $st->{local_stack} ||= [] },
+        bless($cleanup, 'Text::Xslate::PP::Guard');
+
+    $vars->{$key} = $newval;
+    return;
+}
+
+
 sub pad {
     my($st) = @_;
     return $st->frame->[ $st->current_frame ];
@@ -59,12 +130,6 @@ sub pad {
 
 sub op_arg {
     $_[0]->{ code }->[ $_[0]->{ pc } ]->{ arg };
-}
-
-
-sub _verbose {
-    my $v = $_[0]->engine->{ verbose };
-    defined $v ? $v : Text::Xslate::PP::TX_VERBOSE_DEFAULT;
 }
 
 sub _doerror {
@@ -82,7 +147,7 @@ sub _doerror {
 
 sub warn :method {
     my $st = shift;
-    if( $st->_verbose > Text::Xslate::PP::TX_VERBOSE_DEFAULT ) {
+    if( $st->engine->{verbose} > Text::Xslate::PP::TX_VERBOSE_DEFAULT ) {
         $st->_doerror(@_);
     }
     return;
@@ -91,7 +156,7 @@ sub warn :method {
 
 sub error :method {
     my $st = shift;
-    if( $st->_verbose >= Text::Xslate::PP::TX_VERBOSE_DEFAULT ) {
+    if( $st->engine->{verbose} >= Text::Xslate::PP::TX_VERBOSE_DEFAULT ) {
         $st->_doerror(@_);
     }
     return;

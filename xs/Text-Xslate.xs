@@ -131,17 +131,6 @@ tx_load_template(pTHX_ SV* const self, SV* const name);
 
 #include "xs/xslate_opcode.inc"
 
-
-static const char*
-tx_file(pTHX_ const tx_state_t* const st) {
-    return SvPV_nolen_const(st->info[ TX_PC2POS(st, st->pc) ].file);
-}
-
-static int
-tx_line(pTHX_ const tx_state_t* const st) {
-    return (int)st->info[ TX_PC2POS(st, st->pc) ].line;
-}
-
 const char*
 tx_neat(pTHX_ SV* const sv) {
     if(SvOK(sv)) {
@@ -162,15 +151,37 @@ tx_verbose(pTHX_ tx_state_t* const st) {
     return SvIV(sv);
 }
 
+
+static void
+tx_call_error_handler(pTHX_ SV* const handler, SV* const msg) {
+    dSP;
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(msg);
+    PUTBACK;
+    call_sv(handler, G_VOID);
+    SPAGAIN;
+    (void)POPs; /* discard */
+    PUTBACK;
+
+    FREETMPS;
+    LEAVE;
+}
+
 /* for trivial errors, ignored by default */
 void
 tx_warn(pTHX_ tx_state_t* const st, const char* const fmt, ...) {
     assert(st);
     assert(fmt);
     if(tx_verbose(aTHX_ st) > TX_VERBOSE_DEFAULT) { /* stronger than the default */
+        dMY_CXT;
+        SV* msg;
         va_list args;
         va_start(args, fmt);
-        vwarn(fmt, &args);
+        msg = sv_2mortal( vnewSVpvf(fmt, &args) );
+        tx_call_error_handler(aTHX_ MY_CXT.warn_handler, msg);
         va_end(args);
     }
 }
@@ -181,9 +192,12 @@ tx_error(pTHX_ tx_state_t* const st, const char* const fmt, ...) {
     assert(st);
     assert(fmt);
     if(tx_verbose(aTHX_ st) >= TX_VERBOSE_DEFAULT) { /* equal or stronger than the default */
+        dMY_CXT;
+        SV* msg;
         va_list args;
         va_start(args, fmt);
-        vwarn(fmt, &args);
+        msg = sv_2mortal( vnewSVpvf(fmt, &args) );
+        tx_call_error_handler(aTHX_ MY_CXT.warn_handler, msg);
         va_end(args);
     }
 }
@@ -227,14 +241,15 @@ tx_push_frame(pTHX_ tx_state_t* const st) {
 
 SV* /* thin wrapper of Perl_call_sv() */
 tx_call_sv(pTHX_ tx_state_t* const st, SV* const sv, I32 const flags, const char* const name) {
+    SV* retval;
     call_sv(sv, G_SCALAR | G_EVAL | flags);
-
+    retval = TX_pop();
     if(UNLIKELY(!!sv_true(ERRSV))) {
         tx_error(aTHX_ st, "%"SVf "\n"
             "\t... exception cought on %s", ERRSV, name);
     }
 
-    return TX_pop();
+    return retval;
 }
 
 static SV*
@@ -370,6 +385,9 @@ tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
     const char* const end = cur + len;
 
     (void)SvGROW(dest, SvCUR(dest) + len);
+    if(!SvUTF8(dest) && SvUTF8(src)) {
+        sv_utf8_upgrade(dest);
+    }
 
     while(cur != end) {
         const char* parts;
@@ -581,7 +599,7 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, tx_pc_t const reta
     AvARRAY(cframe)[TXframe_OUTPUT] = TX_st->output;
     TX_st->output                   = tmp;
     sv_setpvs(tmp, "");
-    SvUTF8_on(tmp); /* sv_utf8_upgrade(tmp); */
+    SvGROW(tmp, TX_HINT_SIZE);
 
     i = 0;
     if(outer > 0) { /* refers outer lexical variales */
@@ -754,6 +772,7 @@ static MGVTBL xslate_vtbl = { /* for identity */
 static void
 tx_invoke_load_file(pTHX_ SV* const self, SV* const name, SV* const mtime) {
     dSP;
+    dMY_CXT;
     ENTER;
     SAVETMPS;
 
@@ -768,7 +787,10 @@ tx_invoke_load_file(pTHX_ SV* const self, SV* const name, SV* const mtime) {
 
     call_method("load_file", G_EVAL | G_VOID);
     if(sv_true(ERRSV)){
-        croak("%"SVf"\t...", ERRSV);
+        SV* const msg = PL_diehook == MY_CXT.die_handler
+            ? sv_2mortal(newRV_inc(sv_mortalcopy(ERRSV)))
+            : ERRSV;
+        tx_call_error_handler(aTHX_ MY_CXT.die_handler, msg);
     }
 
     FREETMPS;
@@ -977,7 +999,7 @@ CODE:
     }
 
     if(!SvOK(name)) { /* for strings */
-        name     = sv_2mortal(newSVpvs_share("<input>"));
+        name     = sv_2mortal(newSVpvs_share("<string>"));
         fullpath = cachepath = &PL_sv_undef;
         mtime    = sv_2mortal(newSViv( time(NULL) ));
     }
@@ -1191,7 +1213,7 @@ CODE:
     SvGETMAGIC(source);
     if(!SvOK(source)) {
         dXSTARG;
-        sv_setpvs(TARG, "<input>");
+        sv_setpvs(TARG, "<string>");
         source = TARG;
     }
 
@@ -1239,17 +1261,22 @@ CODE:
     SV* self;
     AV* cframe;
     SV* name;
-    const char* prefix;
     SV* full_message;
     SV** svp;
     CV*  handler;
+    UV pc_pos;
+    SV* file;
+
+    /* restore error handlers to avoid recursion */
+    SAVESPTR(PL_warnhook);
+    SAVESPTR(PL_diehook);
+    PL_warnhook = MY_CXT.orig_warn_handler;
+    PL_diehook  = MY_CXT.orig_die_handler;
+
+    msg = sv_mortalcopy(msg);
 
     if(!st) {
-        SAVESPTR(PL_warnhook);
-        SAVESPTR(PL_diehook);
-        PL_warnhook = NULL;
-        PL_diehook  = NULL;
-        croak("Not in $xslate->render()");
+        croak("%"SVf, msg);
     }
     self   = st->engine;
 
@@ -1264,48 +1291,49 @@ CODE:
         HV* stash;
         GV* gv;
         handler = sv_2cv(*svp, &stash, &gv, 0);
-        if(!handler) {
-            croak("Not a subroutine reference for %s handler",
-                ix == 0 ? "warn" : "die");
-        }
     }
     else {
         handler = NULL;
     }
 
-    prefix = form("Xslate(%s:%d &%"SVf"[%d]): ",
-            tx_file(aTHX_ st), tx_line(aTHX_ st),
-            name, (int)TX_PC2POS(st, st->pc));
-
-    if(instr(SvPV_nolen_const(msg), prefix)) {
-        full_message = msg; /* msg has the prefix */
-    }
-    else {
-        full_message = newSVpvf("%s%"SVf, prefix, msg);
-        sv_2mortal(full_message);
+    pc_pos = TX_PC2POS(st, st->pc);
+    file   = st->info[ pc_pos ].file;
+    if(strEQ(SvPV_nolen_const(file), "<string>")) {
+        svp = hv_fetchs((HV*)SvRV(self), "string_buffer", FALSE);
+        if(svp) {
+            file = sv_2mortal(newRV_inc(*svp));
+        }
     }
 
-    /* warnhook/diehook = NULL is to avoid recursion */
+    /* $full_message = make_error(...) */
+    PUSHMARK(SP);
+    EXTEND(SP, 6);
+    PUSHs(self);
+    PUSHs(msg);
+    PUSHs(  file );
+    mPUSHi( st->info[ pc_pos ].line);
+    mPUSHs(newSVpvf("&%"SVf"[%"UVuf"]", name, pc_pos));
+    PUTBACK;
+    call_pv("Text::Xslate::Util::make_error", G_SCALAR);
+    SPAGAIN;
+    full_message = POPs;
+    PUTBACK;
+
     ENTER;
     if(ix == 0) { /* warn */
-        SAVESPTR(PL_warnhook);
-        PL_warnhook = MY_CXT.orig_warn_handler;
-
         /* handler can ignore warnings */
         if(handler) {
             PUSHMARK(SP);
             XPUSHs(full_message);
             PUTBACK;
             call_sv((SV*)handler, G_VOID | G_DISCARD);
+            /* handler can ignore errors */
         }
         else {
             warn("%"SVf, full_message);
         }
     }
     else {
-        SAVESPTR(PL_diehook);
-        PL_diehook = MY_CXT.orig_die_handler;
-
         /* unroll the stack frame */
         /* to fix TXframe_OUTPUT */
         /* TODO: append the stack info to msg */
@@ -1320,14 +1348,14 @@ CODE:
             st->output                     = tmp;
         }
 
-        /* handler cannot ignore errors */
         if(handler) {
             PUSHMARK(SP);
             XPUSHs(full_message);
             PUTBACK;
             call_sv((SV*)handler, G_VOID | G_DISCARD);
+            /* handler cannot ignore errors */
         }
-        croak("%"SVf, full_message);
+        croak("%"SVf, full_message); /* must die */
         /* not reached */
     }
     LEAVE;
@@ -1359,15 +1387,6 @@ CODE:
     ST(0) = tx_html_escape(aTHX_ str);
     XSRETURN(1);
 }
-
-bool
-match(SV* a, SV* b)
-CODE:
-{
-    RETVAL = tx_sv_match(aTHX_ a, b);
-}
-OUTPUT:
-    RETVAL
 
 MODULE = Text::Xslate    PACKAGE = Text::Xslate::Type::Raw
 

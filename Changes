@@ -1,8 +1,15 @@
 Revision history for Perl extension Text::Xslate
 
+0.1040 Thu Jul  1 15:33:14 2010
+    [BUG FIXES]
+    - UTF8 flags was not respected in some cases
+
+    [CHANGES]
+    - Error messages contain source lines
+
 0.1039 Mon Jun 28 20:31:54 2010
     [DOCUMENTS]
-    - Applying the raw filter in templates is concidered harmful. Remove
+    - Applying the raw filter in templates is considered harmful. Remove
       the use of it from the cookbook. Thanks to @typester.
 
 0.1038 Mon Jun 28 17:44:52 2010

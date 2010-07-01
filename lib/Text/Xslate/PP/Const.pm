@@ -79,7 +79,7 @@ our %OPS = (
     ge               => 43,
     ncmp             => 44,
     scmp             => 45,
-    symbol           => 46,
+    fetch_symbol     => 46,
     macro_end        => 47,
     funcall          => 48,
     methodcall_s     => 49,
@@ -143,7 +143,7 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_ge,                  # 43
     \&Text::Xslate::PP::Opcode::op_ncmp,                # 44
     \&Text::Xslate::PP::Opcode::op_scmp,                # 45
-    \&Text::Xslate::PP::Opcode::op_symbol,              # 46
+    \&Text::Xslate::PP::Opcode::op_fetch_symbol,        # 46
     \&Text::Xslate::PP::Opcode::op_macro_end,           # 47
     \&Text::Xslate::PP::Opcode::op_funcall,             # 48
     \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 49
@@ -207,7 +207,7 @@ our @OPARGS = (
     0,             # ge
     0,             # ncmp
     0,             # scmp
-    TXCODE_W_KEY,  # symbol
+    TXCODE_W_KEY,  # fetch_symbol
     TXCODE_W_INT,  # macro_end
     0,             # funcall
     TXCODE_W_KEY,  # methodcall_s

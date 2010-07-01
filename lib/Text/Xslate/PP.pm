@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1039';
+our $VERSION = '0.1040';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -12,7 +12,7 @@ BEGIN{
 use Text::Xslate::PP::Const;
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::Type::Raw;
-use Text::Xslate::Util qw($DEBUG p);
+use Text::Xslate::Util qw($DEBUG p make_error);
 use Text::Xslate;
 
 use Carp ();
@@ -28,6 +28,8 @@ use constant _DUMP_LOAD_TEMPLATE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
 
 
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
+
+my $state_class = 'Text::Xslate::PP::' . _PP_BACKEND;
 
 our @OPCODE; # defined in PP::Const
 
@@ -45,6 +47,16 @@ our $_depth = 0;
 our $_current_st;
 
 our($_orig_die_handler, $_orig_warn_handler);
+
+our %html_escape = (
+    '&' => '&amp;',
+    '<' => '&lt;',
+    '>' => '&gt;',
+    '"' => '&quot;',
+    "'" => '&apos;',
+);
+our $html_metachars = sprintf '[%s]', join '', map { quotemeta } keys %html_escape;
+
 #
 # public APIs
 #
@@ -66,7 +78,7 @@ sub render {
     }
 
     if ( !defined $name ) {
-        $name = '<input>';
+        $name = '<string>';
     }
 
     unless ( ref $vars eq 'HASH' ) {
@@ -90,13 +102,13 @@ sub engine {
 sub _assemble {
     my ( $self, $proto, $name, $fullpath, $cachepath, $mtime ) = @_;
     my $len = scalar( @$proto );
-    my $st  = Text::Xslate::PP::State->new;
+    my $st  = $state_class->new();
 
     our %OPS;    # defined in Text::Xslate::PP::Const
     our @OPARGS; # defined in Text::Xslate::PP::Const
 
     unless ( defined $name ) { # $name ... filename
-        $name = '<input>';
+        $name = '<string>';
         $fullpath = $cachepath = undef;
         $mtime    = time();
     }
@@ -270,48 +282,53 @@ sub _assemble {
             ref($s) eq $esc_class
             or !defined($s);
 
-        $s =~ s/&/&amp;/g;
-        $s =~ s/</&lt;/g;
-        $s =~ s/>/&gt;/g;
-        $s =~ s/"/&quot;/g; # " for poor editors
-        $s =~ s/'/&apos;/g; # ' for poor editors
-
+        $s =~ s/($html_metachars)/$html_escape{$1}/xmsgeo;
         return bless \$s, $esc_class;
-    }
-
-    sub match { # simple smart matching
-        my($a, $b) = @_;
-
-        if(ref($b) eq 'ARRAY') {
-            foreach my $item(@{$b}) {
-                if(defined($item)) {
-                    if(defined($a) && $a eq $item) {
-                        return 1;
-                    }
-                }
-                else {
-                    if(not defined($a)) {
-                        return 1;
-                    }
-                }
-            }
-            return '';
-        }
-        elsif(ref($b) eq 'HASH') {
-            return defined($a) && exists $b->{$a};
-        }
-        elsif(defined($b)) {
-            return defined($a) && $a eq $b;
-        }
-        else {
-            return !defined($a);
-        }
     }
 }
 
 #
 # INTERNAL
 #
+
+sub tx_sv_eq {
+    my($x, $y) = @_;
+    if ( defined $x ) {
+        return defined $y && $x eq $y;
+    }
+    else {
+        return !defined $y;
+    }
+}
+
+sub tx_match { # simple smart matching
+    my($x, $y) = @_;
+
+    if(ref($y) eq 'ARRAY') {
+        foreach my $item(@{$y}) {
+            if(defined($item)) {
+                if(defined($x) && $x eq $item) {
+                    return 1;
+                }
+            }
+            else {
+                if(not defined($x)) {
+                    return 1;
+                }
+            }
+        }
+        return '';
+    }
+    elsif(ref($y) eq 'HASH') {
+        return defined($x) && exists $y->{$x};
+    }
+    elsif(defined($y)) {
+        return defined($x) && $x eq $y;
+    }
+    else {
+        return !defined($x);
+    }
+}
 
 sub tx_push_frame {
     my ( $st ) = @_;
@@ -423,10 +440,8 @@ sub tx_execute {
         return $st->{ booster_code }->( $st );
     }
     else {
-        local $st->{targ};
         local $st->{sa};
         local $st->{sb};
-        local $st->{SP} = [];
         $st->{output} = '';
         $st->{code}->[0]->{ exec_code }->( $st );
         return $st->{output};
@@ -438,40 +453,44 @@ sub _error_handler {
     my ( $str, $die ) = @_;
     my $st = $_current_st;
 
+    local $SIG{__WARN__} = $_orig_warn_handler;
+    local $SIG{__DIE__}  = $_orig_die_handler;
+
     if($str =~ s/at .+Text.Xslate.PP.+ line \d+\.\n$//) {
         $str = Carp::shortmess($str);
     }
 
-    Carp::croak( 'Not in $xslate->render()' ) unless $st;
+    Carp::croak( $str ) unless $st;
+
+    my $engine = $st->engine;
 
     my $cframe = $st->frame->[ $st->current_frame ];
     my $name   = $cframe->[ Text::Xslate::PP::TXframe_NAME ];
 
-    if( $die ) {
-        $_depth = 0;
+    my $opcode = $st->code->[ $st->{ pc } ];
+    my $file   = $opcode->{file};
+    if($file eq '<string>' && exists $engine->{string_buffer}) {
+        $file = \$engine->{string_buffer};
     }
 
-    my $opcode = $st->code->[ $st->{ pc } ];
-    my $mess = sprintf( "Xslate(%s:%d &%s[%d]): %s",
-        $opcode->{file}, $opcode->{line}, $name, $st->{ pc }, $str );
+    my $mess   = make_error($engine, $str, $file, $opcode->{line},
+        sprintf( "&%s[%d]", $name, $st->{pc} ));
 
     if ( !$die ) {
-        local $SIG{__WARN__} = $_orig_warn_handler;
         # $h can ignore warnings
-        if ( my $h = $st->engine->{ warn_handler } ) {
+        if ( my $h = $engine->{ warn_handler } ) {
             $h->( $mess );
         }
         else {
-            Carp::carp( $mess );
+            warn $mess;
         }
     }
     else {
-        local $SIG{__DIE__} = $_orig_die_handler;
         # $h cannot ignore errors
-        if(my $h = $st->engine->{ die_handler } ) {
+        if(my $h = $engine->{ die_handler } ) {
             $h->( $mess );
         }
-        Carp::croak( $mess ); # MUST DIE!
+        die $mess; # MUST DIE!
     }
     return;
 }
@@ -484,6 +503,13 @@ sub _die {
     _error_handler( $_[0], 1 );
 }
 
+{
+    package
+        Text::Xslate::PP::Guard;
+
+    sub DESTROY { $_[0]->() }
+}
+
 1;
 __END__
 
@@ -493,7 +519,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1039.
+This document describes Text::Xslate::PP version 0.1040.
 
 =head1 DESCRIPTION
 
