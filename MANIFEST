@@ -102,7 +102,7 @@ t/010_internals/018_deps_file2.t
 t/010_internals/019_no_vars.t
 t/010_internals/020_util.t
 t/010_internals/021_cached.t
-t/010_internals/022_register_function.t
+t/010_internals/022_reload.t
 t/010_internals/023_opinfo.t
 t/010_internals/024_psgi.t
 t/010_internals/100_threads.t

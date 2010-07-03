@@ -383,8 +383,9 @@ tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
     STRLEN len;
     const char*       cur = SvPV_const(src, len);
     const char* const end = cur + len;
+    STRLEN dest_cur       = SvCUR(dest);
 
-    (void)SvGROW(dest, SvCUR(dest) + len);
+    (void)SvGROW(dest, dest_cur + len);
     if(!SvUTF8(dest) && SvUTF8(src)) {
         sv_utf8_upgrade(dest);
     }
@@ -392,6 +393,8 @@ tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
     while(cur != end) {
         const char* parts;
         STRLEN      parts_len;
+
+        (void)SvGROW(dest, dest_cur + 8 /* at least parts_len + 1 */);
 
         switch(*cur) {
         case '<':
@@ -415,28 +418,20 @@ tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
             parts_len = sizeof("&apos;") - 1;
             break;
         default:
-            parts     = cur;
-            parts_len = 1;
-            len       = SvCUR(dest) + 2; /* parts_len + 1 */
-            SvGROW(dest, len);
-            *SvEND(dest) = *parts;
-            SvCUR_set(dest, SvCUR(dest) + 1);
+            /* copy a normal character */
+            SvPVX(dest)[dest_cur] = *cur;
+            dest_cur++;
             goto loop_continue;
-            break;
         }
 
-        /* copy special characters */
-
-        len = SvCUR(dest) + parts_len + 1;
-        (void)SvGROW(dest, len);
-
-        Copy(parts, SvEND(dest), parts_len, char);
-
-        SvCUR_set(dest, SvCUR(dest) + parts_len);
+        /* copy an escaped token */
+        Copy(parts, SvPVX(dest) + dest_cur, parts_len, char);
+        dest_cur += parts_len;
 
         loop_continue:
         cur++;
     }
+    SvCUR_set(dest, dest_cur);
     *SvEND(dest) = '\0';
 }
 
