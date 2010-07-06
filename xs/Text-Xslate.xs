@@ -23,7 +23,6 @@
 #ifdef DEBUGGING
 #define TX_st_sa  *tx_sv_safe(aTHX_ &(TX_st->sa),  "TX_st->sa",  __FILE__, __LINE__)
 #define TX_st_sb  *tx_sv_safe(aTHX_ &(TX_st->sb),  "TX_st->sb",  __FILE__, __LINE__)
-#define TX_op_arg *tx_sv_safe(aTHX_ &(TX_op->arg), "TX_st->arg", __FILE__, __LINE__)
 static SV**
 tx_sv_safe(pTHX_ SV** const svp, const char* const name, const char* const f, int const l) {
     if(*svp == NULL) {
@@ -57,15 +56,21 @@ tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
 #else /* DEBUGGING */
 #define TX_st_sa        (TX_st->sa)
 #define TX_st_sb        (TX_st->sb)
-#define TX_op_arg       (TX_op->arg)
 
 #define TX_lvarx_get(st, ix) ((st)->pad[ix])
 #endif /* DEBUGGING */
+
+#define TX_op_arg    (TX_op->u_arg)
+#define TX_op_arg_sv (TX_op_arg.sv)
+#define TX_op_arg_iv (TX_op_arg.iv)
+#define TX_op_arg_pc (TX_op_arg.pc)
 
 #define TX_lvarx(st, ix) tx_load_lvar(aTHX_ st, ix)
 
 #define TX_lvar(ix)     TX_lvarx(TX_st, ix)     /* init if uninitialized */
 #define TX_lvar_get(ix) TX_lvarx_get(TX_st, ix)
+
+#define TX_UNMARK_RAW(sv) SvRV(sv)
 
 #define MY_CXT_KEY "Text::Xslate::_guts" XS_VERSION
 typedef struct {
@@ -102,10 +107,10 @@ static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key);
 
 static inline bool
-tx_str_is_marked_raw(pTHX_ SV* const sv);
+tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv);
 
-static inline void
-tx_force_html_escape(pTHX_ SV* const src, SV* const dest);
+static void
+tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src);
 
 static SV*
 tx_html_escape(pTHX_ SV* const str);
@@ -266,7 +271,7 @@ tx_funcall(pTHX_ tx_state_t* const st, SV* const func, const char* const name) {
         (void)POPMARK;
         tx_error(aTHX_ st, "Undefined function%s is called on %s",
             c->exec_code == tx_optable[TXOP_fetch_s]
-                ? form(" %"SVf"()", c->arg)
+                ? form(" %"SVf"()", c->u_arg.sv)
                 : "", name);
         retval = NULL;
         goto finish;
@@ -293,7 +298,6 @@ tx_funcall(pTHX_ tx_state_t* const st, SV* const func, const char* const name) {
 static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     SV* sv = NULL;
-    PERL_UNUSED_ARG(st);
     SvGETMAGIC(var);
     if(SvROK(var) && SvOBJECT(SvRV(var))) {
         dSP;
@@ -346,9 +350,8 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
 }
 
 static inline bool
-tx_str_is_marked_raw(pTHX_ SV* const sv) {
+tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
-        dMY_CXT;
         return SvTYPE(SvRV(sv)) <= SVt_PVMG
             && SvSTASH(SvRV(sv)) == MY_CXT.raw_stash;
     }
@@ -357,11 +360,11 @@ tx_str_is_marked_raw(pTHX_ SV* const sv) {
 
 SV*
 tx_mark_raw(pTHX_ SV* const str) {
-    if(tx_str_is_marked_raw(aTHX_ str)) {
+    dMY_CXT;
+    if(tx_str_is_raw(aTHX_ aMY_CXT_ str)) {
         return str;
     }
     else {
-        dMY_CXT;
         SV* const sv = newSV_type(SVt_PVMG);
         sv_setsv(sv, str);
         return sv_2mortal(sv_bless(newRV_noinc(sv), MY_CXT.raw_stash));
@@ -370,16 +373,17 @@ tx_mark_raw(pTHX_ SV* const str) {
 
 SV*
 tx_unmark_raw(pTHX_ SV* const str) {
-    if(tx_str_is_marked_raw(aTHX_ str)) {
-        return SvRV(str);
+    dMY_CXT;
+    if(tx_str_is_raw(aTHX_ aMY_CXT_ str)) {
+        return TX_UNMARK_RAW(str);
     }
     else {
         return str;
     }
 }
 
-static inline void /* doesn't care about raw-ness */
-tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
+static void /* doesn't care about raw-ness */
+tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src) {
     STRLEN len;
     const char*       cur = SvPV_const(src, len);
     const char* const end = cur + len;
@@ -437,9 +441,10 @@ tx_force_html_escape(pTHX_ SV* const src, SV* const dest) {
 
 static SV*
 tx_html_escape(pTHX_ SV* const str) {
-    if(!( tx_str_is_marked_raw(aTHX_ str) || !SvOK(str) )) {
+    dMY_CXT;
+    if(!( !SvOK(str) || tx_str_is_raw(aTHX_ aMY_CXT_ str) )) {
         SV* const dest = newSVpvs_flags("", SVs_TEMP);
-        tx_force_html_escape(aTHX_ str, dest);
+        tx_sv_cat_with_html_escape_force(aTHX_ dest, str);
         return tx_mark_raw(aTHX_ dest);
     }
     else {
@@ -544,7 +549,6 @@ tx_proccall(pTHX_ tx_state_t* const txst, SV* const proc, const char* const name
         tx_code_t proc_end;
 
         proc_end.exec_code = tx_optable[ TXOP_end ];
-        proc_end.arg = NULL;
         tx_macro_enter(aTHX_ TX_st, (AV*)SvRV(proc), &proc_end);
         TX_RUNOPS(TX_st);
         /* after tx_macro_end */
@@ -687,7 +691,9 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
 
     for(i = 0; i < len; i++) {
         /* opcode */
-        SvREFCNT_dec(code[i].arg);
+        if( tx_oparg[ info[i].optype ] & TXARGf_SV ) {
+            SvREFCNT_dec(code[i].u_arg.sv);
+        }
 
         /* opinfo */
         SvREFCNT_dec(info[i].file);
@@ -727,9 +733,18 @@ tx_mg_dup(pTHX_ MAGIC* const mg, CLONE_PARAMS* const param){
     Newx(st->info, len, tx_info_t);
 
     for(i = 0; i < len; i++) {
+        U8 const oparg = tx_oparg[ proto_info[i].optype ];
         /* opcode */
         st->code[i].exec_code = proto_code[i].exec_code;
-        st->code[i].arg       = tx_sv_dup_inc(aTHX_ proto_code[i].arg, param);
+        if( oparg & TXARGf_SV ) {
+            st->code[i].u_arg.sv = tx_sv_dup_inc(aTHX_ proto_code[i].u_arg.sv, param);
+        }
+        else if ( oparg & TXARGf_INT ) {
+            st->code[i].u_arg.iv = proto_code[i].u_arg.iv;
+        }
+        else if( oparg & TXARGf_PC ) {
+            st->code[i].u_arg.pc = proto_code[i].u_arg.pc;
+        }
 
         /* opinfo */
         st->info[i].optype    = proto_info[i].optype;
@@ -1077,36 +1092,36 @@ CODE:
                     croak("Oops: Opcode %"SVf" must have an argument on [%d]", opname, (int)i);
                 }
 
-                if(tx_oparg[opnum] & TXARGf_KEY) {
+                if(tx_oparg[opnum] & TXARGf_KEY) { /* shared sv */
                     STRLEN len;
                     const char* const pv = SvPV_const(*arg, len);
-                    st.code[i].arg = newSVpvn_share(pv, len, 0U);
+                    st.code[i].u_arg.sv = newSVpvn_share(pv, len, 0U);
                 }
-                else if(tx_oparg[opnum] & TXARGf_INT) {
-                    st.code[i].arg = newSViv(SvIV(*arg));
-
-                    if(tx_oparg[opnum] & TXARGf_GOTO) {
-                        /* calculate relational addresses to absolute addresses */
-                        UV const abs_pos       = (UV)(i + SvIVX(st.code[i].arg));
-
-                        if(abs_pos >= (UV)len) {
-                            croak("Oops: goto address %"IVdf" is out of range (must be 0 <= addr <= %"IVdf")",
-                                SvIVX(st.code[i].arg), (IV)len);
-                        }
-                        sv_setuv(st.code[i].arg, PTR2UV(TX_POS2PC(&st, abs_pos)));
-                    }
-                    SvREADONLY_on(st.code[i].arg);
+                else if(tx_oparg[opnum] & TXARGf_INT) { /* sviv */
+                    st.code[i].u_arg.sv = newSViv(SvIV(*arg));
                 }
                 else { /* normal sv */
-                    st.code[i].arg = newSVsv(*arg);
+                    st.code[i].u_arg.sv = newSVsv(*arg);
                 }
+            }
+            else if(tx_oparg[opnum] & TXARGf_INT) {
+                st.code[i].u_arg.iv = SvIV(*arg);
+            }
+            else if(tx_oparg[opnum] & TXARGf_PC) {
+                /* calculate relational addresses to absolute addresses */
+                UV const abs_pos       = (UV)(i + SvIV(*arg));
+
+                if(abs_pos >= (UV)len) {
+                    croak("Oops: goto address %"IVdf" is out of range (must be 0 <= addr <= %"IVdf")",
+                        SvIV(*arg), (IV)len);
+                }
+                st.code[i].u_arg.pc = TX_POS2PC(&st, abs_pos);
             }
             else {
                 if(arg && SvOK(*arg)) {
                     croak("Oops: Opcode %"SVf" has an extra argument %s on [%d]",
                         opname, tx_neat(aTHX_ *arg), (int)i);
                 }
-                st.code[i].arg = NULL;
             }
 
             /* setup opinfo */
@@ -1123,7 +1138,7 @@ CODE:
 
             /* special cases */
             if(opnum == TXOP_macro_begin) {
-                SV* const name = st.code[i].arg;
+                SV* const name = st.code[i].u_arg.sv;
                 SV* const ent  = hv_iterval(st.symbol,
                     hv_fetch_ent(st.symbol, name, TRUE, 0U));
 
@@ -1138,7 +1153,7 @@ CODE:
                     (void)av_store(macro, TXm_NARGS, newSViv(0));
                     (void)av_store(macro, TXm_ADDR,  newSVuv(PTR2UV(TX_POS2PC(&st, i))));
                     (void)av_store(macro, TXm_NAME,  name);
-                    st.code[i].arg = NULL;
+                    st.code[i].u_arg.sv = NULL;
                 }
                 else { /* already defined */
                     macro = NULL;
@@ -1147,21 +1162,21 @@ CODE:
             else if(opnum == TXOP_macro_nargs) {
                 if(macro) {
                     /* the number of outer lexical variables */
-                    (void)av_store(macro, TXm_NARGS, st.code[i].arg);
-                    st.code[i].arg = NULL;
+                    (void)av_store(macro, TXm_NARGS, st.code[i].u_arg.sv);
+                    st.code[i].u_arg.sv = NULL;
                 }
             }
             else if(opnum == TXOP_macro_outer) {
                 if(macro) {
                     /* the number of outer lexical variables */
-                    (void)av_store(macro, TXm_OUTER, st.code[i].arg);
-                    st.code[i].arg = NULL;
+                    (void)av_store(macro, TXm_OUTER, st.code[i].u_arg.sv);
+                    st.code[i].u_arg.sv = NULL;
                 }
             }
             else if(opnum == TXOP_depend) {
                 /* add a dependent file to the tmpl object */
-                av_push(tmpl, st.code[i].arg);
-                st.code[i].arg = NULL;
+                av_push(tmpl, st.code[i].u_arg.sv);
+                st.code[i].u_arg.sv = NULL;
             }
         }
         else {
@@ -1170,7 +1185,7 @@ CODE:
     } /* end for each code */
 }
 
-SV*
+void
 render(SV* self, SV* source, SV* vars = &PL_sv_undef)
 ALIAS:
     render        = 0
@@ -1179,6 +1194,7 @@ CODE:
 {
     dMY_CXT;
     tx_state_t* st;
+    SV* result;
 
     if(!(SvROK(self) && SvTYPE(SvRV(self)) == SVt_PVHV)) {
         croak("Xslate: Invalid xslate instance: %s",
@@ -1224,14 +1240,13 @@ CODE:
     MY_CXT.orig_die_handler = PL_diehook;
     PL_diehook              = MY_CXT.die_handler;
 
-    RETVAL = sv_newmortal();
-    sv_grow(RETVAL, st->hint_size + TX_HINT_SIZE);
-    SvPOK_on(RETVAL);
+    result = sv_newmortal();
+    sv_grow(result, st->hint_size + TX_HINT_SIZE);
+    SvPOK_on(result);
 
-    tx_execute(aTHX_ st, RETVAL, (HV*)SvRV(vars));
+    tx_execute(aTHX_ st, result, (HV*)SvRV(vars));
 
-    ST(0) = RETVAL;
-    XSRETURN(1);
+    ST(0) = result;
 }
 
 void
@@ -1241,7 +1256,6 @@ CODE:
     dMY_CXT;
     tx_state_t* const st = MY_CXT.current_st;
     ST(0) = st ? st->engine : &PL_sv_undef;
-    XSRETURN(1);
 }
 
 void
@@ -1363,7 +1377,6 @@ mark_raw(SV* str)
 CODE:
 {
     ST(0) = tx_mark_raw(aTHX_ str);
-    XSRETURN(1);
 }
 
 void
@@ -1371,7 +1384,6 @@ unmark_raw(SV* str)
 CODE:
 {
     ST(0) = tx_unmark_raw(aTHX_ str);
-    XSRETURN(1);
 }
 
 
@@ -1380,7 +1392,6 @@ html_escape(SV* str)
 CODE:
 {
     ST(0) = tx_html_escape(aTHX_ str);
-    XSRETURN(1);
 }
 
 MODULE = Text::Xslate    PACKAGE = Text::Xslate::Type::Raw
@@ -1415,16 +1426,14 @@ CODE:
         croak("You cannot extend %s", TX_RAW_CLASS);
     }
     ST(0) = tx_mark_raw(aTHX_ tx_unmark_raw(aTHX_ str));
-    XSRETURN(1);
 }
 
 void
 as_string(SV* self, ...)
 CODE:
 {
-    if(! tx_str_is_marked_raw(aTHX_ self) ) {
+    if(!SvROK(self)) {
         croak("You cannot call %s->as_string() as a class method", TX_RAW_CLASS);
     }
-    ST(0) = SvRV(self);
-    XSRETURN(1);
+    ST(0) = tx_unmark_raw(aTHX_ self);
 }

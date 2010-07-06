@@ -14,7 +14,7 @@ TXC(push);
 TXC(pushmark);
 TXC(nil);
 TXC_w_sv(literal);
-TXC_w_int(literal_i);
+TXC_w_sviv(literal_i);
 TXC_w_key(fetch_s); /* fetch a field from the top */
 TXC(fetch_field); /* fetch a field from a variable (bin operator) */
 TXC_w_key(fetch_field_s); /* fetch a field from a variable (for literal) */
@@ -50,8 +50,8 @@ TXC(ge);
 TXC(ncmp);
 TXC(scmp);
 TXC_w_key(fetch_symbol); /* functions, macros, constants */
-TXC_w_int(macro_end);
 TXC(funcall); /* call a function or a macro */
+TXC(macro_end);
 TXC_w_key(methodcall_s);
 TXC(make_array);
 TXC(make_hash);
@@ -60,8 +60,8 @@ TXC(leave);
 TXC_goto(goto);
 TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC_w_key(macro_begin);
-TXC_w_int(macro_nargs);
-TXC_w_int(macro_outer);
+TXC_w_sviv(macro_nargs);
+TXC_w_sviv(macro_outer);
 TXC(set_opinfo);
 TXC(end);
 
@@ -113,8 +113,8 @@ enum tx_opcode_t {
     TXOP_ncmp, /* 44 */
     TXOP_scmp, /* 45 */
     TXOP_fetch_symbol, /* 46 */
-    TXOP_macro_end, /* 47 */
-    TXOP_funcall, /* 48 */
+    TXOP_funcall, /* 47 */
+    TXOP_macro_end, /* 48 */
     TXOP_methodcall_s, /* 49 */
     TXOP_make_array, /* 50 */
     TXOP_make_hash, /* 51 */
@@ -142,7 +142,7 @@ static const U8 tx_oparg[] = {
     0U, /* pushmark */
     0U, /* nil */
     TXCODE_W_SV, /* literal */
-    TXCODE_W_INT, /* literal_i */
+    TXCODE_W_SVIV, /* literal_i */
     TXCODE_W_KEY, /* fetch_s */
     0U, /* fetch_field */
     TXCODE_W_KEY, /* fetch_field_s */
@@ -178,8 +178,8 @@ static const U8 tx_oparg[] = {
     0U, /* ncmp */
     0U, /* scmp */
     TXCODE_W_KEY, /* fetch_symbol */
-    TXCODE_W_INT, /* macro_end */
     0U, /* funcall */
+    0U, /* macro_end */
     TXCODE_W_KEY, /* methodcall_s */
     0U, /* make_array */
     0U, /* make_hash */
@@ -188,8 +188,8 @@ static const U8 tx_oparg[] = {
     TXCODE_GOTO, /* goto */
     TXCODE_W_SV, /* depend */
     TXCODE_W_KEY, /* macro_begin */
-    TXCODE_W_INT, /* macro_nargs */
-    TXCODE_W_INT, /* macro_outer */
+    TXCODE_W_SVIV, /* macro_nargs */
+    TXCODE_W_SVIV, /* macro_outer */
     0U, /* set_opinfo */
     0U, /* end */
 }; /* tx_oparg[] */
@@ -243,8 +243,8 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(ncmp), newSViv(TXOP_ncmp));
     (void)hv_stores(ops, STRINGIFY(scmp), newSViv(TXOP_scmp));
     (void)hv_stores(ops, STRINGIFY(fetch_symbol), newSViv(TXOP_fetch_symbol));
-    (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
+    (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
     (void)hv_stores(ops, STRINGIFY(methodcall_s), newSViv(TXOP_methodcall_s));
     (void)hv_stores(ops, STRINGIFY(make_array), newSViv(TXOP_make_array));
     (void)hv_stores(ops, STRINGIFY(make_hash), newSViv(TXOP_make_hash));
@@ -309,8 +309,8 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_ncmp,
     TXCODE_scmp,
     TXCODE_fetch_symbol,
-    TXCODE_macro_end,
     TXCODE_funcall,
+    TXCODE_macro_end,
     TXCODE_methodcall_s,
     TXCODE_make_array,
     TXCODE_make_hash,
@@ -381,8 +381,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(ncmp),
         LABEL_PTR(scmp),
         LABEL_PTR(fetch_symbol),
-        LABEL_PTR(macro_end),
         LABEL_PTR(funcall),
+        LABEL_PTR(macro_end),
         LABEL_PTR(methodcall_s),
         LABEL_PTR(make_array),
         LABEL_PTR(make_hash),
@@ -450,8 +450,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(ncmp                ): TXCODE_ncmp                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(scmp                ): TXCODE_scmp                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(fetch_symbol        ): TXCODE_fetch_symbol        (aTHX_ st); goto *(st->pc->exec_code);
-    LABEL(macro_end           ): TXCODE_macro_end           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(funcall             ): TXCODE_funcall             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(macro_end           ): TXCODE_macro_end           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(methodcall_s        ): TXCODE_methodcall_s        (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(make_array          ): TXCODE_make_array          (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(make_hash           ): TXCODE_make_hash           (aTHX_ st); goto *(st->pc->exec_code);

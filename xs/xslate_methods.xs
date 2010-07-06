@@ -14,21 +14,24 @@
 #define TXBM_NAME(t, n) CAT2( CAT2(tx_bm, _), CAT2(t, CAT2(_, n)))
 #define TXBM(t, moniker) static TXBM_DECL( TXBM_NAME(t, moniker))
 
-#define TXBM_SETUP(t, name, nargs) \
-    { STRINGIFY(t) "::" STRINGIFY(name), TXBM_NAME(t, name), nargs }
+#define TXBM_SETUP(t, name, nargs_min, nargs_max) \
+    { STRINGIFY(t) "::" STRINGIFY(name), TXBM_NAME(t, name), nargs_min, nargs_max }
 
 typedef struct {
     const char* const name;
 
     TXBM_DECL( (*body) );
 
-    I16 nargs;
+    U8 nargs_min;
+    U8 nargs_max;
 } tx_builtin_method_t;
 
 #define MY_CXT_KEY "Text::Xslate::Methods::_guts" XS_VERSION
 typedef struct {
     tx_state_t* cmparg_st;
     SV*         cmparg_proc;
+
+    HV* pair_stash;
 } my_cxt_t;
 START_MY_CXT;
 
@@ -58,11 +61,12 @@ tx_pair_cmp(pTHX_ SV* const a, SV* const b) {
 
 static SV*
 tx_kv(pTHX_ SV* const hvref) {
-    HV* const stash = gv_stashpvs(TX_PAIR_CLASS, GV_ADDMULTI);
+    dMY_CXT;
     HV* const hv    = (HV*)SvRV(hvref);
     AV* const av    = newAV();
     SV* const avref = sv_2mortal(newRV_noinc((SV*)av));
     HE* he;
+    I32 i;
 
     assert(SvROK(hvref));
     assert(SvTYPE(hv) == SVt_PVHV);
@@ -72,15 +76,16 @@ tx_kv(pTHX_ SV* const hvref) {
     }
 
     hv_iterinit(hv);
+    i = 0;
     while((he = hv_iternext(hv))) {
-        SV* const pair = tx_make_pair(aTHX_ stash,
+        SV* const pair = tx_make_pair(aTHX_ MY_CXT.pair_stash,
             hv_iterkeysv(he),
             hv_iterval(hv, he));
 
-        av_push(av, pair);
+        (void)av_store(av, i++, pair);
         SvREFCNT_inc_simple_void_NN(pair);
     }
-    sortsv(AvARRAY(av), AvFILLp(av)+1, tx_pair_cmp);
+    sortsv(AvARRAY(av), i, tx_pair_cmp);
     return avref;
 }
 
@@ -90,6 +95,7 @@ tx_keys(pTHX_ SV* const hvref) {
     AV* const av    = newAV();
     SV* const avref = sv_2mortal(newRV_noinc((SV*)av));
     HE* he;
+    I32 i;
 
     assert(SvROK(hvref));
     assert(SvTYPE(hv) == SVt_PVHV);
@@ -99,12 +105,13 @@ tx_keys(pTHX_ SV* const hvref) {
     }
 
     hv_iterinit(hv);
+    i = 0;
     while((he = hv_iternext(hv))) {
         SV* const key = hv_iterkeysv(he);
-        av_push(av, key);
+        (void)av_store(av, i++, key);
         SvREFCNT_inc_simple_void_NN(key);
     }
-    sortsv(AvARRAY(av), AvFILLp(av)+1, Perl_sv_cmp);
+    sortsv(AvARRAY(av), i, Perl_sv_cmp);
     return avref;
 }
 
@@ -158,7 +165,7 @@ TXBM(array, reverse) {
     av_fill(result, len - 1);
     for(i = 0; i < len; i++) {
         SV** const svp = av_fetch(av, i, FALSE);
-        av_store(result, -(i+1), newSVsv(svp ? *svp : &PL_sv_undef));
+        (void)av_store(result, -(i+1), newSVsv(svp ? *svp : &PL_sv_undef));
     }
 
     sv_setsv(retval, resultref);
@@ -180,8 +187,25 @@ tx_sv_cmp(pTHX_ SV* const x, SV* const y) {
     PUSHs(x);
     PUSHs(y);
     PUTBACK;
-    result = tx_proccall(aTHX_ st, proc, "sort callback");
-    return SvIVx(tx_unmark_raw(aTHX_ result));
+    result = tx_unmark_raw(aTHX_ tx_proccall(aTHX_ st, proc, "sort callback"));
+    return SvIV(result);
+}
+
+static SVCOMPARE_t
+tx_prepare_compare_func(pTHX_ tx_state_t* const st, I32 const items, SV** const MARK) {
+    assert(items == 0 || items == 1);
+    if(items == 0) {
+        return Perl_sv_cmp;
+    }
+    else {
+        dMY_CXT;
+        SAVEVPTR(MY_CXT.cmparg_st);
+        SAVESPTR(MY_CXT.cmparg_proc);
+
+        MY_CXT.cmparg_st   = st;
+        MY_CXT.cmparg_proc = *(MARK + 1);
+        return tx_sv_cmp;
+    }
 }
 
 TXBM(array, sort) {
@@ -198,36 +222,17 @@ TXBM(array, sort) {
     SAVETMPS;
     sv_2mortal(resultref);
 
-    if(items == 0) {
-        cmpfunc = Perl_sv_cmp;
-    }
-    else if(items == 1) {
-        dMY_CXT;
-        cmpfunc = tx_sv_cmp;
+    cmpfunc = tx_prepare_compare_func(aTHX_ st, items, MARK);
 
-        SAVEVPTR(MY_CXT.cmparg_st);
-        SAVESPTR(MY_CXT.cmparg_proc);
-
-        MY_CXT.cmparg_st   = st;
-        MY_CXT.cmparg_proc = *(++MARK);
-    }
-    else {
-        tx_error(aTHX_ st, "Wrong number of arguments for sort");
-        sv_setsv(retval, &PL_sv_undef);
-        goto finish;
-    }
-
-
-    av_fill(result, len - 1);
+    av_extend(result, len - 1);
     for(i = 0; i < len; i++) {
         SV** const svp = av_fetch(av, i, FALSE);
-        av_store(result, i, newSVsv(svp ? *svp : &PL_sv_undef));
+        (void)av_store(result, i, newSVsv(svp ? *svp : &PL_sv_undef));
     }
     sortsv(AvARRAY(result), len, cmpfunc);
 
     sv_setsv(retval, resultref);
 
-    finish:
     FREETMPS;
     LEAVE;
 }
@@ -243,7 +248,7 @@ TXBM(array, map) {
     ENTER;
     SAVETMPS;
     sv_2mortal(resultref);
-    av_fill(result, len - 1);
+    av_extend(result, len - 1);
     for(i = 0; i < len; i++) {
         dSP;
         SV** const svp = av_fetch(av, i, FALSE);
@@ -254,7 +259,7 @@ TXBM(array, map) {
         PUSHs(svp ? *svp : &PL_sv_undef);
         PUTBACK;
         sv = tx_proccall(aTHX_ st, proc, "map callback");
-        av_store(result, i, newSVsv(sv));
+        (void)av_store(result, i, newSVsv(sv));
     }
     sv_setsv(retval, resultref);
     FREETMPS;
@@ -305,22 +310,22 @@ TXBM(hash, kv) {
 }
 
 static const tx_builtin_method_t tx_builtin_method[] = {
-    TXBM_SETUP(nil,    defined, 0),
+    TXBM_SETUP(nil,    defined, 0, 0),
 
-    TXBM_SETUP(scalar, defined, 0),
+    TXBM_SETUP(scalar, defined, 0, 0),
 
-    TXBM_SETUP(array, defined, 0),
-    TXBM_SETUP(array, size,    0),
-    TXBM_SETUP(array, join,    1),
-    TXBM_SETUP(array, reverse, 0),
-    TXBM_SETUP(array, sort,   -1),
-    TXBM_SETUP(array, map,     1),
+    TXBM_SETUP(array, defined, 0, 0),
+    TXBM_SETUP(array, size,    0, 0),
+    TXBM_SETUP(array, join,    1, 1),
+    TXBM_SETUP(array, reverse, 0, 0),
+    TXBM_SETUP(array, sort,    0, 1), /* can take a compare function */
+    TXBM_SETUP(array, map,     1, 1),
 
-    TXBM_SETUP(hash, defined,  0),
-    TXBM_SETUP(hash, size,     0),
-    TXBM_SETUP(hash, keys,     0),
-    TXBM_SETUP(hash, values,   0),
-    TXBM_SETUP(hash, kv,       0),
+    TXBM_SETUP(hash, defined,  0, 0),
+    TXBM_SETUP(hash, size,     0, 0),
+    TXBM_SETUP(hash, keys,     0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash, values,   0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash, kv,       0, 0), /* TODO: can take a compare function */
 };
 
 static const size_t tx_num_builtin_method
@@ -394,9 +399,8 @@ tx_methodcall(pTHX_ tx_state_t* const st, SV* const method) {
 
             bm = &tx_builtin_method[SvUVX(entity)];
 
-            if(bm->nargs != -1 && bm->nargs != items) {
-                tx_error(aTHX_ st, "Wrong number of arguments for %"SVf" (%d %c %d)",
-                    method, (int)items, items > bm->nargs ? '>' : '<', (int)bm->nargs);
+            if(!(items >= bm->nargs_min && items <= bm->nargs_max)) {
+                tx_error(aTHX_ st, "Wrong number of arguments for %"SVf, method);
                 goto finish;
             }
 
@@ -443,7 +447,7 @@ VERSIONCHECK: DISABLE
 BOOT:
 {
     MY_CXT_INIT;
-    PERL_UNUSED_VAR(MY_CXT);
+    MY_CXT.pair_stash = gv_stashpvs(TX_PAIR_CLASS, GV_ADDMULTI);
 }
 
 #ifdef USE_ITHREADS
@@ -453,7 +457,7 @@ CLONE(...)
 CODE:
 {
     MY_CXT_CLONE;
-    PERL_UNUSED_VAR(MY_CXT);
+    MY_CXT.pair_stash = gv_stashpvs(TX_PAIR_CLASS, GV_ADDMULTI);
     PERL_UNUSED_VAR(items);
 }
 
@@ -467,5 +471,4 @@ ALIAS:
 CODE:
 {
     ST(0) = *av_fetch(pair, ix, TRUE);
-    XSRETURN(1);
 }

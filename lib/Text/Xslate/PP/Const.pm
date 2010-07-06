@@ -10,13 +10,16 @@ use constant TXARGf_SV      => 0x01;
 use constant TXARGf_INT     => 0x02;
 use constant TXARGf_KEY     => 0x04;
 use constant TXARGf_VAR     => 0x08;
-use constant TXARGf_GOTO    => 0x10;
+use constant TXARGf_PC      => 0x10;
 
+# note that these flags are different form XS's because
+# of the difference of data structure
 use constant TXCODE_W_SV    => TXARGf_SV;
+use constant TXCODE_W_SVIV  => (TXARGf_SV | TXARGf_INT) ;
+use constant TXCODE_W_KEY   => (TXARGf_SV | TXARGf_KEY);
 use constant TXCODE_W_INT   => (TXARGf_SV | TXARGf_INT);
 use constant TXCODE_W_VAR   => (TXARGf_SV | TXARGf_INT | TXARGf_VAR);
-use constant TXCODE_W_KEY   => (TXARGf_SV | TXARGf_KEY);
-use constant TXCODE_GOTO    => (TXARGf_SV | TXARGf_INT | TXARGf_GOTO);
+use constant TXCODE_GOTO    => (TXARGf_SV | TXARGf_INT | TXARGf_PC);
 
 # template representation, stored in $self->{template}{$file}
 use constant TXo_MTIME          => 0;
@@ -80,8 +83,8 @@ our %OPS = (
     ncmp             => 44,
     scmp             => 45,
     fetch_symbol     => 46,
-    macro_end        => 47,
-    funcall          => 48,
+    funcall          => 47,
+    macro_end        => 48,
     methodcall_s     => 49,
     make_array       => 50,
     make_hash        => 51,
@@ -144,8 +147,8 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_ncmp,                # 44
     \&Text::Xslate::PP::Opcode::op_scmp,                # 45
     \&Text::Xslate::PP::Opcode::op_fetch_symbol,        # 46
-    \&Text::Xslate::PP::Opcode::op_macro_end,           # 47
-    \&Text::Xslate::PP::Opcode::op_funcall,             # 48
+    \&Text::Xslate::PP::Opcode::op_funcall,             # 47
+    \&Text::Xslate::PP::Opcode::op_macro_end,           # 48
     \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 49
     \&Text::Xslate::PP::Opcode::op_make_array,          # 50
     \&Text::Xslate::PP::Opcode::op_make_hash,           # 51
@@ -172,7 +175,7 @@ our @OPARGS = (
     0,             # pushmark
     0,             # nil
     TXCODE_W_SV,   # literal
-    TXCODE_W_INT,  # literal_i
+    TXCODE_W_SVIV, # literal_i
     TXCODE_W_KEY,  # fetch_s
     0,             # fetch_field
     TXCODE_W_KEY,  # fetch_field_s
@@ -208,8 +211,8 @@ our @OPARGS = (
     0,             # ncmp
     0,             # scmp
     TXCODE_W_KEY,  # fetch_symbol
-    TXCODE_W_INT,  # macro_end
     0,             # funcall
+    0,             # macro_end
     TXCODE_W_KEY,  # methodcall_s
     0,             # make_array
     0,             # make_hash
@@ -218,8 +221,8 @@ our @OPARGS = (
     TXCODE_GOTO,   # goto
     TXCODE_W_SV,   # depend
     TXCODE_W_KEY,  # macro_begin
-    TXCODE_W_INT,  # macro_nargs
-    TXCODE_W_INT,  # macro_outer
+    TXCODE_W_SVIV, # macro_nargs
+    TXCODE_W_SVIV, # macro_outer
     0,             # set_opinfo
     0,             # end
 ); # @OPARGS

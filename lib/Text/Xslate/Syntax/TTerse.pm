@@ -94,18 +94,19 @@ sub init_symbols {
     return;
 }
 
-after init_iterator_elements => sub {
-    my($parser) = @_;
+around _build_iterator_element => sub {
+    my($super, $parser) = @_;
 
-    my $tab = $parser->iterator_element;
+    my $table = $super->($parser);
 
-    $tab->{first} = $tab->{is_first};
-    $tab->{last}  = $tab->{is_last};
-    $tab->{next}  = $tab->{peek_next};
-    $tab->{prev}  = $tab->{peek_prev};
-    $tab->{max}   = $tab->{max_index};
+    # make aliases
+    $table->{first} = $table->{is_first};
+    $table->{last}  = $table->{is_last};
+    $table->{next}  = $table->{peek_next};
+    $table->{prev}  = $table->{peek_prev};
+    $table->{max}   = $table->{max_index};
 
-    return;
+    return $table;
 };
 
 around advance => sub {
@@ -533,15 +534,17 @@ sub std_filter {
     $parser->advance();
 
     my $proc = $parser->lambda($symbol);
-    $proc->id('block'); # to return values without marking as raw
 
     $proc->second([]);
     $proc->third( $parser->statements() );
     $parser->advance("END");
 
-    # _immediate_block() | filter
-
     my $callmacro  = $parser->call($proc->first);
+
+    if($filter eq 'html') {
+        # for compatibility with TT2
+        $filter = 'unmark_raw';
+    }
     my $callfilter = $parser->call($filter, $callmacro);
 
     my $print = $parser->symbol('print')->clone(
@@ -786,17 +789,16 @@ CALL evaluates expressions, but does not print it.
 
     [% CALL expr %]
 
-SET and assignments are supported, although the use of them are strongly
-discouraged.
+SET and assignments, although the use of them are strongly discouraged.
 
     [% SET var1 = expr1, var2 = expr2 %]
     [% var = expr %]
 
-DEFAULT statements are supported as a syntactic sugar to C<< SET var = var // expr >>:
+DEFAULT statements as a syntactic sugar to C<< SET var = var // expr >>:
 
     [% DEFAULT lang = "TTerse" %]
 
-FILTER blocks are supported:
+FILTER blocks:
 
     [% FILTER html -%]
     Hello, <Xslate> world!

@@ -18,9 +18,11 @@ use constant _DUMP_TOKEN => scalar($DEBUG =~ /\b dump=token \b/xmsi);
 
 our @CARP_NOT = qw(Text::Xslate::Compiler Text::Xslate::Symbol);
 
-my $ID      = qr/(?: (?:[A-Za-z_]|\$\~?) [A-Za-z0-9_]* )/xms;
+my $IDENT = qr/(?: (?:[A-Za-z_]|\$\~?) [A-Za-z0-9_]* )/xms;
 
-my $OPERATOR_TOKEN = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
+# Operator tokens that the parser recognizes.
+# All the single characters are tokanized as an operator.
+my $OPERATOR_TOKEN = sprintf '(?:%s|[^ \t\r\n])', join('|', map{ quotemeta } qw(
     ...
     ..
     == != <=> <= >=
@@ -33,20 +35,6 @@ my $OPERATOR_TOKEN = sprintf '(?:%s)', join('|', map{ quotemeta } qw(
     -> =>
     ::
     ++ --
-
-    < >
-    =
-    + - * / %
-    & | ^ 
-    !
-    .
-    ~
-    ? :
-    ( )
-    { }
-    [ ]
-    ;
-    `
 ), ',');
 
 my %shortcut_table = (
@@ -75,11 +63,11 @@ has symbol_table => ( # the global symbol table
 );
 
 has iterator_element => (
-    is  => 'rw',
+    is  => 'ro',
     isa => 'HashRef',
 
     lazy     => 1,
-    default  => sub { {} },
+    builder  => '_build_iterator_element',
 
     init_arg => undef,
 );
@@ -361,7 +349,6 @@ sub BUILD {
     my($parser) = @_;
     $parser->_init_basic_symbols();
     $parser->init_symbols();
-    $parser->init_iterator_elements();
     return;
 }
 
@@ -522,10 +509,8 @@ sub init_symbols {
     return;
 }
 
-sub init_iterator_elements {
-    my($parser) = @_;
-
-    $parser->iterator_element({
+sub _build_iterator_element {
+    return {
         index     => \&iterator_index,
         count     => \&iterator_count,
         is_first  => \&iterator_is_first,
@@ -536,9 +521,7 @@ sub init_iterator_elements {
         peek_next => \&iterator_peek_next,
         peek_prev => \&iterator_peek_prev,
         cycle     => \&iterator_cycle,
-    });
-
-    return;
+    };
 }
 
 
@@ -575,11 +558,8 @@ sub look_ahead {
         $parser->following_newline(0);
     }
 
-    if(s/\A ($ID)//xmso){
+    if(s/\A ($IDENT)//xmso){
         return [ name => $1 ];
-    }
-    elsif(s/\A ($OPERATOR_TOKEN)//xmso){
-        return [ operator => $1 ];
     }
     elsif(s/\A $COMMENT //xmso) {
         goto &look_ahead; # tail recursion
@@ -589,6 +569,9 @@ sub look_ahead {
     }
     elsif(s/\A ($STRING)//xmso){
         return [ string => $1 ];
+    }
+    elsif(s/\A ($OPERATOR_TOKEN)//xmso){
+        return [ operator => $1 ];
     }
     elsif(s/\A (\S+)//xms) {
         $parser->_error("Oops: Unexpected lex symbol '$1'");
@@ -1342,10 +1325,7 @@ sub std_proc {
 }
 
 # block name -> { ... }
-# Note that the "block" keyword defines "immediate" macros, which
-# returns a normal string, instead of a raw string.
-# see _generate_proc()
-
+# block name | filter -> { ... }
 sub std_macro_block {
     my($parser, $symbol) = @_;
 
@@ -1384,17 +1364,12 @@ sub std_macro_block {
     $parser->pointy($macro);
 
     my $call = $parser->call($macro->first);
-    my $command;
     if(@filters) {
         foreach my $filter(@filters) { # apply filters
             $call = $parser->call($filter, $call);
         }
-        $command = 'print'; # need to explicit 'raw' filter for security
     }
-    else {
-        $command = 'print_raw';
-    }
-    my $print = $parser->symbol($command)->clone(
+    my $print = $parser->symbol('print')->clone(
         arity => 'command',
         first => [$call],
     );

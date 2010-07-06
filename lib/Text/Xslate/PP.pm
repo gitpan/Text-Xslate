@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1041';
+our $VERSION = '0.1042';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -194,7 +194,7 @@ sub _assemble {
             elsif ( $oparg & TXARGf_INT ) {
                 $code->[ $i ]->{ arg } = int($arg);
 
-                if( $oparg & TXARGf_GOTO ) {
+                if( $oparg & TXARGf_PC ) {
                     my $abs_addr = $i + $arg;
 
                     if( $abs_addr >= $len ) {
@@ -519,7 +519,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1041.
+This document describes Text::Xslate::PP version 0.1042.
 
 =head1 DESCRIPTION
 

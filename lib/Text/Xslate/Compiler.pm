@@ -237,7 +237,7 @@ sub compile {
         my $ast = $parser->parse($input, %args);
         print STDERR p($ast) if _DUMP_AST;
         @code = (
-            $self->opcode(set_opinfo => undef, file => $args{file}, line => 1),
+            $self->opcode(set_opinfo => undef, file => $self->current_file, line => 1),
             $self->_compile_ast($ast),
             $self->opcode('end'),
         );
@@ -393,7 +393,7 @@ sub _process_cascade {
                     $macro->{outer} = $c->[1];
                 }
                 elsif($c->[0] eq 'macro_end') {
-                    $macro->{immediate} = $c->[1];
+                    # noop
                 }
                 else {
                     push @{$macro->{body}}, $c;
@@ -504,7 +504,7 @@ sub _flush_macro_table {
             push @code, $self->opcode( macro_outer => $macro->{outer} )
                 if $macro->{outer};
 
-            push @code, @{ $macro->{body} }, $self->opcode( macro_end => $macro->{immediate} );
+            push @code, @{ $macro->{body} }, $self->opcode('macro_end');
         }
     }
     %{$mtable} = ();
@@ -718,7 +718,6 @@ sub _generate_proc { # definition of macro, block, before, around, after
         line      => $opinfo->[2],
         file      => $opinfo->[3],
         outer     => $lvar_used,
-        immediate => 0, # whether it returns normal string or raw string
     );
 
     if(any_in($type, qw(macro block))) {
@@ -727,9 +726,6 @@ sub _generate_proc { # definition of macro, block, before, around, after
             if(p(\%macro) ne p($m)) {
                 $self->_error("Redefinition of $type $name is forbidden", $node);
             }
-        }
-        if($type eq 'block') {
-            $macro{immediate} = 1;
         }
         $self->macro_table->{$name} = \%macro;
     }
