@@ -1,4 +1,5 @@
 benchmark/cascade.pl
+benchmark/data_section.pl
 benchmark/demo-mt.pl
 benchmark/demo-tt.pl
 benchmark/expr.pl
@@ -34,6 +35,9 @@ example/base.tx
 example/cascade.gold
 example/cascade.pl
 example/cascade.tx
+example/data_section.gold
+example/data_section.pl
+example/fillinform.gold
 example/fillinform.pl
 example/form.psgi
 example/hello.gold
@@ -42,6 +46,7 @@ example/hello.tx
 example/list.gold
 example/list.pl
 example/list.tx
+example/uri_escape.gold
 example/uri_escape.pl
 HACKING
 inc/Module/Install.pm
@@ -105,6 +110,7 @@ t/010_internals/021_cached.t
 t/010_internals/022_reload.t
 t/010_internals/023_opinfo.t
 t/010_internals/024_psgi.t
+t/010_internals/025_data_section.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t

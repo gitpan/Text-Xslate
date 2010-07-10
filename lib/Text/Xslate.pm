@@ -4,13 +4,14 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1042';
+our $VERSION = '0.1043';
 
 use Carp       ();
 use File::Spec ();
 use Exporter   ();
 
-use Text::Xslate::Util qw($DEBUG
+use Text::Xslate::Util qw(
+    $DEBUG
     mark_raw unmark_raw
     html_escape escaped_string
 );
@@ -198,9 +199,16 @@ sub find_file {
     my $cache_mtime;
 
     foreach my $p(@{$self->{path}}) {
-        $fullpath = File::Spec->catfile($p, $file);
-        defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
-            or next;
+        if(ref $p eq 'HASH') {
+            defined(my $content = $p->{$file}) or next;
+            $fullpath   = \$content;
+            $orig_mtime = '+inf'; # always fresh
+        }
+        else {
+            $fullpath = File::Spec->catfile($p, $file);
+            defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
+                or next;
+        }
 
         # $file is found
 
@@ -404,6 +412,13 @@ sub _magic_token {
         $self->_extract_options(\%parser_option),
     );
 
+    if(ref $fullpath) { # ref to content string
+        require 'Digest/MD5.pm'; # we don't want to create its namespace
+        my $md5 = Digest::MD5->new();
+        $md5->add(${$fullpath});
+        $fullpath = 'SCALAR:' . $md5->hexdigest();
+    }
+
     return sprintf $XSLATE_MAGIC,
         $VERSION, $fullpath, $opt;
 }
@@ -466,7 +481,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1042.
+This document describes Text::Xslate version 0.1043.
 
 =head1 SYNOPSIS
 
@@ -594,7 +609,8 @@ Possible options are:
 
 =item C<< path => \@path // ['.'] >>
 
-Specifies the include paths.
+Specifies the include paths, which may be directory names or HASH references
+which contain C<< $file_name => $content >> mapping.
 
 =item C<< cache => $level // 1 >>
 
@@ -933,6 +949,8 @@ Thanks to gardejo for the proposal to the name B<template cascading>.
 Thanks to jjn1056 to the concept of template overlay (now implemented as C<cascade with ...>).
 
 Thanks to makamaka for the contribution of Text::Xslate::PP.
+
+Thanks to typester for the various inspirations.
 
 =head1 AUTHOR
 
