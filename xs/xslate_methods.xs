@@ -60,36 +60,6 @@ tx_pair_cmp(pTHX_ SV* const a, SV* const b) {
 }
 
 static SV*
-tx_kv(pTHX_ SV* const hvref) {
-    dMY_CXT;
-    HV* const hv    = (HV*)SvRV(hvref);
-    AV* const av    = newAV();
-    SV* const avref = sv_2mortal(newRV_noinc((SV*)av));
-    HE* he;
-    I32 i;
-
-    assert(SvROK(hvref));
-    assert(SvTYPE(hv) == SVt_PVHV);
-
-    if(HvKEYS(hv) > 0) {
-        av_extend(av, HvKEYS(hv) - 1);
-    }
-
-    hv_iterinit(hv);
-    i = 0;
-    while((he = hv_iternext(hv))) {
-        SV* const pair = tx_make_pair(aTHX_ MY_CXT.pair_stash,
-            hv_iterkeysv(he),
-            hv_iterval(hv, he));
-
-        (void)av_store(av, i++, pair);
-        SvREFCNT_inc_simple_void_NN(pair);
-    }
-    sortsv(AvARRAY(av), i, tx_pair_cmp);
-    return avref;
-}
-
-static SV*
 tx_keys(pTHX_ SV* const hvref) {
     HV* const hv    = (HV*)SvRV(hvref);
     AV* const av    = newAV();
@@ -126,7 +96,6 @@ TXBM(any, defined) {
 #define tx_bm_hash_defined   tx_bm_any_defined
 
 /* NIL */
-
 
 /* SCALAR */
 
@@ -261,11 +230,47 @@ TXBM(array, map) {
         sv = tx_proccall(aTHX_ st, proc, "map callback");
         (void)av_store(result, i, newSVsv(sv));
     }
+    /* setting retval must be here because retval is actually st->targ */
     sv_setsv(retval, resultref);
     FREETMPS;
     LEAVE;
+}
 
+TXBM(array, reduce) {
+    AV* const av        = (AV*)SvRV(*MARK);
+    SV* const proc      = *(++MARK);
+    I32 const len       = av_len(av) + 1;
+    SV** svp;
+    SV* a;
+    I32 i;
+
+    if(len < 2) {
+        svp = av_fetch(av, 0, FALSE);
+        sv_setsv(retval, svp ? *svp : NULL);
+        return;
+    }
+
+    ENTER;
+    SAVETMPS;
+    svp = av_fetch(av, 0, FALSE);
+    a = svp ? *svp : &PL_sv_undef;
+
+    for(i = 1; i < len; i++) {
+        dSP;
+        SV* b;
+        svp = av_fetch(av, i, FALSE);
+        b   = svp ? *svp : &PL_sv_undef;
+
+        PUSHMARK(SP);
+        PUSHs(a);
+        PUSHs(b);
+        PUTBACK;
+        a = tx_proccall(aTHX_ st, proc, "reduce callback");
+    }
     /* setting retval must be here because retval is actually st->targ */
+    sv_setsv(retval, a);
+    FREETMPS;
+    LEAVE;
 }
 
 /* HASH */
@@ -306,7 +311,37 @@ TXBM(hash, values) {
 }
 
 TXBM(hash, kv) {
-    sv_setsv(retval, tx_kv(aTHX_ *MARK));
+    dMY_CXT;
+    SV* const hvref = *MARK;
+    HV* const hv    = (HV*)SvRV(hvref);
+    AV* const av    = newAV();
+    SV* const avref = newRV_noinc((SV*)av);
+    HE* he;
+    I32 i;
+
+    ENTER;
+    SAVETMPS;
+    sv_2mortal(avref);
+
+    if(HvKEYS(hv) > 0) {
+        av_extend(av, HvKEYS(hv) - 1);
+    }
+
+    hv_iterinit(hv);
+    i = 0;
+    while((he = hv_iternext(hv))) {
+        SV* const pair = tx_make_pair(aTHX_ MY_CXT.pair_stash,
+            hv_iterkeysv(he),
+            hv_iterval(hv, he));
+
+        (void)av_store(av, i++, pair);
+        SvREFCNT_inc_simple_void_NN(pair);
+    }
+    sortsv(AvARRAY(av), i, tx_pair_cmp);
+    sv_setsv(retval, avref);
+
+    FREETMPS;
+    LEAVE;
 }
 
 static const tx_builtin_method_t tx_builtin_method[] = {
@@ -314,18 +349,19 @@ static const tx_builtin_method_t tx_builtin_method[] = {
 
     TXBM_SETUP(scalar, defined, 0, 0),
 
-    TXBM_SETUP(array, defined, 0, 0),
-    TXBM_SETUP(array, size,    0, 0),
-    TXBM_SETUP(array, join,    1, 1),
-    TXBM_SETUP(array, reverse, 0, 0),
-    TXBM_SETUP(array, sort,    0, 1), /* can take a compare function */
-    TXBM_SETUP(array, map,     1, 1),
+    TXBM_SETUP(array,  defined, 0, 0),
+    TXBM_SETUP(array,  size,    0, 0),
+    TXBM_SETUP(array,  join,    1, 1),
+    TXBM_SETUP(array,  reverse, 0, 0),
+    TXBM_SETUP(array,  sort,    0, 1), /* can take a compare function */
+    TXBM_SETUP(array,  map,     1, 1),
+    TXBM_SETUP(array,  reduce,  1, 1),
 
-    TXBM_SETUP(hash, defined,  0, 0),
-    TXBM_SETUP(hash, size,     0, 0),
-    TXBM_SETUP(hash, keys,     0, 0), /* TODO: can take a compare function */
-    TXBM_SETUP(hash, values,   0, 0), /* TODO: can take a compare function */
-    TXBM_SETUP(hash, kv,       0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash,   defined, 0, 0),
+    TXBM_SETUP(hash,   size,    0, 0),
+    TXBM_SETUP(hash,   keys,    0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash,   values,  0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash,   kv,      0, 0), /* TODO: can take a compare function */
 };
 
 static const size_t tx_num_builtin_method
@@ -432,7 +468,7 @@ tx_register_builtin_methods(pTHX_ HV* const hv) {
     assert(hv);
     for(i = 0; i < tx_num_builtin_method; i++) {
         const tx_builtin_method_t* const bm = &tx_builtin_method[i];
-        SV* const sv                 = *hv_fetch(hv, bm->name, strlen(bm->name), TRUE);
+        SV* const sv = *hv_fetch(hv, bm->name, strlen(bm->name), TRUE);
         if(!SvOK(sv)) { /* users can override it */
             sv_setiv(sv, i);
         }

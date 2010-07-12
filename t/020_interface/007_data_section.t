@@ -6,9 +6,10 @@ use Test::More;
 use Text::Xslate;
 use t::lib::Util;
 
-END{ unlink '.test_data_section' }
+use File::Path qw(rmtree);
+END{ rmtree '.test_data_section' }
 
-my $section = {
+my $data = {
     'foo.tx' => 'Hello, <: $lang :> world!',
 
     'base.tx'  => <<'T',
@@ -27,7 +28,7 @@ T
 
 for my $cache(0 .. 2) {
     my $tx = Text::Xslate->new(
-        path      => [ $section, path ],
+        path      => [ $data, path ],
         cache_dir => '.test_data_section',
         cache     => $cache,
     );

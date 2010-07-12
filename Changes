@@ -1,5 +1,14 @@
 Revision history for Perl extension Text::Xslate
 
+0.1044 Mon Jul 12 17:50:35 2010
+    [BUG FIXES]
+    - Underscores in bare words (i.e. left-hand side of the operator '=>')
+      were accidentally removed.
+    - There were several issues on path => \%vpath
+
+    [NEW FESTURES]
+    - $array.reduce(-> $x, $y { ... }) method
+
 0.1043 Sat Jul 10 14:26:57 2010
     [BUG FIXES]
     - What Makefile.PL wrote for additional tests did not work on Win32
@@ -14,7 +23,7 @@ Revision history for Perl extension Text::Xslate
 
 0.1042 Tue Jul  6 13:28:43 2010
     [BUG FIXES]
-    - Makefile.PL does not work on some environments
+    - Makefile.PL did not work on some environments
     - block -> {} and FILTER BLOCK were not consistent with normal macros
 
     [CHANGES]

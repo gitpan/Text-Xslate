@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1043';
+our $VERSION = '0.1044';
 
 use Carp       ();
 use File::Spec ();
@@ -129,7 +129,7 @@ sub new {
         warnings::warnif(misc => "$class: Unknown option(s): " . join ' ', @unknowns);
     }
 
-    if(!ref $args{path}) {
+    if(ref($args{path}) ne 'ARRAY') {
         $args{path} = [$args{path}];
     }
 
@@ -374,7 +374,7 @@ sub _load_compiled {
             my $dep_mtime = (stat $value)[_ST_MTIME];
             if(!defined $dep_mtime) {
                 $dep_mtime = '+inf'; # force reload
-                Carp::carp("Xslate: failed to stat $value (ignored): $!");
+                Carp::carp("Xslate: Failed to stat $value (ignored): $!");
             }
             if($dep_mtime > $threshold_mtime){
                 printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
@@ -481,7 +481,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1043.
+This document describes Text::Xslate version 0.1044.
 
 =head1 SYNOPSIS
 
@@ -582,10 +582,10 @@ Here is a result of F<benchmark/others.pl> to compare various template engines.
 You can see Xslate is 36 times faster than Template-Toolkit, and 4 times faster
 than HTML::Template::Pro and Text::ClearSilver, which are implemented in XS.
 
-=head3 High extensibility
+=head3 Auto HTML escaping
 
-Xslate is highly extensible. You can add functions and methods to the template
-engine and even add a new syntax via extending the parser.
+All the template expressions the engine interpolates into templates are
+html-escaped automatically, so the output has no possibility to XSS by default.
 
 =head3 Template cascading
 
@@ -594,6 +594,11 @@ templates with block modifiers. It is like traditional template inclusion,
 but is more powerful.
 
 This mechanism is also called as template inheritance.
+
+=head3 High extensibility
+
+Xslate is highly extensible. You can add functions and methods to the template
+engine and even add a new syntax via extending the parser.
 
 =head1 INTERFACE
 
@@ -609,8 +614,8 @@ Possible options are:
 
 =item C<< path => \@path // ['.'] >>
 
-Specifies the include paths, which may be directory names or HASH references
-which contain C<< $file_name => $content >> mapping.
+Specifies the include paths, which may be directory names or virtual paths,
+i.e. HASH references which contain C<< $file_name => $content >> mapping.
 
 =item C<< cache => $level // 1 >>
 

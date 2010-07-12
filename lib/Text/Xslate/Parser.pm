@@ -435,7 +435,7 @@ sub init_basic_operators {
     $parser->infix('cmp', 150);
     $parser->infix('~~',  150);
 
-    $parser->infix('|',  140, \&led_bar);
+    $parser->infix('|',  140, \&led_pipe);
 
     $parser->infix('&&', 130)->is_logical(1);
 
@@ -564,17 +564,14 @@ sub look_ahead {
     elsif(s/\A $COMMENT //xmso) {
         goto &look_ahead; # tail recursion
     }
-    elsif(s/\A ($NUMBER)//xmso){
-        return [ number => $1 ];
-    }
-    elsif(s/\A ($STRING)//xmso){
-        return [ string => $1 ];
+    elsif(s/\A ($NUMBER | $STRING)//xmso){
+        return [ literal => $1 ];
     }
     elsif(s/\A ($OPERATOR_TOKEN)//xmso){
         return [ operator => $1 ];
     }
     elsif(s/\A (\S+)//xms) {
-        $parser->_error("Oops: Unexpected lex symbol '$1'");
+        Carp::confess("Oops: Unexpected lex symbol '$1'");
     }
     else { # empty
         return [ special => '(end)' ];
@@ -606,7 +603,7 @@ sub advance {
     my $proto;
 
     if( $arity eq "name" && $parser->next_token->[1] eq "=>" ) {
-        $arity = "string";
+        $arity = "literal";
     }
 
     print STDOUT "[$arity => $value]\n" if _DUMP_TOKEN;
@@ -623,14 +620,13 @@ sub advance {
             $parser->_error("Unknown operator '$value'");
         }
     }
-    elsif($arity eq "string" or $arity eq "number") {
+    elsif($arity eq "literal") {
         $proto = $symtab->{"(literal)"};
-        $arity = "literal";
         push @extra, value => $parser->parse_literal($value);
     }
 
     if(not defined $proto) {
-        Carp::confess("Panic: Unexpected token: $value ($arity)");
+        Carp::confess("Oops: Unexpected token: $value ($arity)");
     }
 
     return $parser->token( $proto->clone(
@@ -822,7 +818,7 @@ sub led_call {
     return $call;
 }
 
-sub led_bar { # filter
+sub led_pipe { # filter
     my($parser, $symbol, $left) = @_;
     # a | b -> b(a)
     return $parser->call($parser->expression($symbol->lbp), $left);

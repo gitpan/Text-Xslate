@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1043';
+our $VERSION = '0.1044';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -265,9 +265,12 @@ sub _assemble {
     sub escaped_string; *escaped_string = \&mark_raw;
     sub mark_raw {
         my($str) = @_;
-        return ref($str) eq $esc_class
-            ? $str
-            : bless \$str, $esc_class;
+        if(defined $str) {
+            return ref($str) eq $esc_class
+                ? $str
+                : bless \$str, $esc_class;
+        }
+        return $str; # undef
     }
     sub unmark_raw {
         my($str) = @_;
@@ -402,7 +405,7 @@ sub tx_all_deps_are_fresh {
         next unless defined $deppath;
 
         my $mtime = ( stat( $deppath ) )[9];
-        if ( $mtime > $cache_mtime ) {
+        if ( defined($mtime) and $mtime > $cache_mtime ) {
             my $main_cache = $tmpl->[ TXo_CACHEPATH ];
             if ( $i != TXo_FULLPATH and $main_cache ) {
                 unlink $main_cache or warn $!;
@@ -519,7 +522,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1043.
+This document describes Text::Xslate::PP version 0.1044.
 
 =head1 DESCRIPTION
 
