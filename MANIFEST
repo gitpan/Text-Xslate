@@ -76,6 +76,7 @@ lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
 lib/Text/Xslate/PP/Type/Pair.pm
 lib/Text/Xslate/PP/Type/Raw.pm
+lib/Text/Xslate/Runner.pm
 lib/Text/Xslate/Symbol.pm
 lib/Text/Xslate/Syntax/Kolon.pm
 lib/Text/Xslate/Syntax/Metakolon.pm
@@ -166,6 +167,7 @@ t/040_tterse/016_call.t
 t/040_tterse/017_filter.t
 t/040_tterse/018_process.t
 t/040_tterse/019_switch.t
+t/040_tterse/020_chomp.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
 t/050_builtins/003_autobox_w_cb.t
@@ -175,6 +177,8 @@ t/100_plugin/003_bridge.t
 t/100_plugin/100_error.t
 t/200_app/001_hello.t
 t/200_app/002_tree.t
+t/200_app/003_runner.t
+t/200_app/simple/dont_touch.tx
 t/200_app/simple/goodbye.tx
 t/200_app/simple/hello.tx
 t/300_examples/001_basic.t

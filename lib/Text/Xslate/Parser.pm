@@ -18,8 +18,6 @@ use constant _DUMP_TOKEN => scalar($DEBUG =~ /\b dump=token \b/xmsi);
 
 our @CARP_NOT = qw(Text::Xslate::Compiler Text::Xslate::Symbol);
 
-my $IDENT = qr/(?: (?:[A-Za-z_]|\$\~?) [A-Za-z0-9_]* )/xms;
-
 # Operator tokens that the parser recognizes.
 # All the single characters are tokanized as an operator.
 my $OPERATOR_TOKEN = sprintf '(?:%s|[^ \t\r\n])', join('|', map{ quotemeta } qw(
@@ -46,6 +44,18 @@ my $CHOMP_FLAGS = qr/-/xms; # should support [-=~+] like Template-Toolkit?
 my $COMMENT = qr/\# [^\n;]* (?=[;\n])?/xms;
 
 my $CODE    = qr/ (?: (?: $STRING | [^'"] )*? ) /xms; # ' for poor editors
+
+has identity_pattern => (
+    is  => 'ro',
+    isa => 'RegexpRef',
+
+    builder  => '_build_identity_pattern',
+    init_arg => undef,
+);
+
+sub _build_identity_pattern {
+    return qr/(?: (?:[A-Za-z_]|\$\~?) [A-Za-z0-9_]* )/xms;
+}
 
 has [qw(compiler engine)] => (
     is       => 'rw',
@@ -98,10 +108,18 @@ has next_token => ( # to peek the next token
     init_arg => undef,
 );
 
-has [qw(following_newline statement_is_finished)] => (
+has statement_is_finished => (
     is  => 'rw',
     isa => 'Bool',
 
+    init_arg => undef,
+);
+
+has following_newline => (
+    is  => 'rw',
+    isa => 'Int',
+
+    default  => 0,
     init_arg => undef,
 );
 
@@ -200,9 +218,8 @@ sub split :method {
     while($_) {
         if($in_tag) {
             if(s/$lex_tag_end//xms) {
-                $in_tag = 0;
-
                 my($code, $chomp) = ($1, $2);
+                $in_tag = 0;
 
                 push @tokens, [ code => $code ];
                 if($chomp) {
@@ -210,13 +227,7 @@ sub split :method {
                 }
             }
             else {
-                # calculate line number
-                my $orig_src = $_[0];
-                substr $orig_src, -length($_), length($_), '';
-                my $line = ($orig_src =~ tr/\n/\n/);
-                $parser->_error("Malformed templates detected",
-                    p((split /\n/, $_)[0]), $line + 1,
-                );
+                last; # the end tag is not found
             }
         }
         # not $in_tag
@@ -238,6 +249,16 @@ sub split :method {
             confess "Oops: Unreached code, near" . p($_);
         }
     }
+
+    if($in_tag) {
+        # calculate line number
+        my $orig_src = $_[0];
+        substr $orig_src, -length($_), length($_), '';
+        my $line = ($orig_src =~ tr/\n/\n/);
+        $parser->_error("Malformed templates detected",
+            neat((split /\n/, $_)[0]), ++$line,
+        );
+    }
     #p(\@tokens);
     return \@tokens;
 }
@@ -258,35 +279,58 @@ sub preprocess {
         my($type, $s) = @{ $tokens_ref->[$i] };
 
         if($type eq 'text') {
+            my $p;
+            my $has_nl = 0;
+
+            # postchomp
+            if($i >= 1
+                    and ($p = $tokens_ref->[$i-1])->[0] eq 'postchomp') {
+                # [ CODE ][*][ TEXT    ]
+                # <: ...  -:>  \nfoobar
+                #            ^^^^
+                $s =~ s/\A [ \t]* (\n)//xms;
+                if($1) {
+                    $has_nl++;
+                }
+            }
+
+            # prechomp
+            if(($i+1) < @{$tokens_ref}
+                    and ($p = $tokens_ref->[$i+1])->[0] eq 'prechomp') {
+                if($s !~ / [^ \t] /xms) {
+                    #   HERE
+                    # [ TEXT ][*][ CODE ]
+                    #         <:- ...  :>
+                    # ^^^^^^^^
+                    $s = '';
+                }
+                else {
+                    #   HERE
+                    # [ TEXT ][*][ CODE ]
+                    #       \n<:- ...  :>
+                    #       ^^
+                    $has_nl += chomp $s;
+                }
+            }
+            elsif(($i+2) < @{$tokens_ref}
+                    and ($p = $tokens_ref->[$i+2])->[0] eq 'prechomp'
+                    and ($p = $tokens_ref->[$i+1])->[0] eq 'text'
+                    and $p->[1] !~ / [^ \t] /xms) {
+                #   HERE
+                # [ TEXT ][ TEXT ][*][ CODE ]
+                #       \n        <:- ...  :>
+                #       ^^^^^^^^^^
+                $p->[1] = '';
+                $has_nl += chomp $s;
+            }
+
             $s =~ s/(["\\])/\\$1/gxms; # " for poor editors
 
-            # $s may have  single new line
-            my $nl = ($s =~ s/\n/\\n/xms);
-
-            my $p = $tokens_ref->[$i-1]; # pre-token
-            if(defined($p) && $p->[0] eq 'postchomp') {
-                # <: ... -:>  \nfoobar
-                #           ^^^^
-                $s =~ s/\A [ \t]* \\n//xms;
-            }
-
-            if($nl && defined($p = $tokens_ref->[$i+1])) {
-                if($p->[0] eq 'prechomp') {
-                    # \n  <:- ... -:>
-                    # ^^^^
-                    $s =~ s/\\n [ \t]* \z//xms;
-                }
-                elsif($p->[1] =~ /\A [ \t]+ \z/xms){
-                    my $nn = $tokens_ref->[$i+2];
-                    if(defined($nn) && $nn->[0] eq 'prechomp') {
-                        $p->[1] = '';               # chomp the next
-                        $s =~ s/\\n [ \t]* \z//xms; # chomp this
-                    }
-                }
-            }
+            # $s may have single new line
+            $has_nl += ($s =~ s/\n/\\n/xms);
 
             $code .= qq{print_raw "$s";} if length($s);
-            $code .= qq{\n} if $nl;
+            $code .= qq{\n} if $has_nl;
         }
         elsif($type eq 'code') {
             # shortcut commands
@@ -323,7 +367,7 @@ sub parse {
     my($parser, $input, %args) = @_;
 
     $parser->file( $args{file} || \$input );
-    $parser->line( $args{line} || 1 );
+    $parser->line(1);
     $parser->init_scope();
     $parser->in_given(0);
 
@@ -360,18 +404,12 @@ sub _init_basic_symbols {
     $parser->symbol('(end)')->is_block_end(1); # EOF
 
     # prototypes of value symbols
-    my $s;
-    $s = $parser->symbol('(name)');
-    $s->arity('name');
-    $s->is_value(1);
-
-    $s = $parser->symbol('(variable)');
-    $s->arity('variable');
-    $s->is_value(1);
-
-    $s = $parser->symbol('(literal)');
-    $s->arity('literal');
-    $s->is_value(1);
+    foreach my $type qw(name variable literal) {
+        my $s = $parser->symbol("($type)");
+        $s->arity($type);
+        $s->set_nud( $parser->can("nud_$type") );
+        $s->is_value(1);
+    }
 
     # common separators
     $parser->symbol(';');
@@ -392,6 +430,10 @@ sub _init_basic_symbols {
     $parser->define_literal(nil   => undef);
     $parser->define_literal(true  => 1);
     $parser->define_literal(false => 0);
+
+    # special tokens
+    $parser->symbol('__FILE__')->set_nud(\&nud_current_file);
+    $parser->symbol('__LINE__')->set_nud(\&nud_current_line);
 
     return;
 }
@@ -550,15 +592,10 @@ sub look_ahead {
 
     my $i = 0;
     s{\G (\s) }{ $1 eq "\n" and ++$i; "" }xmsge;
-    if($i) {
-        $parser->following_newline(1);
-        $parser->line( $parser->line + $i );
-    }
-    else {
-        $parser->following_newline(0);
-    }
+    $parser->following_newline($i);
 
-    if(s/\A ($IDENT)//xmso){
+    my $id_rx = $parser->identity_pattern;
+    if(s/\A ($id_rx)//xms){
         return [ name => $1 ];
     }
     elsif(s/\A $COMMENT //xmso) {
@@ -595,7 +632,8 @@ sub advance {
     if($t->[0] eq 'special') {
         return $parser->token( $symtab->{ $t->[1] } );
     }
-    $parser->statement_is_finished( $parser->following_newline );
+    $parser->statement_is_finished( $parser->following_newline != 0 );
+    $parser->line( $parser->line + $parser->following_newline );
 
     $parser->next_token( $parser->look_ahead() );
 
@@ -640,6 +678,25 @@ sub advance {
 sub parse_literal {
     my($parser, $literal) = @_;
     return literal_to_value($literal);
+}
+
+sub nud_name {
+    my($parser, $symbol) = @_;
+    return $symbol->clone(
+        arity => 'name',
+    );
+}
+sub nud_variable {
+    my($parser, $symbol) = @_;
+    return $symbol->clone(
+        arity => 'variable',
+    );
+}
+sub nud_literal {
+    my($parser, $symbol) = @_;
+    return $symbol->clone(
+        arity => 'literal',
+    );
 }
 
 sub default_nud {
@@ -964,17 +1021,11 @@ sub binary {
     );
 }
 
-sub nud_name {
-    my($parser, $s) = @_;
-    return $s->clone(arity => 'name');
-}
-
 sub define_function {
     my($parser, @names) = @_;
 
     foreach my $name(@names) {
-        my $s = $parser->symbol($name);
-        $s->set_nud(\&nud_name);
+        $parser->symbol($name)->set_nud(\&nud_name);
     }
     return;
 }
@@ -1183,6 +1234,23 @@ sub nud_lambda {
     return $symbol->clone(
         arity => 'lambda',
         first => $pointy,
+    );
+}
+
+sub nud_current_file {
+    my($self, $symbol) = @_;
+    my $file = $self->file;
+    return $symbol->clone(
+        arity => 'literal',
+        value => ref($file) ? '<string>' : $file,
+    );
+}
+
+sub nud_current_line {
+    my($self, $symbol) = @_;
+    return $symbol->clone(
+        arity => 'literal',
+        value => $self->line,
     );
 }
 
@@ -1786,7 +1854,7 @@ Text::Xslate::Parser - The base class of template parsers
 
 =head1 DESCRIPTION
 
-This is a parser to make the abstract syntax tree from templates.
+This is a parser to build the abstract syntax tree from templates.
 
 The basis of the parser is Top Down Operator Precedence.
 
@@ -1795,5 +1863,7 @@ The basis of the parser is Top Down Operator Precedence.
 L<http://javascript.crockford.com/tdop/tdop.html> - Top Down Operator Precedence (Douglas Crockford)
 
 L<Text::Xslate>
+
+L<Text::Xslate::Compiler>
 
 =cut

@@ -5,6 +5,10 @@ use Scalar::Util ();
 
 extends qw(Text::Xslate::Parser);
 
+sub _build_identity_pattern {
+    return qr/(?: [A-Za-z_] [A-Za-z0-9_]* )/xms;
+}
+
 # [% ... %] and %% ...
 sub _build_line_start { '%%' }
 sub _build_tag_start  { '[%' }
@@ -117,11 +121,29 @@ around advance => sub {
     return $super->($parser, $id);
 };
 
+sub default_nud {
+    my($parser, $symbol) = @_;
+    return $symbol->clone(
+        arity => 'variable',
+    );
+}
+
 sub nud_dollar {
-    my($self, $symbol) = @_;
-    $self->advance("{");
-    my $expr = $self->expression(0);
-    $self->advance("}");
+    my($parser, $symbol) = @_;
+    my $expr;
+    my $t = $parser->token;
+    if($t->id eq "{") {
+        $parser->advance("{");
+        $expr = $parser->expression(0);
+        $parser->advance("}");
+    }
+    else {
+        if(!any_in($t->arity, qw(name variable))) {
+            $parser->_unexpected("a name", $t);
+        }
+        $parser->advance();
+        $expr = $t->clone( arity => 'variable' );
+    }
     return $expr;
 }
 
@@ -460,7 +482,7 @@ sub std_macro {
 
 # WRAPPER "foo.tt" ...  END
 # is
-# cascade "foo.tt" { content => content@xxx() }
+# cascade "foo.tt" { content => lambda@xxx() }
 # macro content@xxx -> { ... }
 sub std_wrapper {
     my($parser, $symbol) = @_;
@@ -526,12 +548,7 @@ sub wrap {
 sub std_filter {
     my($parser, $symbol) = @_;
 
-    my $t = $parser->token;
-    if($t->arity ne 'name') {
-        $parser->_error("Expected filter name, not $t");
-    }
-    my $filter = $t->nud($parser);
-    $parser->advance();
+    my $filter = $parser->expression(0);
 
     my $proc = $parser->lambda($symbol);
 
@@ -541,7 +558,7 @@ sub std_filter {
 
     my $callmacro  = $parser->call($proc->first);
 
-    if($filter eq 'html') {
+    if($filter->id eq 'html') {
         # for compatibility with TT2
         $filter = 'unmark_raw';
     }

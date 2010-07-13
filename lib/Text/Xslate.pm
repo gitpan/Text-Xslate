@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1044';
+our $VERSION = '0.1045';
 
 use Carp       ();
 use File::Spec ();
@@ -202,7 +202,7 @@ sub find_file {
         if(ref $p eq 'HASH') {
             defined(my $content = $p->{$file}) or next;
             $fullpath   = \$content;
-            $orig_mtime = '+inf'; # always fresh
+            $orig_mtime = 0; # always fresh
         }
         else {
             $fullpath = File::Spec->catfile($p, $file);
@@ -481,7 +481,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1044.
+This document describes Text::Xslate version 0.1045.
 
 =head1 SYNOPSIS
 
@@ -822,8 +822,8 @@ to use C<unmark_raw> to ensure expressions to be html-escaped.
 
 =head2 Application
 
-C<App::xslate> is provided as a CLI to the Text::Xslate module, which is
-used to process directory trees or evaluate one liners.
+The C<xslate(1)> command is provided as a CLI to the Text::Xslate module,
+which is used to process directory trees or to evaluate one liners.
 For example:
 
     $ xslate -D name=value -o dest_path src_path

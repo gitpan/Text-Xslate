@@ -91,6 +91,12 @@ like $@, qr/Malformed/;
 like $@, qr/"Xslate'/; # " for poor editors
 
 eval {
+    $tx->render_string('<:');
+}; # " for poor editors
+like $@, qr/Malformed/;
+like $@, qr/<:/;
+
+eval {
     $tx->render_string(<<'T');
 Hello, <: foo(42 :>
 T
@@ -202,5 +208,15 @@ eval {
     $tx->render_string('<: for $data -> $i { $i~.foobar } :>');
 };
 like $@, qr/\b foobar \b/xms;
+
+$tx = Text::Xslate->new(
+    syntax => 'TTerse',
+    cache  => 0,
+);
+
+eval {
+    $tx->render_string('[% $~foo %]');
+};
+like $@, qr/Expected a name/;
 
 done_testing;
