@@ -69,14 +69,14 @@ my @data = (
     ['<: 30 max ($value0 != 0 ? 10 : 20) :>', 30 ],
 );
 
+my %vars = (
+    value0  =>  0,
+    value10 => 10,
+    value20 => 20,
+);
 foreach my $pair(@data) {
     my($in, $out) = @$pair;
 
-    my %vars = (
-        value0  =>  0,
-        value10 => 10,
-        value20 => 20,
-    );
     is $tx->render_string($in, \%vars), $out or diag $in;
 }
 

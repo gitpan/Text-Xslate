@@ -33,6 +33,7 @@ my $OPERATOR_TOKEN = sprintf '(?:%s|[^ \t\r\n])', join('|', map{ quotemeta } qw(
     -> =>
     ::
     ++ --
+    +| +& +^ +< +> +~
 ), ',');
 
 my %shortcut_table = (
@@ -452,17 +453,22 @@ sub init_basic_operators {
 
     $parser->prefix('(', 256, \&nud_paren);
 
-    $parser->prefix('!', 200)->is_logical(1);
-    $parser->prefix('+', 200);
-    $parser->prefix('-', 200);
+    $parser->prefix('!',  200)->is_logical(1);
+    $parser->prefix('+',  200);
+    $parser->prefix('-',  200);
+    $parser->prefix('+^', 200); # numeric bitwise negate
 
-    $parser->infix('*', 190);
-    $parser->infix('/', 190);
-    $parser->infix('%', 190);
+    $parser->infix('*',  190);
+    $parser->infix('/',  190);
+    $parser->infix('%',  190);
+    $parser->infix('+&', 190); # numeric bitwise and
 
-    $parser->infix('+', 180);
-    $parser->infix('-', 180);
-    $parser->infix('~', 180); # connect
+    $parser->infix('+',  180);
+    $parser->infix('-',  180);
+    $parser->infix('~',  180); # connect
+    $parser->infix('+|', 180); # numeric bitwise or
+    $parser->infix('+^', 180); # numeric bitwise xor
+
 
     $parser->prefix('defined', 170, \&nud_defined); # named unary operator
 

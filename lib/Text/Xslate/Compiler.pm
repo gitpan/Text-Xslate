@@ -54,6 +54,10 @@ my %binary = (
 
     '~'  => 'concat',
 
+    '+|' => 'bitor',
+    '+&' => 'bitand',
+    '+^' => 'bitxor',
+
     'min' => 'lt', # a < b ? a : b
     'max' => 'gt', # a > b ? a : b
 
@@ -72,6 +76,7 @@ my %unary = (
     'not' => 'not',
     '+'   => 'noop',
     '-'   => 'minus',
+    '+^'  => 'bitneg',
 
     'max_index' => 'max_index', # for loop context vars
 );
@@ -528,6 +533,13 @@ sub _generate_name {
     }
 
     return $self->opcode( fetch_symbol => $node->id, line => $node->line );
+}
+
+sub _generate_operator {
+    my($self, $node) = @_;
+    # This method is called when an operators is used as an expression,
+    # e.g. <: + :>, so simply throws the error
+    $self->_error("Invalid expression", $node);
 }
 
 sub _can_print_optimize {
