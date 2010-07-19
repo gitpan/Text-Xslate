@@ -156,10 +156,16 @@ has parser => (
     is  => 'rw',
     isa => 'Object', # Text::Xslate::Parser
 
-    handles => [qw(file line define_function)],
+    handles => [qw(define_function)],
 
     lazy     => 1,
     builder  => '_build_parser',
+    init_arg => undef,
+);
+
+has file => (
+    is  => 'rw',
+
     init_arg => undef,
 );
 
@@ -206,7 +212,7 @@ sub lvar_use {
 
 sub filename {
     my($self) = @_;
-    my $file = $self->parser->file;
+    my $file = $self->file;
     return ref($file) ? '<string>' : $file;
 }
 
@@ -223,9 +229,9 @@ sub compile {
     local $self->{header}       = $self->{header};
     local $self->{footer}       = $self->{footer};
     local $self->{current_file} = '<string>'; # for opinfo
+    local $self->{file}         = $args{file} || \$input;
 
     my $parser = $self->parser;
-    local $parser->{file};
 
     my $header = delete $self->{header};
     my $footer = delete $self->{footer};
@@ -936,27 +942,45 @@ sub _generate_unary {
     }
 }
 
+sub _generate_field {
+    my($self, $node) = @_;
+
+    my @lhs   = $self->_expr($node->first);
+    my $field = $node->second;
+
+    # $foo.field
+    if($field->arity eq "word") {
+        return
+            @lhs,
+            $self->opcode( fetch_field_s => $field->id );
+    }
+    # $foo[expression]
+    else {
+        local $self->{lvar_id} = $self->lvar_use(1);
+        my @rhs = $self->_expr($field);
+        if($OPTIMIZE and $self->_code_is_literal(@rhs)) {
+            return
+                @lhs,
+                $self->opcode( fetch_field_s => $rhs[0][1] );
+        }
+        return
+            @lhs,
+            $self->opcode( save_to_lvar => $self->lvar_id ),
+            @rhs,
+            $self->opcode( load_lvar_to_sb => $self->lvar_id ),
+            $self->opcode( 'fetch_field' ),
+        ;
+    }
+
+}
+
 sub _generate_binary {
     my($self, $node) = @_;
 
     my @lhs = $self->_expr($node->first);
 
     my $id = $node->id;
-    if($id eq '.') {
-        return
-            @lhs,
-            $self->opcode( fetch_field_s => $node->second->id );
-    }
-    elsif(exists $binary{$id}) {
-        if($id eq "["
-                and $node->second->arity eq "literal"
-                and $node->second->id    ne "nil") {
-            # $foo[literal]
-            return
-                @lhs,
-                $self->opcode( fetch_field_s => $node->second->value );
-        }
-
+    if(exists $binary{$id}) {
         local $self->{lvar_id} = $self->lvar_use(1);
         my @rhs = $self->_expr($node->second);
         my @code = (

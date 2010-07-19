@@ -7,7 +7,7 @@ use Text::Xslate;
 my $tx = Text::Xslate->new();
 
 my @data = (
-    ['<:= $var.attr :>', 'value'],
+    ['<:= $var.field :>', 'value'],
 
     ['<:= $g.f.x :>',  'gfx'],
     ['<:= $x.f.g :>',  'xfg'],
@@ -17,7 +17,7 @@ my @data = (
     ['<:= $ary.1 :>', 20],
     ['<:= $ary.2 :>', 30],
 
-    ['<:= $var["attr"] :>',  'value'],
+    ['<:= $var["field"] :>',  'value'],
 
     ['<:= $g["f"]["x"] :>',  'gfx'],
     ['<:= $x["f"]["g"] :>',  'xfg'],
@@ -29,6 +29,15 @@ my @data = (
     ['<:= $ary[0] :>', 10],
     ['<:= $ary[1] :>', 20],
     ['<:= $ary[2] :>', 30],
+
+    ['<: constant foo   = "xxx"; $var[foo]   :>', "yyy"],
+    ['<: constant field = "xxx"; $var[field] :>', "yyy"],
+
+    ['<: constant foo   = "xxx"; $var.foo   :>', "FOO"],
+    ['<: constant field = "xxx"; $var.field :>', "value"],
+
+    ['<: $var.if :>',  'IF'],
+    ['<: $var.nil :>', 'NIL'],
 
     ['<: $a :>', 'as_string'],
 );
@@ -43,20 +52,26 @@ my @data = (
     );
 }
 
+my %vars = (
+    var => {
+        foo   => 'FOO',
+        field => 'value',
+        xxx   => 'yyy',
+        if    => 'IF',
+        nil   => 'NIL',
+    },
+
+    g => { f => { x => 'gfx' } },
+    x => { f => { g => 'xfg' } },
+    a => A->new(foo => 'bar'),
+
+    ary => [10, 20, 30],
+
+    foo => 'foo',
+);
+
 foreach my $pair(@data) {
     my($in, $out) = @$pair;
-
-    my %vars = (
-        var => { attr => 'value' },
-
-        g => { f => { x => 'gfx' } },
-        x => { f => { g => 'xfg' } },
-        a => A->new(foo => 'bar'),
-
-        ary => [10, 20, 30],
-
-        foo => 'foo',
-    );
 
     is $tx->render_string($in, \%vars), $out or diag $in;
 }

@@ -330,7 +330,7 @@ sub preprocess {
             # $s may have single new line
             $has_nl += ($s =~ s/\n/\\n/xms);
 
-            $code .= qq{print_raw "$s";} if length($s);
+            $code .= qq{print_raw "$s";}; # must set even if $s is empty
             $code .= qq{\n} if $has_nl;
         }
         elsif($type eq 'code') {
@@ -367,15 +367,15 @@ sub preprocess {
 sub parse {
     my($parser, $input, %args) = @_;
 
-    $parser->file( $args{file} || \$input );
-    $parser->line(1);
-    $parser->init_scope();
-    $parser->in_given(0);
-
+    local $parser->{file}     = $args{file} || \$input;
+    local $parser->{line}     = $args{line} || 1;
+    local $parser->{in_given} = 0;
+    local $parser->{scope}        = [ map { +{ %{$_} } } @{ $parser->scope } ];
     local $parser->{symbol_table} = { %{ $parser->symbol_table } };
     local $parser->{near_token};
     local $parser->{next_token};
     local $parser->{token};
+    local $parser->{input};
 
     $parser->input( $parser->preprocess($input) );
 
@@ -815,6 +815,7 @@ sub led_ternary {
 sub is_valid_field {
     my($parser, $token) = @_;
     my $arity = $token->arity;
+
     if($arity eq "name") {
         return 1;
     }
@@ -832,7 +833,11 @@ sub led_dot {
         $parser->_unexpected("a field name", $t);
     }
 
-    my $dot = $parser->binary($symbol, $left, $t->clone(arity => 'literal'));
+    my $dot = $symbol->clone(
+        arity  => "field",
+        first  => $left,
+        second => $t->clone(arity => 'word'),
+    );
 
     $t = $parser->advance();
     if($t->id eq "(") {
@@ -845,10 +850,14 @@ sub led_dot {
     return $dot;
 }
 
-sub led_fetch {
+sub led_fetch { # $h[$field]
     my($parser, $symbol, $left) = @_;
 
-    my $fetch = $parser->binary($symbol, $left, $parser->expression(0));
+    my $fetch = $symbol->clone(
+        arity  => "field",
+        first  => $left,
+        second => $parser->expression(0),
+    );
     $parser->advance("]");
     return $fetch;
 }
@@ -905,13 +914,18 @@ sub nud_prefix {
     return $un;
 }
 
+sub nil {
+    my($parser) = @_;
+    return $parser->symbol('nil')->nud($parser);
+}
+
 sub nud_defined {
     my($parser, $symbol) = @_;
     $parser->reserve( $symbol->clone() );
     return $parser->binary(
         '!=',
         $parser->expression($symbol->ubp),
-        $parser->symbol('nil'),
+        $parser->nil,
    );
 }
 
@@ -919,7 +933,8 @@ sub define_literal{
     my($parser, $id, $value) = @_;
 
     my $symbol = $parser->symbol($id);
-    $symbol->arity('literal');
+    $symbol->arity('name');
+    $symbol->set_nud(\&nud_literal);
     $symbol->value($value);
     return $symbol;
 }
@@ -1552,7 +1567,7 @@ sub build_given_body {
             }
         }
         else { # default
-            $when->first( $parser->symbol('true') );
+            $when->first( $parser->symbol('true')->nud($parser) );
             $else = $when;
             next;
         }
@@ -1776,7 +1791,7 @@ sub iterator_peek_prev {
     return $parser->symbol('?')->clone(
         arity  => 'if',
         first  => $parser->iterator_is_first($iterator),
-        second => [$parser->symbol('nil')],
+        second => [$parser->nil],
         third  => [$parser->_iterator_peek($iterator, -1)],
     );
 }

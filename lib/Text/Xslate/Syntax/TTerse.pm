@@ -162,29 +162,16 @@ sub is_valid_field {
 sub led_dot {
     my($parser, $symbol, $left) = @_;
 
-    my $rhs_starts_dollar = ($parser->token->id =~ qr/\A \$/xms);
-
-    my $rhs;
-
-    if($rhs_starts_dollar) { # var.$foo, var.${foo}
-        $rhs = $parser->expression( $symbol->lbp );
-        return $parser->binary("[", $left, $rhs);
-    }
-    else { # var.foo
-        $rhs = $parser->token->clone( arity => 'literal' );
-        $parser->advance();
+    # special case: foo.$field, foo.${expr}
+    if($parser->token->id eq '$') {
+        return $symbol->clone(
+            arity  => "field",
+            first  => $left,
+            second => $parser->expression( $symbol->lbp ),
+        );
     }
 
-    my $dot = $parser->binary($symbol, $left, $rhs);
-
-    my $t = $parser->token();
-    if($t->id eq "(") { # foo.method()
-        $parser->advance(); # "("
-        $dot->third( $parser->expression_list() );
-        $parser->advance(")");
-        $dot->arity("methodcall");
-    }
-    return $dot;
+    return $parser->SUPER::led_dot($symbol, $left);
 }
 
 sub led_concat {
@@ -851,7 +838,7 @@ L<Template::Tiny>
 
 L<Text::Xslate::Bridge::TT2>
 
-L<Text::Xslate::Bridge::TT2::Like>
+L<Text::Xslate::Bridge::TT2Like>
 
 L<Text::Xslate::Bridge::Alloy>
 

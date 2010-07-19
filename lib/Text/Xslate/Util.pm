@@ -50,14 +50,6 @@ sub unmark_raw;  # XS
 sub html_escape; # XS
 sub escaped_string; *escaped_string = \&mark_raw;
 
-sub Text::Xslate::EscapedString::new {
-    my($class, $str) = @_;
-    warnings::warnif(deprecated
-        => 'Text::Xslate::EscapedString->new has been deprecated. '
-         . 'Use Text::Xslate::Type::Raw->new instead.');
-    return Text::Xslate::Type::Raw->new($str);
-}
-
 sub neat {
     my($s) = @_;
     if ( defined $s ) {
@@ -75,7 +67,8 @@ sub neat {
 
 sub is_int {
     my($s) = @_;
-    return defined($s) && $s =~ /\A [+-]? [0-9]+ \z/xms;
+    # XXX: '+1' must be interpreted as a string
+    return defined($s) && $s =~ /\A -? [0-9]+ \z/xms;
 }
 
 sub any_in {
@@ -131,7 +124,8 @@ sub value_to_literal {
     my($value) = @_;
     return 'undef' if not defined $value;
 
-    if($value =~ /\A [+-]? $NUMBER \z/xmso){
+    # XXX: '+1' must be interpreted as a string
+    if($value =~ /\A -? $NUMBER \z/xmso){
         return $value;
     }
     else {
