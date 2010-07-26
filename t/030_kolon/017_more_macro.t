@@ -140,11 +140,13 @@ X
 
     [ <<'T', { }, <<'X', "a macro returns escaped string" ],
 <: macro em ->($x) { :><em><: $x :></em><: } -:>
-    <: "foo" | em | raw  :>
-    <: "bar" | em | html :>
+    <: "foo" | em        :>
+    <: "bar" | em | raw  :>
+    <: "baz" | em | html :>
 T
     <em>foo</em>
     <em>bar</em>
+    <em>baz</em>
 X
 
     [ <<'T', { }, <<'X', "save macro" ],
@@ -156,6 +158,16 @@ T
     <em>foo</em>
 X
 
+
+    [<<'T', { value10 => 10 }, '100'],
+: macro foo ->($x) { $x.foo }
+: foo( { foo => $value10 == 10 ? 100 : $value10 == 20 ? 200 : 300 } )
+T
+
+    [<<'T', { value20 => 20 }, '200'],
+: macro foo ->($x) { $x.foo }
+: foo( { foo => $value20 == 10 ? 100 : $value20 == 20 ? 200 : 300 } )
+T
 );
 
 foreach my $d(@set) {

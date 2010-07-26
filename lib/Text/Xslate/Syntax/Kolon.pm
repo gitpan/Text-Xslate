@@ -26,7 +26,7 @@ Text::Xslate::Syntax::Kolon - The default template syntax
 
 =head1 DESCRIPTION
 
-Kolon is the default syntax, using C<< <: ... :> >> tags and C<< : ... >> line code.
+Kolon is the default syntax, using C<< <: ... :> >> tags and C<< : ... >> line code. In this syntax all the futures in Xslate are available.
 
 =head1 SYNTAX
 
@@ -53,7 +53,7 @@ C<< $obj["accessor"] >> syntax may be call object methods.
 
 Special:
 
-    : nil   # indicates "nothing"
+    : nil   # as undef, indicating "nothing"
     : true  # as the integer 1
     : false # as the integer 0
 
@@ -66,8 +66,9 @@ Number:
 
     : 42
     : 3.14
-    : 0xFF
-    : 0b1010
+    : 0xFF   # hex
+    : 0777   # octal
+    : 0b1010 # binary
 
 Array:
 
@@ -77,8 +78,8 @@ Hash:
 
     : foo({ foo => "bar" })
 
-C<{ ... }> is always parsed as hash literals, so you need not to use prefix C<+>
-as Perl sometimes requires:
+Note that C<{ ... }> is always parsed as hash literals, so you need not
+to use prefix:<+> as Perl sometimes requires:
 
     :  {}.kv(); # ok
     : +{}.kv(); # also ok
@@ -154,9 +155,15 @@ These two statements has the same semantics, so you cannot modify C<$foo>.
 
 There is C<for> loops that are like Perl's C<foreach>.
 
-    : # $data must be an ARRAY reference
+    : # iterate over an ARRAY reference
     : for $data -> $item {
         [<: $item.field :>]
+    : }
+
+    : # iterate over a HASH reference
+    : # You must specify how to iterate it (.keys(), .values() or .kv())
+    : for $data.keys() -> $key {
+        <: $key :>=<: $data[$key] :>
     : }
 
 You can get the iterator index in C<for> statements as C<$~ITERATOR_VAR>:
@@ -170,7 +177,7 @@ You can get the iterator index in C<for> statements as C<$~ITERATOR_VAR>:
         : }
     : }
 
-C<$~item> is a pseudo object, so you can access its elements
+C<$~ITERATOR_VAR> is a pseudo object, so you can access its elements
 via the dot-name syntax.
 
     : for $data -> $i {
@@ -201,8 +208,8 @@ C<while> loops are also supported in the same semantics as Perl's:
 C<< while defined expr -> $item >> is interpreted as
 C<< while defined(my $item = expr) >> for convenience.
 
-    : while defined $obj.fetch() -> $item {
-        [<: $item # $item can be false-but-defined:>]
+    : while defined $dbh.fetch() -> $item {
+        [<: $item # $item can be false-but-defined :>]
     : }
 
 =head2 Conditional statements
@@ -266,7 +273,8 @@ C<< infix:<|> >> is also supported as a syntactic sugar to C<()>.
     : f(1, 2, 3) # with args
     : 42 | f     # the same as f(42)
 
-Functions are Perl's subroutines, so you can define dynamic functions:
+Functions are just Perl's subroutines, so you can define dynamic functions
+(a.k.a. dynamic filters), which is a subroutine that returns another subroutine:
 
     # code
     sub mk_indent {
@@ -284,8 +292,8 @@ Functions are Perl's subroutines, so you can define dynamic functions:
     );
 
     :# template
-    : $value | indent("> ")
-    : indent("> ")($value)
+    : $value | indent("> ") # Template-Toolkit like
+    : indent("> ")($value)  # This is also valid
 
 There are several builtin functions, which you cannot redefine:
 
@@ -329,9 +337,15 @@ For arrays:
 
 For hashes:
 
-    <: $hash.size() :>
-    <: $hash.keys()   # sorted by keys :>
-    <: $hash.values() # sorted by keys :>
+    <: $hash.size() # correspond to "scalar keys %{$hash}" in Perl :>
+
+    <: # iterate HASH references by keys, values and key-value pairs :>
+    <: for $hash.keys() -> $key {  # sorted by keys :>
+        <: $key :>
+    <: } :>
+    <: for $hash.values() -> $value { # sorted by keys :>
+        <: $value :>
+    <: } :>
     <: for $hash.kv() -> $pair { # sorted by keys :>
         <: # $pair is a pair type with 'key' and 'value' fields -:>
         <: $pair.key :> = <: $pair.value :>
@@ -474,7 +488,7 @@ because template cascading is statically processed.
 
 Macros are supported, which are called in the same way as functions and
 return a C<raw> string. Macros returns what their bodies render, so
-macros cannot returns references nor objects including other macros.
+they cannot return references nor objects including other macros.
 
     : macro add ->($x, $y) {
     :   $x + $y;
@@ -501,7 +515,7 @@ C<unmark_raw> to remove C<raw-ness> from the values.
     : em("foo")               # renders "<em>foo</em>"
     : em("foo") | unmark_raw  # renders "&lt;em&gt;foo&lt;em&gt;"
 
-Macros are first-class objects, so you can bind them to symbols.
+Because macros are first-class objects, you can bind them to symbols.
 
     <: macro foo -> { "foo" }
        macro bar -> { "bar" }
@@ -512,7 +526,8 @@ Macros are first-class objects, so you can bind them to symbols.
     : $dispatcher{$key}()
 
 Anonymous macros are also supported, although they can return
-only strings.
+only strings. They might be useful for callbacks to high-level
+functions or methods.
 
     <: -> $x, $y { $x + $y }(1, 2) # => 3 :>
 
@@ -528,8 +543,10 @@ Template:
 Output:
         &lt;em&gt;Hello, world!&lt;/em&gt;
 
-See also L<Text::Xslate::Cookbook/"Using FillInForm"> for
+See also L<Text::Xslate::Manual::Cookbook/"Using FillInForm"> for
 another example to use this block filter syntax.
+
+Note that closures are not supported.
 
 =head2 Comments
 
@@ -547,7 +564,5 @@ Comments start from C<#> to a new line or semicolon.
 =head1 SEE ALSO
 
 L<Text::Xslate>
-
-L<Text::Xslate::Cookbook>
 
 =cut

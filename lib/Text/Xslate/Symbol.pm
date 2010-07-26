@@ -19,7 +19,7 @@ has id => (
     required => 1,
 );
 
-has lbp => (
+has lbp => ( # left binding power
     is       => 'rw',
     isa      => 'Int',
 
@@ -27,7 +27,7 @@ has lbp => (
     default  => 0,
 );
 
-has ubp => (
+has ubp => ( # unary binding power
     is       => 'rw',
     isa      => 'Int',
 
@@ -52,6 +52,14 @@ has value => (
 #        }
 #        return $_[0]->id
 #   },
+);
+
+# some tokens have the counterpart token (e.g. '{' to '}')
+has counterpart => (
+    is  => 'rw',
+    isa => 'Str',
+
+    required => 0,
 );
 
 # flags
@@ -156,7 +164,7 @@ has assignment => (
 #);
 
 has line => (
-    is  => 'ro',
+    is  => 'rw',
     isa => 'Int',
 
     lazy    => 1,

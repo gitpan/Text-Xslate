@@ -188,6 +188,33 @@ has line => (
 
 sub symbol_class() { 'Text::Xslate::Symbol' }
 
+# the entry point
+sub parse {
+    my($parser, $input, %args) = @_;
+
+    local $parser->{file}     = $args{file} || \$input;
+    local $parser->{line}     = $args{line} || 1;
+    local $parser->{in_given} = 0;
+    local $parser->{scope}        = [ map { +{ %{$_} } } @{ $parser->scope } ];
+    local $parser->{symbol_table} = { %{ $parser->symbol_table } };
+    local $parser->{near_token};
+    local $parser->{next_token};
+    local $parser->{token};
+    local $parser->{input};
+
+    $parser->input( $parser->preprocess($input) );
+
+    $parser->next_token( $parser->tokanize() );
+    $parser->advance();
+    my $ast = $parser->statements();
+
+    if($parser->input ne '') {
+        $parser->_error("Syntax error", $parser->token);
+    }
+
+    return $ast;
+}
+
 sub trim_code {
     my($parser, $s) = @_;
 
@@ -364,32 +391,6 @@ sub preprocess {
     return $code;
 }
 
-sub parse {
-    my($parser, $input, %args) = @_;
-
-    local $parser->{file}     = $args{file} || \$input;
-    local $parser->{line}     = $args{line} || 1;
-    local $parser->{in_given} = 0;
-    local $parser->{scope}        = [ map { +{ %{$_} } } @{ $parser->scope } ];
-    local $parser->{symbol_table} = { %{ $parser->symbol_table } };
-    local $parser->{near_token};
-    local $parser->{next_token};
-    local $parser->{token};
-    local $parser->{input};
-
-    $parser->input( $parser->preprocess($input) );
-
-    $parser->next_token( $parser->look_ahead() );
-    $parser->advance();
-    my $ast = $parser->statements();
-
-    if($parser->input ne '') {
-        $parser->_error("Syntax error", $parser->token);
-    }
-
-    return $ast;
-}
-
 sub BUILD {
     my($parser) = @_;
     $parser->_init_basic_symbols();
@@ -409,17 +410,13 @@ sub _init_basic_symbols {
         my $s = $parser->symbol("($type)");
         $s->arity($type);
         $s->set_nud( $parser->can("nud_$type") );
-        $s->is_value(1);
     }
 
     # common separators
     $parser->symbol(';');
-    $parser->symbol('(');
-    $parser->symbol(')');
-    $parser->symbol('{');
-    $parser->symbol('}');
-    $parser->symbol('[');
-    $parser->symbol(']');
+    $parser->define_pair('(' => ')');
+    $parser->define_pair('{' => '}');
+    $parser->define_pair('[' => ']');
     $parser->symbol(',')  ->is_comma(1);
     $parser->symbol('=>') ->is_comma(1);
 
@@ -427,7 +424,7 @@ sub _init_basic_symbols {
     $parser->symbol('print')    ->set_std(\&std_command);
     $parser->symbol('print_raw')->set_std(\&std_command);
 
-    # common literals
+    # special literals
     $parser->define_literal(nil   => undef);
     $parser->define_literal(true  => 1);
     $parser->define_literal(false => 0);
@@ -506,10 +503,9 @@ sub init_basic_operators {
     $parser->assignment('||=', 100);
     $parser->assignment('//=', 100);
 
-    $parser->prefix('not', 70)->is_logical(1);
-    $parser->infix('and',  60)->is_logical(1);
-    $parser->infix('or',   50)->is_logical(1);
-
+    $parser->make_alias('!'  => 'not')->ubp(70);
+    $parser->make_alias('&&' => 'and')->lbp(60);
+    $parser->make_alias('||' => 'or') ->lbp(50);
     return;
 }
 
@@ -574,24 +570,32 @@ sub _build_iterator_element {
 
 
 sub symbol {
-    my($parser, $id, $bp) = @_;
+    my($parser, $id, $lbp) = @_;
 
-    my $s = $parser->symbol_table->{$id};
+    my $stash = $parser->symbol_table;
+    my $s     = $stash->{$id};
     if(defined $s) {
-        if($bp && $bp >= $s->lbp) {
-            $s->lbp($bp);
+        if(defined $lbp) {
+            $s->lbp($lbp);
         }
     }
-    else {
-        $s = $parser->symbol_class->new(id => $id);
-        $s->lbp($bp) if $bp;
-        $parser->symbol_table->{$id} = $s;
+    else { # create a new symbol
+        $s = $parser->symbol_class->new(id => $id, lbp => $lbp || 0);
+        $stash->{$id} = $s;
     }
 
     return $s;
 }
 
-sub look_ahead {
+sub define_pair {
+    my($parser, $left, $right) = @_;
+    $parser->symbol($left) ->counterpart($right);
+    $parser->symbol($right)->counterpart($left);
+    return;
+}
+
+# the low-level tokanizer. Don't use it directly, use advance() instead.
+sub tokanize {
     my($parser) = @_;
 
     local *_ = \$parser->{input};
@@ -605,7 +609,7 @@ sub look_ahead {
         return [ name => $1 ];
     }
     elsif(s/\A $COMMENT //xmso) {
-        goto &look_ahead; # tail recursion
+        goto &tokanize; # tail recursion
     }
     elsif(s/\A ($NUMBER | $STRING)//xmso){
         return [ literal => $1 ];
@@ -614,71 +618,72 @@ sub look_ahead {
         return [ operator => $1 ];
     }
     elsif(s/\A (\S+)//xms) {
-        Carp::confess("Oops: Unexpected lex symbol '$1'");
+        Carp::confess("Oops: Unexpected token '$1'");
     }
     else { # empty
         return [ special => '(end)' ];
     }
 }
 
+sub next_token_is {
+    my($parser, $token) = @_;
+    return $parser->next_token->[1] eq $token;
+}
+
+# the high-level tokanizer
 sub advance {
-    my($parser, $id) = @_;
+    my($parser, $expect) = @_;
 
     my $t = $parser->token;
-    if(defined($id) && $t->id ne $id) {
-        $parser->_unexpected(neat($id), $t);
+    if(defined($expect) && $t->id ne $expect) {
+        $parser->_unexpected(neat($expect), $t);
     }
 
     $parser->near_token($t);
 
-    my $symtab = $parser->symbol_table;
+    my $stash = $parser->symbol_table;
 
     $t = $parser->next_token;
 
     if($t->[0] eq 'special') {
-        return $parser->token( $symtab->{ $t->[1] } );
+        return $parser->token( $stash->{ $t->[1] } );
     }
     $parser->statement_is_finished( $parser->following_newline != 0 );
-    $parser->line( $parser->line + $parser->following_newline );
+    my $line = $parser->line( $parser->line + $parser->following_newline );
 
-    $parser->next_token( $parser->look_ahead() );
+    $parser->next_token( $parser->tokanize() );
 
-    my($arity, $value) = @{$t};
-    my $proto;
-
-    if( $arity eq "name" && $parser->next_token->[1] eq "=>" ) {
+    my($arity, $id) = @{$t};
+    if( $arity eq "name" && $parser->next_token_is("=>") ) {
         $arity = "literal";
     }
 
-    print STDOUT "[$arity => $value]\n" if _DUMP_TOKEN;
+    print STDOUT "[$arity => $id]\n" if _DUMP_TOKEN;
 
-    my @extra;
-
-    if($arity eq "name") {
-        $proto = $parser->find($value);
-        $arity = $proto->arity;
+    my $symbol;
+    if($arity eq "literal") {
+        $symbol = $parser->symbol('(literal)')->clone(
+            id    => $id,
+            value => $parser->parse_literal($id)
+        );
     }
     elsif($arity eq "operator") {
-        $proto = $symtab->{$value};
-        if(not defined $proto) {
-            $parser->_error("Unknown operator '$value'");
+        $symbol = $stash->{$id};
+        if(not defined $symbol) {
+            $parser->_error("Unknown operator '$id'");
         }
+        $symbol = $symbol->clone(
+            arity => $arity, # to make error messages clearer
+        );
     }
-    elsif($arity eq "literal") {
-        $proto = $symtab->{"(literal)"};
-        push @extra, value => $parser->parse_literal($value);
+    else { # name
+        # find_or_create() returns a cloned symbol,
+        # so there's not need to clone() here
+        $symbol = $parser->find_or_create($id);
     }
 
-    if(not defined $proto) {
-        Carp::confess("Oops: Unexpected token: $value ($arity)");
-    }
-
-    return $parser->token( $proto->clone(
-        id    => $value,
-        arity => $arity,
-        line  => $parser->line,
-        @extra,
-     ) );
+    $symbol->line($line);
+    return $parser->token($symbol);
 }
 
 sub parse_literal {
@@ -761,6 +766,7 @@ sub expression_list {
     return \@list;
 }
 
+# for left associative infix operators
 sub led_infix {
     my($parser, $symbol, $left) = @_;
     return $parser->binary( $symbol, $left, $parser->expression($symbol->lbp) );
@@ -774,6 +780,7 @@ sub infix {
     return $symbol;
 }
 
+# for right associative infix operators
 sub led_infixr {
     my($parser, $symbol, $left) = @_;
     return $parser->binary( $symbol, $left, $parser->expression($symbol->lbp - 1) );
@@ -785,6 +792,24 @@ sub infixr {
     my $symbol = $parser->symbol($id, $bp);
     $symbol->set_led($led || \&led_infixr);
     return $symbol;
+}
+
+# for prefix operators
+sub prefix {
+    my($parser, $id, $bp, $nud) = @_;
+
+    my $symbol = $parser->symbol($id);
+    $symbol->ubp($bp);
+    $symbol->set_nud($nud || \&nud_prefix);
+    return $symbol;
+}
+
+sub nud_prefix {
+    my($parser, $symbol) = @_;
+    my $un = $symbol->clone(arity => 'unary');
+    $parser->reserve($un);
+    $un->first($parser->expression($symbol->ubp));
+    return $un;
 }
 
 sub led_assignment {
@@ -800,6 +825,7 @@ sub assignment {
     return;
 }
 
+# the ternary is a right associative operator
 sub led_ternary {
     my($parser, $symbol, $left) = @_;
 
@@ -836,7 +862,7 @@ sub led_dot {
     my $dot = $symbol->clone(
         arity  => "field",
         first  => $left,
-        second => $t->clone(arity => 'word'),
+        second => $t->clone(arity => 'literal'),
     );
 
     $t = $parser->advance();
@@ -896,24 +922,6 @@ sub led_pipe { # filter
     return $parser->call($parser->expression($symbol->lbp), $left);
 }
 
-
-sub prefix {
-    my($parser, $id, $bp, $nud) = @_;
-
-    my $symbol = $parser->symbol($id);
-    $symbol->ubp($bp);
-    $symbol->set_nud($nud || \&nud_prefix);
-    return $symbol;
-}
-
-sub nud_prefix {
-    my($parser, $symbol) = @_;
-    my $un = $symbol->clone(arity => 'unary');
-    $parser->reserve($un);
-    $un->first($parser->expression($symbol->ubp));
-    return $un;
-}
-
 sub nil {
     my($parser) = @_;
     return $parser->symbol('nil')->nud($parser);
@@ -922,6 +930,7 @@ sub nil {
 sub nud_defined {
     my($parser, $symbol) = @_;
     $parser->reserve( $symbol->clone() );
+    # prefix:<defined> is a syntactic sugar to $a != nil
     return $parser->binary(
         '!=',
         $parser->expression($symbol->ubp),
@@ -929,13 +938,22 @@ sub nud_defined {
    );
 }
 
-sub define_literal{
+# for special literals (e.g. nil, true, false)
+sub nud_special {
+    my($parser, $symbol) = @_;
+    return $symbol->first;
+}
+
+sub define_literal { # special literals
     my($parser, $id, $value) = @_;
 
     my $symbol = $parser->symbol($id);
-    $symbol->arity('name');
-    $symbol->set_nud(\&nud_literal);
-    $symbol->value($value);
+    $symbol->first( $symbol->clone(
+        arity => defined($value) ? 'literal' : 'nil',
+        value => $value,
+    ) );
+    $symbol->set_nud(\&nud_special);
+    $symbol->is_defined(1);
     return $symbol;
 }
 
@@ -954,20 +972,24 @@ sub pop_scope {
 sub undefined_name {
     my($parser, $name) = @_;
     if($name =~ /\A \$/xms) {
-        return $parser->symbol_table->{'(variable)'};
+        return $parser->symbol_table->{'(variable)'}->clone(
+            id => $name,
+        );
     }
     else {
-        return $parser->symbol_table->{'(name)'};
+        return $parser->symbol_table->{'(name)'}->clone(
+            id => $name,
+        );
     }
 }
 
-sub find { # find a name from all the scopes
+sub find_or_create { # find a name from all the scopes
     my($parser, $name) = @_;
     my $s;
     foreach my $scope(reverse @{$parser->scope}){
         $s = $scope->{$name};
         if(defined $s) {
-            return $s;
+            return $s->clone();
         }
     }
     $s = $parser->symbol_table->{$name};
@@ -1116,7 +1138,7 @@ sub block {
     $parser->new_scope();
     $parser->advance("{");
     my $a = $parser->statements();
-    $parser->advance('}');
+    $parser->advance("}");
     $parser->pop_scope();
     return $a;
 }
@@ -1124,7 +1146,7 @@ sub block {
 sub nud_paren {
     my($parser, $symbol) = @_;
     my $expr = $parser->expression(0);
-    $parser->advance(')');
+    $parser->advance( $symbol->counterpart );
     return $expr;
 }
 
@@ -1134,10 +1156,9 @@ sub nud_brace {
 
     my $list = $parser->expression_list();
 
-    my $end = $symbol->id eq '{' ? '}' : ']';
-    $parser->advance($end);
+    $parser->advance($symbol->counterpart);
     return $symbol->clone(
-        arity => 'objectliteral',
+        arity => 'composer',
         first => $list,
     );
 }
@@ -1156,7 +1177,7 @@ sub nud_iterator {
             $parser->_unexpected("a field name", $t);
         }
 
-        my $generator = $parser->iterator_element->{$t->id};
+        my $generator = $parser->iterator_element->{$t->value};
         if(!$generator) {
             $parser->_error("Undefined iterator element: $t");
         }
@@ -1274,36 +1295,6 @@ sub nud_current_line {
         value => $self->line,
     );
 }
-
-#sub std_var {
-#    my($parser, $symbol) = @_;
-#    my @a;
-#    while(1) {
-#        my $name = $parser->token;
-#        if($name->arity ne "variable") {
-#            confess("Expected a new variable name, but $name is not");
-#        }
-#        $parser->define($name);
-#        $parser->advance();
-#
-#        if($parser->token->id eq "=") {
-#            my $t = $parser->token;
-#            $parser->advance("=");
-#            $t->first($name);
-#            $t->second($parser->expression(0));
-#            $t->arity("binary");
-#            push @a, $t;
-#        }
-#
-#        if($parser->token->id ne ",") {
-#            last;
-#        }
-#        $parser->advance(",");
-#    }
-#
-#    $parser->advance(";");
-#    return @a;
-#}
 
 # -> VARS { STATEMENTS }
 # ->      { STATEMENTS }
@@ -1536,7 +1527,7 @@ sub std_when {
     return $proc;
 }
 
-sub _is_literal_ws {
+sub _only_white_spaces {
     my($s) = @_;
     return  $s->arity eq "literal"
          && $s->value =~ m{\A [ \t\r\n]* \z}xms
@@ -1554,7 +1545,7 @@ sub build_given_body {
         if($when->arity ne $expect) {
             # ignore white space
             if($when->id eq "print_raw"
-                    && !grep { !_is_literal_ws($_) } @{$when->first}) {
+                    && !grep { !_only_white_spaces($_) } @{$when->first}) {
                 next;
             }
             $parser->_unexpected("$expect blocks", $when);
@@ -1657,6 +1648,7 @@ sub barename {
     return \@parts;
 }
 
+# NOTHING | { expression-list }
 sub localize_vars {
     my($parser) = @_;
     if($parser->token->id eq "{") {
@@ -1844,6 +1836,25 @@ sub iterator_cycle {
 
 # utils
 
+sub make_alias { # alas(from => to)
+    my($parser, $from, $to) = @_;
+
+    my $stash = $parser->symbol_table;
+    if(exists $parser->symbol_table->{$to}) {
+        Carp::croak("Cannot make an alias to an existing symbol ($from => $to)");
+    }
+
+    # make a snapshot
+    return $stash->{$to} = $parser->symbol($from)->clone(
+        value => $to, # real id
+    );
+}
+
+sub not_supported {
+    my($parser, $symbol) = @_;
+    $parser->_error("'$symbol' is not supported");
+}
+
 sub _unexpected {
     my($parser, $expected, $got) = @_;
     if(defined($got) && $got ne ";") {
@@ -1858,10 +1869,10 @@ sub _error {
     my($parser, $message, $near, $line) = @_;
 
     $near ||= $parser->near_token || ";";
-    if($near ne ";") {
+    if($near ne ";" && $message !~ /\b \Q$near\E \b/xms) {
         $message .= ", near $near";
     }
-    die make_error($parser, $message . " while parsing templates",
+    die make_error($parser, $message . ", while parsing templates",
         $parser->file, $line || $parser->line);
 }
 

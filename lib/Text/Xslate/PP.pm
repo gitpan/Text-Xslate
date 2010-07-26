@@ -3,13 +3,13 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1047';
+our $VERSION = '0.1048';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
 }
 
-use Text::Xslate::PP::Const;
+use Text::Xslate::PP::Const qw(:all);
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::Type::Raw;
 use Text::Xslate::Util qw($DEBUG p make_error);
@@ -24,14 +24,11 @@ use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
                             : _PP_BOOSTER ? 'Booster'
                             :               'Opcode'; # default
 
-use constant _DUMP_LOAD_TEMPLATE => scalar($DEBUG =~ /\b dump=load_file \b/xms);
-
+use constant _DUMP_LOAD => scalar($DEBUG =~ /\b dump=load \b/xms);
 
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
 my $state_class = 'Text::Xslate::PP::' . _PP_BACKEND;
-
-our @OPCODE; # defined in PP::Const
 
 {
     package
@@ -115,9 +112,6 @@ sub _assemble {
     my ( $self, $proto, $name, $fullpath, $cachepath, $mtime ) = @_;
     my $len = scalar( @$proto );
     my $st  = $state_class->new();
-
-    our %OPS;    # defined in Text::Xslate::PP::Const
-    our @OPARGS; # defined in Text::Xslate::PP::Const
 
     unless ( defined $name ) { # $name ... filename
         $name = '<string>';
@@ -235,10 +229,11 @@ sub _assemble {
         if( $opnum == $OPS{ macro_begin } ) {
             my $name = $code->[ $i ]->{ arg };
             if(!exists $st->symbol->{$name}) {
-                require Text::Xslate::PP::Macro;
-                $macro = Text::Xslate::PP::Macro->new(
-                    name => $name,
-                    addr => $i,
+                require Text::Xslate::PP::Type::Macro;
+                $macro = Text::Xslate::PP::Type::Macro->new(
+                    name  => $name,
+                    addr  => $i,
+                    state => $st,
                 );
                 $st->symbol->{ $name } = $macro;
             }
@@ -265,7 +260,12 @@ sub _assemble {
     $st->{ booster_code } = Text::Xslate::PP::Booster->new()->opcode_to_perlcode( $proto )
         if _PP_BACKEND eq 'Booster';
 
-    push @{$code}, { exec_code => $OPCODE[ $OPS{end} ] }; # for threshold
+    push @{$code}, {
+        exec_code => $OPCODE[ $OPS{end} ],
+        file      => $oi_file,
+        line      => $oi_line,
+        opname    => 'end',
+    }; # for threshold
     return;
 }
 
@@ -273,20 +273,19 @@ sub _assemble {
     package
         Text::Xslate::Util;
 
-    my $esc_class = 'Text::Xslate::Type::Raw';
     sub escaped_string; *escaped_string = \&mark_raw;
     sub mark_raw {
         my($str) = @_;
         if(defined $str) {
-            return ref($str) eq $esc_class
+            return ref($str) eq Text::Xslate::PP::TXt_RAW()
                 ? $str
-                : bless \$str, $esc_class;
+                : bless \$str, Text::Xslate::PP::TXt_RAW();
         }
         return $str; # undef
     }
     sub unmark_raw {
         my($str) = @_;
-        return ref($str) eq $esc_class
+        return ref($str) eq Text::Xslate::PP::TXt_RAW()
             ? ${$str}
             : $str;
     }
@@ -294,11 +293,11 @@ sub _assemble {
     sub html_escape {
         my($s) = @_;
         return $s if
-            ref($s) eq $esc_class
+            ref($s) eq Text::Xslate::PP::TXt_RAW()
             or !defined($s);
 
         $s =~ s/($html_metachars)/$html_escape{$1}/xmsgeo;
-        return bless \$s, $esc_class;
+        return bless \$s, Text::Xslate::PP::TXt_RAW();
     }
 }
 
@@ -342,6 +341,26 @@ sub tx_match { # simple smart matching
     }
     else {
         return !defined($x);
+    }
+}
+
+sub tx_concat {
+    my($lhs, $rhs) = @_;
+    if(ref($lhs) eq TXt_RAW) {
+        if(ref($rhs) eq TXt_RAW) {
+            return Text::Xslate::Util::mark_raw(${ $lhs } . ${ $rhs });
+        }
+        else {
+            return Text::Xslate::Util::mark_raw(${ $lhs } . Text::Xslate::Util::html_escape($rhs));
+        }
+    }
+    else {
+        if(ref($rhs) eq TXt_RAW) {
+            return Text::Xslate::Util::mark_raw(Text::Xslate::Util::html_escape($lhs) . ${ $rhs });
+        }
+        else {
+            return $lhs . $rhs;
+        }
     }
 }
 
@@ -419,7 +438,7 @@ sub tx_all_deps_are_fresh {
     for ( my $i = TXo_FULLPATH; $i < $len; $i++ ) {
         my $deppath = $tmpl->[ $i ];
 
-        next unless defined $deppath;
+        next if ref $deppath;
 
         my $mtime = ( stat( $deppath ) )[9];
         if ( defined($mtime) and $mtime > $cache_mtime ) {
@@ -427,7 +446,7 @@ sub tx_all_deps_are_fresh {
             if ( $i != TXo_FULLPATH and $main_cache ) {
                 unlink $main_cache or warn $!;
             }
-            if(_DUMP_LOAD_TEMPLATE) {
+            if(_DUMP_LOAD) {
                 printf STDERR "  tx_all_depth_are_fresh: %s is too old (%d > %d)\n",
                     $deppath, $mtime, $cache_mtime;
             }
@@ -539,7 +558,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1047.
+This document describes Text::Xslate::PP version 0.1048.
 
 =head1 DESCRIPTION
 

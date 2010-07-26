@@ -124,8 +124,8 @@ sub value_to_literal {
     my($value) = @_;
     return 'undef' if not defined $value;
 
-    # XXX: '+1' must be interpreted as a string
-    if($value =~ /\A -? $NUMBER \z/xmso){
+    # XXX: '+1', '1.0' must be interpreted as a string
+    if($value =~ /\A -? [0-9]+ \z/xmso){
         return $value;
     }
     else {
@@ -144,7 +144,7 @@ sub import_from {
         my $module = $_[$i];
 
         if($module =~ /[^a-zA-Z0-9_:]/) {
-            Carp::croak("Invalid module name: $module");
+            Carp::confess("Xslate: Invalid module name: $module");
         }
 
         my $commands;
@@ -174,7 +174,7 @@ END_IMPORT
             . $code;
         $@;
     };
-    Carp::confess("Xslate: Failed to import:\n" . $code . $e) if $e;
+    Carp::confess("Xslate: Failed to import:\n" . $e) if $e;
     push @funcs, map {
             my $glob_ref = \$Text::Xslate::Util::_import::{$_};
             my $c = ref($glob_ref) eq 'GLOB' ? *{$glob_ref}{CODE} : undef;
@@ -186,7 +186,7 @@ END_IMPORT
 
 sub make_error {
     my($self, $message, $file, $line, @extra) = @_;
-    if(ref $message) { # re-thrown form virtual machines
+    if(ref $message eq 'SCALAR') { # re-thrown form virtual machines
         return ${$message};
     }
 

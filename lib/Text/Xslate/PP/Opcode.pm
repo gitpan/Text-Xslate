@@ -1,5 +1,4 @@
 package Text::Xslate::PP::Opcode;
-
 use Any::Moose;
 extends qw(Text::Xslate::PP::State);
 
@@ -10,16 +9,10 @@ use Text::Xslate::PP::Const;
 use Text::Xslate::Util qw(
     p neat
     mark_raw unmark_raw html_escape
+    $DEBUG
 );
 
-use constant TXframe_NAME       => Text::Xslate::PP::TXframe_NAME;
-use constant TXframe_OUTPUT     => Text::Xslate::PP::TXframe_OUTPUT;
-use constant TXframe_RETADDR    => Text::Xslate::PP::TXframe_RETADDR;
-use constant TXframe_START_LVAR => Text::Xslate::PP::TXframe_START_LVAR;
-
-use constant TXfor_ITEM  => Text::Xslate::PP::TXfor_ITEM;
-use constant TXfor_ITER  => Text::Xslate::PP::TXfor_ITER;
-use constant TXfor_ARRAY => Text::Xslate::PP::TXfor_ARRAY;
+use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
 no warnings 'recursion';
 
@@ -128,7 +121,7 @@ sub op_print {
     my($st) = @_;
     my $sv = $st->{sa};
 
-    if ( ref( $sv ) eq 'Text::Xslate::Type::Raw' ) {
+    if ( ref( $sv ) eq TXt_RAW ) {
         if(defined ${$sv}) {
             $st->{ output } .= ${$sv};
         }
@@ -168,7 +161,6 @@ sub op_print_raw_s {
 
 sub op_include {
     my $st = Text::Xslate::PP::tx_load_template( $_[0]->engine, $_[0]->{sa} );
-
     $_[0]->{ output } .= Text::Xslate::PP::tx_execute( $st, $_[0]->{vars} );
 
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
@@ -255,10 +247,9 @@ sub op_mod {
 
 
 sub op_concat {
-    my $sv = $_[0]->op_arg;
-    $sv .= $_[0]->{sb} . $_[0]->{sa};
-    $_[0]->{sa} = $sv;
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    my($st) = @_;
+    $st->{sa} = Text::Xslate::PP::tx_concat($st->{sb}, $st->{sa});
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 sub op_bitor {
@@ -420,6 +411,8 @@ sub tx_macro_enter {
     my $outer  = $macro->outer;
     my $args   = pop @{ $st->{SP} };
 
+    print STDERR " " x $st->current_frame, "tx_macro_enter($name) to $retaddr\n" if _DUMP_PP;
+
     if(@{$args} != $nargs) {
         $st->error(undef, "Wrong number of arguments for %s (%d %s %d)",
             $name, scalar(@{$args}), scalar(@{$args}) > $nargs ? '>' : '<', $nargs);
@@ -451,6 +444,9 @@ sub tx_macro_enter {
     }
 
     $st->{ pc } = $addr;
+    if($st->{code}->[$addr]->{opname} ne 'macro_begin') {
+        Carp::croak("Oops: entering non-macros: ", p($st->{code}->[$addr]));
+    }
     return;
 }
 
@@ -459,6 +455,8 @@ sub op_macro_end {
     my $frames   = $st->frame;
     my $oldframe = $frames->[ $st->current_frame ];
     my $cframe   = $frames->[ $st->current_frame( $st->current_frame - 1 ) ]; # pop frame
+
+    print STDERR " " x $st->current_frame, "tx_macro_end($oldframe->[ TXframe_NAME ])\n" if _DUMP_PP;
 
     $st->{sa} = mark_raw( $st->{ output } );
 
@@ -470,7 +468,7 @@ sub op_macro_end {
 sub op_funcall {
     my($st) = @_;
     my $func = $st->{sa};
-    if(ref $func eq 'Text::Xslate::PP::Macro') {
+    if(ref $func eq TXt_MACRO) {
         tx_macro_enter($st, $func, $st->{ pc } + 1);
         goto $st->{ code }->[ $st->{ pc } ]->{ exec_code };
     }
@@ -519,10 +517,12 @@ sub op_goto {
 }
 
 sub op_end {
-    $_[0]->{ pc } = $_[0]->code_len;
+    my($st) = @_;
+    printf STDERR "op_end at %d\n", $st->{pc} if _DUMP_PP;
+    $st->{ pc } = $st->code_len;
 
-    if($_[0]->current_frame != 0) {
-        Carp::croak("Oops: broken stack frame:" .  p($_[0]->frame));
+    if($st->current_frame != 0) {
+        Carp::croak("Oops: broken stack frame:" .  p($st->frame));
     }
     return;
 }
@@ -565,9 +565,8 @@ sub tx_funcall {
 
 sub proccall {
     my($st, $proc) = @_;
-    if(ref $proc eq 'Text::Xslate::PP::Macro') {
+    if(ref $proc eq TXt_MACRO) {
         local $st->{pc} = $st->{pc};
-
         tx_macro_enter($st, $proc, $st->{code_len});
         $st->{code}->[ $st->{pc} ]->{ exec_code }->( $st );
         return $st->{sa};

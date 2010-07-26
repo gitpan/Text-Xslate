@@ -15,10 +15,6 @@ use Text::Xslate::Util qw(
 
 use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
-use constant TXfor_ITEM  => Text::Xslate::PP::TXfor_ITEM;
-use constant TXfor_ITER  => Text::Xslate::PP::TXfor_ITER;
-use constant TXfor_ARRAY => Text::Xslate::PP::TXfor_ARRAY;
-
 our($html_metachars, %html_escape);
 BEGIN {
     *html_metachars = \$Text::Xslate::PP::html_metachars;
@@ -281,7 +277,7 @@ $CODE_MANIP{ 'print' } = sub {
     $self->write_lines( sprintf( <<'CODE', $sv, $err, $err ) );
 # print
 $sv = %s;
-if ( ref($sv) eq 'Text::Xslate::Type::Raw' ) {
+if ( ref($sv) eq TXt_RAW ) {
     if(defined ${$sv}) {
         $output .= $sv;
     }
@@ -396,7 +392,7 @@ $CODE_MANIP{ 'mod' } = sub {
 
 $CODE_MANIP{ 'concat' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s . %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf( 'Text::Xslate::PP::tx_concat( %s, %s )', $self->sb(), $self->sa() ) );
 };
 
 
@@ -637,7 +633,7 @@ $CODE_MANIP{ 'fetch_symbol' } = sub {
             $self->sa( $arg );
         }
         else {
-            $self->sa( sprintf( 'bless( [ %s ], "Text::Xslate::PP::Booster::Macro" )', value_to_literal($arg) ) );
+            $self->sa( sprintf( '$st->symbol->{%s}', value_to_literal($arg) ) );
         }
         return;
     }
@@ -834,7 +830,11 @@ sub _check_logic {
                 : $type eq 'or'   ? '%s || %%s '
                 : $type eq 'dor'  ? $] < 5.010 ? 'cond_dor( %s, sub { %%s } )'  : '%s // %%s'
                 : die $type;
-        $self->exprs( sprintf( $fmt, $self->sa() ) ); # store
+
+        my $expr = sprintf( $fmt, $self->sa() );
+
+        $self->exprs( sprintf( defined $self->exprs ? $self->exprs : '%s', $expr ) ); # store
+
         return;
     }
 
@@ -886,9 +886,10 @@ sub _check_logic {
             my $st_2nd = $self->_spawn_child->_convert_opcode( $nested_ops );
 
             if ( $last_op->[0] eq 'print' ) { # optimization
+                my $expr = sprintf( $fmt, $self->sa );
                 return $self->sa(
                         sprintf( '( %s ? %s : %s )',
-                        sprintf( $fmt, $self->sa ),
+                        sprintf( ( defined $self->exprs ?  $self->exprs : '%s' ), $expr ),
                         _rm_tailed_lf( $st_1st->sa ),
                         _rm_tailed_lf( $st_2nd->sa ),
                     )
@@ -1150,10 +1151,8 @@ sub call {
                 );
             }
         }
-        elsif ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
-            return bless \do {
-                $st->{ booster_macro }->{ $proc->[0] }->( $st, push_pad( $st->{pad}, [ @args ] ), [ $frame, $line ] )
-            }, 'Text::Xslate::Type::Raw';
+        elsif ( ref( $proc ) eq TXt_MACRO ) {
+            $ret = $st->{ booster_macro }->{ $proc->name }->( $st, push_pad( $st->{pad}, [ @args ] ), [ $frame, $line ] )
         }
         else {
             $ret = eval { $proc->( @args ) };
@@ -1169,11 +1168,9 @@ sub proccall {
     my $args = pop @{$st->{SP}};
     my $ret;
 
-    if ( ref( $proc ) eq 'Text::Xslate::PP::Booster::Macro' ) {
+    if ( ref( $proc ) eq TXt_MACRO ) {
         my @pad = ($args);
-        return bless \do {
-            $st->{ booster_macro }->{ $proc->[0] }->( $st, \@pad, $context)
-        }, 'Text::Xslate::Type::Raw';
+        $ret = $st->{ booster_macro }->{ $proc->name }->( $st, \@pad, $context)
     }
     else {
         $ret = eval { $proc->( @{$args} ) };
@@ -1400,7 +1397,7 @@ code by C<< XSLATE=dump=pp >>).
 
             # print
             $sv = $pad->[ -1 ]->[ 0 ];
-            if ( ref($sv) eq 'Text::Xslate::Type::Raw' ) {
+            if ( ref($sv) eq TXt_RAW ) {
                 if(defined ${$sv}) {
                     $output .= $sv;
                 }
@@ -1430,7 +1427,7 @@ code by C<< XSLATE=dump=pp >>).
 
         # print
         $sv = $macro{ "foo" }->( $st, push_pad( $pad, [ $vars->{ "value" } ] ), [ "main", 5 ] );
-        if ( ref($sv) eq 'Text::Xslate::Type::Raw' ) {
+        if ( ref($sv) eq TXt_RAW ) {
             if(defined ${$sv}) {
                 $output .= $sv;
             }

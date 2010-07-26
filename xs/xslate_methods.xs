@@ -377,24 +377,14 @@ tx_methodcall(pTHX_ tx_state_t* const st, SV* const method) {
     const char* type_name;
     SV* fq_name;
     HE* he;
-    SV* retval = NULL;
+    SV* retval;
 
     if(sv_isobject(invocant)) {
-        STRLEN methodlen;
-        const char* const methodpv = SvPV_const(method, methodlen);
-        HV* const stash = SvSTASH(SvRV(invocant));
-        GV* const mgv   = gv_fetchmeth_autoload(stash, methodpv, methodlen, 0);
-
-        if(mgv) {
-            PUSHMARK(ORIGMARK); /* re-pushmark */
-            retval = st->targ;
-            sv_setsv(retval, tx_call_sv(aTHX_ st, (SV*)GvCV(mgv), 0, "method call"));
-            return retval;
-        }
-
-        goto not_found;
+        PUSHMARK(ORIGMARK); /* re-pushmark */
+        return tx_call_sv(aTHX_ st, method, G_METHOD, "method call");
     }
 
+    retval = NULL;
     if(SvROK(invocant)) {
         SV* const referent = SvRV(invocant);
         if(SvTYPE(referent) == SVt_PVAV) {
@@ -453,7 +443,6 @@ tx_methodcall(pTHX_ tx_state_t* const st, SV* const method) {
         tx_warn(aTHX_ st, "Use of nil to invoke method %"SVf, method);
         goto finish;
     }
-    not_found:
     tx_error(aTHX_ st, "Undefined method %"SVf" called for %s", method, tx_neat(aTHX_ invocant));
 
     finish:
@@ -508,3 +497,4 @@ CODE:
 {
     ST(0) = *av_fetch(pair, ix, TRUE);
 }
+

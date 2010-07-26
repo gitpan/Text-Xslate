@@ -26,74 +26,64 @@ around trim_code => sub {
 
 sub init_symbols {
     my($parser) = @_;
-    my $s;
-
-    $parser->symbol(']');
-    $parser->symbol('}');
 
     $parser->init_basic_operators();
+
     $parser->symbol('$')->set_nud(\&nud_dollar);
-    $parser->infix('_', $parser->symbol('~')->lbp, \&led_concat);
+    $parser->make_alias('~' => '_');
+    $parser->make_alias('|' => 'FILTER');
     $parser->symbol('.')->set_led(\&led_dot); # redefine
 
-    # defines both upper cased and lower cased
-
     $parser->symbol('END')  ->is_block_end(1);
-    $parser->symbol('end')  ->is_block_end(1);
     $parser->symbol('ELSE') ->is_block_end(1);
-    $parser->symbol('else') ->is_block_end(1);
     $parser->symbol('ELSIF')->is_block_end(1);
-    $parser->symbol('elsif')->is_block_end(1);
+    $parser->symbol('CASE') ->is_block_end(1);
 
     $parser->symbol('IN');
-    $parser->symbol('in');
 
     $parser->symbol('IF')      ->set_std(\&std_if);
-    $parser->symbol('if')      ->set_std(\&std_if);
     $parser->symbol('UNLESS')  ->set_std(\&std_if);
-    $parser->symbol('unless')  ->set_std(\&std_if);
     $parser->symbol('FOREACH') ->set_std(\&std_foreach);
-    $parser->symbol('foreach') ->set_std(\&std_foreach);
     $parser->symbol('FOR')     ->set_std(\&std_foreach);
-    $parser->symbol('for')     ->set_std(\&std_foreach);
     $parser->symbol('WHILE')   ->set_std(\&std_while);
-    $parser->symbol('while')   ->set_std(\&std_while);
-
-    $parser->symbol('SWITCH')   ->set_std(\&std_switch);
-    $parser->symbol('switch')   ->set_std(\&std_switch);
-    $s = $parser->symbol('CASE');
-    $s->set_std(\&std_case);
-    $s->is_block_end(1);
-    $s = $parser->symbol('case');
-    $s->set_std(\&std_case);
-    $s->is_block_end(1);
+    $parser->symbol('SWITCH')  ->set_std(\&std_switch);
+    $parser->symbol('CASE')    ->set_std(\&std_case);
 
     $parser->symbol('INCLUDE') ->set_std(\&std_include);
-    $parser->symbol('include') ->set_std(\&std_include);
     $parser->symbol('WITH');
-    $parser->symbol('with');
 
+    $parser->symbol('GET')     ->set_std(\&std_get);
     $parser->symbol('SET')     ->set_std(\&std_set);
-    $parser->symbol('set')     ->set_std(\&std_set);
     $parser->symbol('DEFAULT') ->set_std(\&std_set);
-    $parser->symbol('default') ->set_std(\&std_set);
     $parser->symbol('CALL')    ->set_std(\&std_call);
-    $parser->symbol('call')    ->set_std(\&std_call);
-
-    # macros
 
     $parser->symbol('MACRO') ->set_std(\&std_macro);
-    $parser->symbol('macro') ->set_std(\&std_macro);
     $parser->symbol('BLOCK');
-    $parser->symbol('block');
-
     $parser->symbol('WRAPPER')->set_std(\&std_wrapper);
-    $parser->symbol('wrapper')->set_std(\&std_wrapper);
     $parser->symbol('INTO');
-    $parser->symbol('into');
 
     $parser->symbol('FILTER')->set_std(\&std_filter);
-    $parser->symbol('filter')->set_std(\&std_filter);
+
+    # unsupported directives
+    my $nos = $parser->can('not_supported');
+    foreach my $keyword qw(
+            INSERT PROCESS PERL RAWPERL TRY THROW NEXT LAST RETURN
+            STOP CLEAR META TAGS DEBUG VIEW) {
+        $parser->symbol($keyword)->set_std($nos);
+    }
+
+    # not supported, but ignored (synonym to CALL)
+    $parser->symbol('USE')->set_std(\&std_call);
+
+    foreach my $id(keys %{$parser->symbol_table}) {
+        if($id =~ /\A [A-Z]+ \z/xms) { # upper-cased keywords
+            $parser->make_alias($id => lc $id);
+        }
+    }
+
+    $parser->make_alias('not' => 'NOT');
+    $parser->make_alias('and' => 'AND');
+    $parser->make_alias('or'  => 'OR');
 
     return;
 }
@@ -111,14 +101,6 @@ around _build_iterator_element => sub {
     $table->{max}   = $table->{max_index};
 
     return $table;
-};
-
-around advance => sub {
-    my($super, $parser, $id) = @_;
-    if(defined $id and $parser->token->id eq lc($id)) {
-        $id = lc($id);
-    }
-    return $super->($parser, $id);
 };
 
 sub default_nud {
@@ -148,9 +130,11 @@ sub nud_dollar {
 }
 
 sub undefined_name {
-    my($parser) = @_;
+    my($parser, $name) = @_;
     # undefined names are always variables
-    return $parser->symbol_table->{'(variable)'};
+    return $parser->symbol_table->{'(variable)'}->clone(
+        id => $name,
+    );
 }
 
 sub is_valid_field {
@@ -188,7 +172,7 @@ sub led_assignment {
     $assign->is_statement(1);
 
     my $name = $assign->first;
-    if(not $parser->find($name->id)->is_defined) {
+    if(not $parser->find_or_create($name->id)->is_defined) {
         $parser->define($name);
         $assign->third('declare');
     }
@@ -208,7 +192,7 @@ sub std_if {
     my $if = $symbol->clone(arity => "if");
 
     $if->first(  $parser->expression(0) );
-    if(uc($symbol->id) eq 'UNLESS') {
+    if($symbol->id eq 'UNLESS') {
         my $not_expr = $parser->symbol('not')->clone(
             arity  => 'unary',
             first  => $if->first,
@@ -221,7 +205,7 @@ sub std_if {
 
     my $top_if = $if;
 
-    while(uc($t->id) eq "ELSIF") {
+    while($t->id eq "ELSIF") {
         $parser->reserve($t);
         $parser->advance(); # "ELSIF"
 
@@ -233,11 +217,11 @@ sub std_if {
         $t  = $parser->token;
     }
 
-    if(uc($t->id) eq "ELSE") {
+    if($t->id eq "ELSE") {
         $parser->reserve($t);
         $t = $parser->advance(); # "ELSE"
 
-        $if->third( uc($t->id) eq "IF"
+        $if->third( $t->id eq "IF"
             ? [$parser->statement()]
             :  $parser->statements());
     }
@@ -262,7 +246,7 @@ sub std_switch {
     local $parser->{in_given} = 1;
 
     my @cases;
-    while(uc($parser->token->id) ne "END") {
+    while($parser->token->id ne "END") {
         push @cases, $parser->statement();
     }
     $switch->third( \@cases );
@@ -281,7 +265,7 @@ sub std_case {
     }
     my $case = $symbol->clone(arity => "case");
 
-    if(uc($parser->token->id) ne "DEFAULT") {
+    if($parser->token->id ne "DEFAULT") {
         $case->first( $parser->expression(0) );
     }
     else {
@@ -330,22 +314,21 @@ sub std_while {
     return $while;
 }
 
-sub std_include {
-    my($parser, $symbol) = @_;
-
-    my $command = $parser->SUPER::std_include($symbol);
-    $command->id( lc $command->id );
+around std_include => sub {
+    my($super, $self, $symbol) = @_;
+    my $command = $self->$super($symbol);
+    $command->id(lc $command->id); # the case is significant
     return $command;
-}
+};
 
 sub localize_vars {
     my($parser, $symbol) = @_;
 
 # should make 'WITH' optional?
 #    my $t = $parser->token;
-#    if(uc($t->id) eq "WITH" or $t->arity eq "variable") {
-#        $parser->advance() if uc($t->id) eq "WITH";
-    if(uc($parser->token->id) eq "WITH") {
+#    if($t->id eq "WITH" or $t->arity eq "variable") {
+#        $parser->advance() if $t->id eq "WITH";
+    if($parser->token->id eq "WITH") {
         $parser->advance();
         $parser->new_scope();
         my $vars = $parser->set_list();
@@ -361,7 +344,8 @@ sub set_list {
     while(1) {
         my $key = $parser->token;
 
-        if($key->arity ne "variable") {
+        if(!(any_in($key->arity, qw(variable name))
+                && $parser->next_token_is("="))) {
             last;
         }
         $parser->advance();
@@ -379,22 +363,32 @@ sub set_list {
     return \@args;
 }
 
+sub std_get {
+    my($parser, $symbol) = @_;
+
+    return $symbol->clone(
+        id    => 'print',
+        arity => 'command',
+        first => [ $parser->expression(0) ],
+   );
+}
+
 sub std_set {
     my($parser, $symbol) = @_;
 
-    my $is_default = (uc($symbol->id) eq 'DEFAULT');
+    my $is_default = ($symbol->id eq 'DEFAULT');
 
     my $set_list = $parser->set_list();
     my @assigns;
     for(my $i = 0; $i < @{$set_list}; $i += 2) {
         my($name, $value) = @{$set_list}[$i, $i+1];
 
-        if($is_default) {
+        if($is_default) { # DEFAULT a = b -> a = a || b
             my $var = $parser->symbol('(variable)')->clone(
                 id => $name->id,
             );
 
-            $value = $parser->binary('//', $var, $value);
+            $value = $parser->binary('||', $var, $value);
         }
         my $assign = $symbol->clone(
             id     => '=',
@@ -403,7 +397,7 @@ sub std_set {
             second => $value,
         );
 
-        if(not $parser->find($name->id)->is_defined) {
+        if(not $parser->find_or_create($name->id)->is_defined) {
             $parser->define($name);
             $assign->third('declare');
         }
@@ -476,7 +470,7 @@ sub std_wrapper {
 
     my $base  = $parser->barename();
     my $into;
-    if(uc($parser->token->id) eq "INTO") {
+    if($parser->token->id eq "INTO") {
         my $t = $parser->advance();
         if(!any_in($t->arity, qw(name variable))) {
             $parser->_unexpected("a variable name", $t);
@@ -592,6 +586,10 @@ Text::Xslate::Syntax::TTerse - An alternative syntax compatible with Template To
 TTerse is a subset of the Template-Toolkit 2 (and partially  3) syntax,
 using C<< [% ... %] >> tags and C<< %% ... >> line code.
 
+Note that TTerse itself has few methods and filters while Template-Toolkit 2
+has a lot. See C<Text::Xslate::Bridge::*> modules on CPAN which provide extra
+methods and filters if you want to use those features.
+
 (TODO: I should concentrate on the difference between Template-Toolkit 2 and
 TTerse)
 
@@ -608,6 +606,7 @@ Scalar access:
 
     [%  var %]
     [% $var %]
+    [% GET var # 'GET' is optional %]
 
 Field access:
 
@@ -772,10 +771,9 @@ A few methods are supported in the Xslate core.
     %% h.values();
     %% h.kv();
 
-However, there is a bridge mechanism that allows you to use more methods.
-For example, Text::Xslate::Bridge::TT2 provides the TT2 pseudo
-methods (a.k.a virtual methods) for Xslate, which uses Template::VMethods
-implementation.
+However, there is a bridge mechanism that allows you to use external methods.
+For example, Text::Xslate::Bridge::TT2 provides the TT2 virtual methods for
+Xslate, which bridges Template::VMethods implementation.
 
     use Text::Xslate::Bridge::TT2;
 
@@ -802,13 +800,13 @@ DEFAULT statements as a syntactic sugar to C<< SET var = var // expr >>:
 
     [% DEFAULT lang = "TTerse" %]
 
-FILTER blocks:
+FILTER blocks to apply filters to text sections:
 
     [% FILTER html -%]
     Hello, <Xslate> world!
     [% END -%]
 
-=head1 CAVEAT
+=head1 COMPATIBILITY
 
 There are some differences between TTerse and Template-Toolkit.
 
@@ -825,6 +823,36 @@ that of Template-Toolkit allows a bare token:
 =item *
 
 C<FOREACH item = list> is forbidden in TTerse. It must be C<FOREACH item IN list>.
+
+=item *
+
+TTerse does not support plugins (i.e. C<USE> directive), but understands
+the C<USE> keyword as an alias to C<CALL>, so you could use some simple
+plugins which do not depend on the context object of Template-Toolkit.
+
+    use Template::Plugin::Math;
+    use Template::Plugin::String;
+
+    my $tt = Text::Xslate->new(...);
+
+    mt %vars = (
+        Math   => Template::Plugin::Math->new(),   # as a namespace
+        String => Template::Plugin::String->new(), # as a prototype
+    );
+    print $tt->render_string(<<'T', \%vars);
+    [% USE Math # does nothing actually, only for compatibility %]
+    [% USE String %]
+    [% Math.abs(-100)          # => 100 %]
+    [% String.new("foo").upper # => FOO %]
+
+=item *
+
+The following directives are not supported:
+C<INSERT>, C<PROCESS>, C<BLOCK> as a named blocks, C<USE> (but see above),
+C<PERL>, C<RAWPERL>, C<TRY>, C<THROW>, C<NEXT>, C<LAST>,
+C<RETURN>, C<STOP>, C<CLEAR>, C<META>, C<TAGS>, C<DEBUG>, and C<VIEW>.
+
+Some might be supported in a future.
 
 =back
 

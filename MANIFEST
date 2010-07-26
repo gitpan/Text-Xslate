@@ -12,6 +12,7 @@ benchmark/interpolate.pl
 benchmark/json.pl
 benchmark/keys.pl
 benchmark/map.pl
+benchmark/method.pl
 benchmark/others.pl
 benchmark/sort.pl
 benchmark/template/base.mt
@@ -65,15 +66,16 @@ inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Bridge.pm
 lib/Text/Xslate/Compiler.pm
-lib/Text/Xslate/Cookbook.pod
+lib/Text/Xslate/Manual/Cookbook.pod
+lib/Text/Xslate/Manual/FAQ.pod
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
 lib/Text/Xslate/PP/Booster.pm
 lib/Text/Xslate/PP/Const.pm
-lib/Text/Xslate/PP/Macro.pm
 lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
 lib/Text/Xslate/PP/State.pm
+lib/Text/Xslate/PP/Type/Macro.pm
 lib/Text/Xslate/PP/Type/Pair.pm
 lib/Text/Xslate/PP/Type/Raw.pm
 lib/Text/Xslate/Runner.pm
@@ -109,6 +111,7 @@ t/010_internals/016_cached.t
 t/010_internals/017_render.t
 t/010_internals/018_opinfo.t
 t/010_internals/019_runtime_error.t
+t/010_internals/020_optimize.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -149,6 +152,7 @@ t/030_kolon/027_lambda.t
 t/030_kolon/028_smartmatch.t
 t/030_kolon/029_blockfilter.t
 t/030_kolon/030_bitwise.t
+t/030_kolon/031_xfuncs.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -169,6 +173,8 @@ t/040_tterse/017_filter.t
 t/040_tterse/018_process.t
 t/040_tterse/019_switch.t
 t/040_tterse/020_chomp.t
+t/040_tterse/021_fake_use.t
+t/040_tterse/100_not_supported.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
 t/050_builtins/003_autobox_w_cb.t
