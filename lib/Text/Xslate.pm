@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1048';
+our $VERSION = '0.1049';
 
 use Carp       ();
 use File::Spec ();
@@ -53,9 +53,13 @@ BEGIN {
 
     *_ST_MTIME = sub() { 9 }; # see perldoc -f stat
 
-    my $cache_dir = File::Spec->catfile(
-        $ENV{HOME} || File::Spec->tmpdir,
-        '.xslate_cache');
+    my $cache_dir = '.xslate_cache';
+    foreach my $d($ENV{HOME}, File::Spec->tmpdir) {
+        if(-d $d && -w _) {
+            $cache_dir = File::Spec->catfile($d, '.xslate_cache');
+            last;
+        }
+    }
     *_DEFAULT_CACHE_DIR = sub() { $cache_dir };
 }
 
@@ -131,12 +135,12 @@ sub new {
         warnings::warnif(misc => "$class: Unknown option(s): " . join ' ', @unknowns);
     }
 
-    if(ref($args{path}) ne 'ARRAY') {
-        $args{path} = [$args{path}];
-    }
+    $args{path} = [
+        map { ref($_) ? $_ : File::Spec->rel2abs($_) }
+            ref($args{path}) eq 'ARRAY' ? @{$args{path}} : $args{path}
+    ];
 
     # function
-
     my %funcs;
     $class->_merge_hash(\%funcs, $class->default_functions());
 
@@ -200,6 +204,7 @@ sub find_file {
     my $orig_mtime;
     my $cache_mtime;
     foreach my $p(@{$self->{path}}) {
+        print STDOUT "  find_file: $p / $file\n" if _DUMP_LOAD;
         if(ref $p eq 'HASH') { # virtual path
             defined(my $content = $p->{$file}) or next;
             $fullpath   = \$content;
@@ -213,7 +218,10 @@ sub find_file {
 
         # $file is found
 
-        $cachepath   = File::Spec->catfile($self->{cache_dir}, $file . 'c');
+        $cachepath   = File::Spec->catfile(
+            $self->{cache_dir},
+            (ref($p) ? 'VPATH' : $p),
+            $file . 'c');
         $cache_mtime = (stat($cachepath))[_ST_MTIME]; # may fail, but doesn't matter
         last;
     }
@@ -418,7 +426,7 @@ sub _magic_token {
         require 'Digest/MD5.pm'; # we don't want to create its namespace
         my $md5 = Digest::MD5->new();
         $md5->add(${$fullpath});
-        $fullpath = 'SCALAR:' . $md5->hexdigest();
+        $fullpath = 'VPATH:' . $md5->hexdigest();
     }
 
     return sprintf $XSLATE_MAGIC,
@@ -483,7 +491,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1048.
+This document describes Text::Xslate version 0.1049.
 
 =head1 SYNOPSIS
 
@@ -963,6 +971,8 @@ Thanks to jjn1056 to the concept of template overlay (now implemented as C<casca
 Thanks to makamaka for the contribution of Text::Xslate::PP.
 
 Thanks to typester for the various inspirations.
+
+Thanks to clouder for the patch of adding C<AND> and C<OR> to TTerse.
 
 =head1 AUTHOR
 

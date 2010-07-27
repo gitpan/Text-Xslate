@@ -134,7 +134,6 @@ has input => (
 has line_start => (
     is      => 'ro',
     isa     => 'Maybe[Str]',
-    coerce  => 1,
     builder => '_build_line_start',
 );
 sub _build_line_start { ':' }
@@ -142,7 +141,6 @@ sub _build_line_start { ':' }
 has tag_start => (
     is      => 'ro',
     isa     => 'Str',
-    coerce  => 1,
     builder => '_build_tag_start',
 );
 sub _build_tag_start { '<:' }
@@ -150,7 +148,6 @@ sub _build_tag_start { '<:' }
 has tag_end => (
     is      => 'ro',
     isa     => 'Str',
-    coerce  => 1,
     builder => '_build_tag_end',
 );
 sub _build_tag_end { ':>' }
@@ -1224,16 +1221,15 @@ sub nud_constant {
 my $lambda_id = 0;
 sub lambda {
     my($parser, $proto) = @_;
-    $proto ||= $parser->symbol('(lambda)');
-    my $name = $proto->clone(
+    my $name = $parser->symbol('(name)')->clone(
         id   => sprintf('lambda@%d', $lambda_id++),
     );
 
-    return $proto->clone(
+    return $parser->symbol('(name)')->clone(
         arity => 'proc',
         id    => 'macro',
         first => $name,
-        line  => $parser->line,
+        line  => $proto->line,
     );
 }
 
