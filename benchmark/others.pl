@@ -25,10 +25,10 @@ if(!($tmpl eq 'list' or $tmpl eq 'include')) {
 use Config; printf "Perl/%vd %s\n", $^V, $Config{archname};
 
 my $has_tcs = eval q{ use Text::ClearSilver 0.10.5.4; 1 };
-warn "Text::CelarSilver is not available ($@)\n" if $@;
+warn "Text::ClearSilver is not available ($@)\n" if $@;
 
-my $has_mst = $tmpl eq 'list' && $try_mst && eval q{ use MobaSiF::Template; 1 };
-warn "MobaSif::Template is not available ($@)\n" if $@;
+my $has_mst = ($tmpl eq 'list' && $try_mst && eval q{ use MobaSiF::Template; 1 });
+warn "MobaSiF::Template is not available ($@)\n" if $try_mst && $@;
 
 my $has_ht = eval q{ use HTML::Template::Pro; 1 };
 warn "HTML::Template::Pro is not available ($@)\n" if $@;
@@ -44,7 +44,7 @@ my $path = "$Bin/template";
 
 my $tx = Text::Xslate->new(
     path       => [$path],
-    cache_dir  =>  $path,
+    cache_dir  =>  '.xslate_cache',
     cache      => 2,
 );
 my $mt = Text::MicroTemplate::Extended->new(

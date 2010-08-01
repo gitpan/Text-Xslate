@@ -8,6 +8,7 @@ use parent qw(Exporter);
 our @EXPORT_OK = qw(
     mark_raw unmark_raw
     html_escape escaped_string
+    uri_escape
     p
 
     literal_to_value value_to_literal
@@ -48,6 +49,7 @@ require Text::Xslate; # load XS stuff
 sub mark_raw;    # XS
 sub unmark_raw;  # XS
 sub html_escape; # XS
+sub uri_escape;  # XS
 sub escaped_string; *escaped_string = \&mark_raw;
 
 sub neat {
@@ -281,6 +283,10 @@ This is the entity of the C<unmark_raw> filter.
 =head3 C<html_escape($str)>
 
 This is the entity of the C<html_escape> filter.
+
+=head3 C<uri_escape($str)>
+
+This is the entity of the C<uri> filter.
 
 =head3 C<p($any)>
 

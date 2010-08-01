@@ -4,17 +4,17 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1051';
+our $VERSION = '0.1052';
 
 use Carp        ();
 use File::Spec  ();
 use Exporter    ();
-use Digest::MD5 ();
 
 use Text::Xslate::Util qw(
     $DEBUG
     mark_raw unmark_raw
     html_escape escaped_string
+    uri_escape
 );
 
 our @ISA = qw(Text::Xslate::Engine Exporter);
@@ -22,6 +22,7 @@ our @ISA = qw(Text::Xslate::Engine Exporter);
 our @EXPORT_OK = qw(
     mark_raw unmark_raw
     escaped_string html_escape
+    uri_escape
 );
 
 # load backend (XS or PP)
@@ -89,6 +90,7 @@ my %builtin = (
     html       => \&Text::Xslate::Util::html_escape,
     mark_raw   => \&Text::Xslate::Util::mark_raw,
     unmark_raw => \&Text::Xslate::Util::unmark_raw,
+    uri        => \&Text::Xslate::Util::uri_escape,
     dump       => \&Text::Xslate::Util::p,
 );
 
@@ -197,8 +199,13 @@ sub load_string { # for <string>
     return $asm;
 }
 
+my $updir = File::Spec->updir;
 sub find_file {
     my($self, $file) = @_;
+
+    if($file =~ /\Q$updir\E/xmso) {
+        $self->_error("LoadError: Forbidden component (updir: '$updir') found in file name '$file'");
+    }
 
     my $fullpath;
     my $cachepath;
@@ -219,7 +226,11 @@ sub find_file {
 
         # $file is found
 
-        $cachepath = $self->_cache_path($p, $file);
+        $cachepath = File::Spec->catfile(
+            $self->{cache_dir},
+            Text::Xslate::uri_escape(ref($p) ? ref $p : $p),
+            $file . 'c',
+        );
         $cache_mtime = (stat($cachepath))[_ST_MTIME]; # may fail, but doesn't matter
         last;
     }
@@ -239,15 +250,6 @@ sub find_file {
     };
 }
 
-sub _cache_path {
-    my($self, $path, $file) = @_;
-
-    $path = 'VPATH' if ref $path;
-    return  do {
-        my $d = Digest::MD5::md5_hex($path);
-        File::Spec->catfile($self->{cache_dir}, $d, $file . "c");
-    };
-}
 
 sub load_file {
     my($self, $file, $mtime) = @_;
@@ -431,7 +433,10 @@ sub _magic_token {
     );
 
     if(ref $fullpath) { # ref to content string
-        $fullpath = 'VPATH:' . Digest::MD5::md5_hex(${$fullpath})
+        require 'Digest/MD5.pm';
+        my $md5 = Digest::MD5->new();
+        $md5->add(${$fullpath});
+        $fullpath = ref($fullpath) . ':' . $md5->hexdigest();
     }
 
     return sprintf $XSLATE_MAGIC,
@@ -496,7 +501,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1051.
+This document describes Text::Xslate version 0.1052.
 
 =head1 SYNOPSIS
 
@@ -802,7 +807,7 @@ This method is significant when it is called by template functions and methods.
 
 =head2 Exportable functions
 
-=head3 C<< mark_raw($str :Str) :RawString >>
+=head3 C<< mark_raw($str :Str) :RawStr >>
 
 Marks I<$str> as raw, so that the content of I<$str> will be rendered as is,
 so you have to escape these strings by yourself.
@@ -827,7 +832,7 @@ be escaped before rendered.
 
 This function is available in templates as the C<unmark_raw> filter.
 
-=head3 C<< html_escape($str :Str) :RawString >>
+=head3 C<< html_escape($str :Str) :RawStr >>
 
 Escapes html meta characters in I<$str>, and returns it as a raw string (see above).
 If I<$str> is already a raw string, it returns I<$str> as is.
@@ -837,6 +842,12 @@ expressions.
 
 This function is available in templates as the C<html> filter, but you'd better
 to use C<unmark_raw> to ensure expressions to be html-escaped.
+
+=head3 C<< uri_escape($str :Str) :Str >>
+
+Escapes URI unsafe characters in I<$str>, and returns it.
+
+This function is available in templates as the C<uri> filter.
 
 =head2 Command line interface
 
@@ -922,6 +933,10 @@ to cpan-RT. Patches are welcome :)
 
 =head1 SEE ALSO
 
+Documents:
+
+L<Text::Xslate::Manual>
+
 Xslate template syntaxes:
 
 L<Text::Xslate::Syntax::Kolon>
@@ -929,12 +944,6 @@ L<Text::Xslate::Syntax::Kolon>
 L<Text::Xslate::Syntax::Metakolon>
 
 L<Text::Xslate::Syntax::TTerse>
-
-Documents:
-
-L<Text::Xslate::Manual::Cookbook>
-
-L<Text::Xslate::Manual::FAQ>
 
 Xslate command:
 

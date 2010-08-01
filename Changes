@@ -1,5 +1,23 @@
 Revision history for Perl extension Text::Xslate
 
+0.1052 Sun Aug  1 15:42:16 2010
+    http://xslate.org is out!
+    Thanks to Shibuya.pm, esp. @tokuhirom and @lestrrat.
+
+    [BUG FIXES]
+    - Forbid '..' in file names
+    - "<: $foo :>:<: $bar :>" caused parse errors
+
+    [CHANGES]
+    - The algorithm of building cache paths has been changed, which requires
+      to re-compile templates.
+
+    [NEW FEATURES]
+    - Documents: Text::Xslate::Manual for table of contents,
+                 Text::Xslate::Builtin for builtin methods and filters
+    - Exportable functions: uri_escape()
+    - Builtin filters: uri
+
 0.1051 Thu Jul 29 17:41:43 2010
     [BUG FIXES]
     - Fix cache issues enbugged in 0.1049

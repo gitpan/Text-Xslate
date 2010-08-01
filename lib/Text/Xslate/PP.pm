@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1051';
+our $VERSION = '0.1052';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -299,6 +299,14 @@ sub _assemble {
         $s =~ s/($html_metachars)/$html_escape{$1}/xmsgeo;
         return bless \$s, Text::Xslate::PP::TXt_RAW();
     }
+
+    my $uri_unsafe_rfc3986 = qr/[^A-Za-z0-9\-\._~]/;
+    sub uri_escape {
+        my($s) = @_;
+        return $s if not defined $s;
+        $s =~ s/($uri_unsafe_rfc3986)/sprintf '%%' . '%02X', ord $1/xmsgeo;
+        return $s;
+    }
 }
 
 #
@@ -558,7 +566,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1051.
+This document describes Text::Xslate::PP version 0.1052.
 
 =head1 DESCRIPTION
 
