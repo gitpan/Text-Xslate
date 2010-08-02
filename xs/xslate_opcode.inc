@@ -117,19 +117,20 @@ TXC_w_key(fetch_field_s) { /* fetch a field from a variable (for literal) */
 
 TXC(print) {
     dMY_CXT;
-    SV* const sv          = TX_st_sa;
-    SV* const output      = TX_st->output;
+    SV* const sv  = TX_st_sa;
+    SV* const out = TX_st->output;
 
     if(tx_str_is_raw(aTHX_ aMY_CXT_ sv)) {
-        if(SvOK(SvRV(sv))) {
-            sv_catsv_nomg(output, TX_UNMARK_RAW(sv));
+        SV* const arg = TX_UNMARK_RAW(sv);
+        if(SvOK(arg)) {
+            tx_sv_cat(aTHX_ out, arg);
         }
         else {
             tx_warn(aTHX_ TX_st, "Use of nil to print");
         }
     }
     else if(SvOK(sv)) {
-        tx_sv_cat_with_html_escape_force(aTHX_ output, sv);
+        tx_sv_cat_with_html_escape_force(aTHX_ out, sv);
     }
     else {
         tx_warn(aTHX_ TX_st, "Use of nil to print");
@@ -140,10 +141,9 @@ TXC(print) {
 }
 
 TXC(print_raw) {
-    SV* const arg = TX_st_sa;
-    SvGETMAGIC(arg);
+    SV* const arg = tx_unmark_raw(aTHX_ TX_st_sa);
     if(SvOK(arg)) {
-        sv_catsv_nomg(TX_st->output, arg);
+        tx_sv_cat(aTHX_ TX_st->output, arg);
     }
     else {
         tx_warn(aTHX_ TX_st, "Use of nil to print");
@@ -152,7 +152,7 @@ TXC(print_raw) {
 }
 
 TXC_w_sv(print_raw_s) {
-    sv_catsv_nomg(TX_st->output, TX_op_arg_sv);
+    tx_sv_cat(aTHX_ TX_st->output, TX_op_arg_sv);
 
     TX_RETURN_NEXT();
 }
