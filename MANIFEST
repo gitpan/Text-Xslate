@@ -70,6 +70,7 @@ lib/Text/Xslate/Compiler.pm
 lib/Text/Xslate/Manual.pod
 lib/Text/Xslate/Manual/Builtin.pod
 lib/Text/Xslate/Manual/Cookbook.pod
+lib/Text/Xslate/Manual/Debugging.pod
 lib/Text/Xslate/Manual/FAQ.pod
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
