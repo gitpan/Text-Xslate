@@ -1,6 +1,7 @@
 #define PERL_NO_GET_CONTEXT
 #include <EXTERN.h>
 #include <perl.h>
+#define NO_XSLOCKS /* for exceptions */
 #include <XSUB.h>
 
 #define NEED_newSVpvn_flags_GLOBAL
@@ -72,6 +73,11 @@ tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
 #define TX_lvar_get(ix) TX_lvarx_get(TX_st, ix)
 
 #define TX_UNMARK_RAW(sv) SvRV(sv)
+
+#define TX_CopyToken(s, d, c) STMT_START {  \
+        Copy(s "", d, sizeof(s) - 1, char); \
+        c += sizeof(s) - 1;                 \
+    } STMT_END
 
 #define MY_CXT_KEY "Text::Xslate::_guts" XS_VERSION
 typedef struct {
@@ -403,9 +409,9 @@ tx_sv_cat(pTHX_ SV* const dest, SV* const src) {
         STRLEN len;
         const char* const pv  = SvPV_const(src, len);
         STRLEN const dest_cur = SvCUR(dest);
+        char* const d         = SvGROW(dest, dest_cur + len + 1 /* count '\0' */);
 
-        (void)SvGROW(dest, dest_cur + len + 1 /* count '\0' */);
-        Copy(pv, SvPVX_mutable(dest) + dest_cur, len + 1 /* copy '\0' */, char);
+        Copy(pv, d + dest_cur, len + 1 /* copy '\0' */, char);
         SvCUR_set(dest, dest_cur + len);
     }
 }
@@ -423,44 +429,31 @@ tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src) {
     }
 
     while(cur != end) {
-        (void)SvGROW(dest, dest_cur + 8 /* at least parts_len + 1 */);
-
+        /* preallocate the buffer for at least max parts_len + 1 */
+        char* const d = SvGROW(dest, dest_cur + 8) + dest_cur;
         if(char_trait[(U8)*cur] & TXct_HTML_META) {
-            const char* parts;
-            STRLEN      parts_len;
             switch(*cur) {
             case '<':
-                parts     =        "&lt;";
-                parts_len = sizeof("&lt;") - 1;
+                TX_CopyToken("&lt;",   d, dest_cur);
                 break;
             case '>':
-                parts     =        "&gt;";
-                parts_len = sizeof("&gt;") - 1;
+                TX_CopyToken("&gt;",   d, dest_cur);
                 break;
             case '&':
-                parts     =        "&amp;";
-                parts_len = sizeof("&amp;") - 1;
+                TX_CopyToken("&amp;",  d, dest_cur);
                 break;
             case '"':
-                parts     =        "&quot;";
-                parts_len = sizeof("&quot;") - 1;
+                TX_CopyToken("&quot;", d, dest_cur);
                 break;
             case '\'':
-                parts     =        "&apos;";
-                parts_len = sizeof("&apos;") - 1;
+                TX_CopyToken("&apos;", d, dest_cur);
                 break;
             default:
                 assert(!"Not reached");
-                parts     = NULL; /* -Wuninitialized */
-                parts_len = 0;    /* -Wuninitialized */
             }
-            /* copy an escaped token */
-            Copy(parts, SvPVX(dest) + dest_cur, parts_len, char);
-            dest_cur += parts_len;
         }
         else {
-            /* copy a normal character */
-            SvPVX(dest)[dest_cur] = *cur;
+            *d = *cur;
             dest_cur++;
         }
 
@@ -703,8 +696,8 @@ tx_macro_enter(pTHX_ tx_state_t* const txst, AV* const macro, tx_pc_t const reta
 /* NOTE: tx_execute() must be surrounded in ENTER and LEAVE */
 static void
 tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv) {
+    dXCPT;
     tx_state_t st;
-
     StructCopy(base, &st, tx_state_t);
 
     st.output = output;
@@ -721,10 +714,31 @@ tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv
     }
 
     /* local $depth = $depth + 1 */
-    SAVEI32(MY_CXT.depth);
     MY_CXT.depth++;
 
-    TX_RUNOPS(&st);
+    XCPT_TRY_START {
+        TX_RUNOPS(&st);
+    }
+    XCPT_TRY_END;
+
+    /* finally */
+    MY_CXT.depth--;
+
+    XCPT_CATCH {
+        /* unroll the stack frame to fix up TXframe_OUTPUT */
+        while(st.current_frame > 0) {
+            AV* const frame = (AV*)AvARRAY(st.frame)[st.current_frame];
+            SV* tmp;
+            st.current_frame--;
+
+            /* swap st->output and TXframe_OUTPUT */
+            tmp                            = AvARRAY(frame)[TXframe_OUTPUT];
+            AvARRAY(frame)[TXframe_OUTPUT] = st.output;
+            st.output                      = tmp;
+        }
+
+        XCPT_RETHROW;
+    }
 
     /* clear temporary buffers */
     sv_setsv(st.targ, &PL_sv_undef);
@@ -1458,19 +1472,7 @@ CODE:
         }
     }
     else {
-        /* unroll the stack frame */
-        /* to fix TXframe_OUTPUT */
         /* TODO: append the stack info to msg */
-        while(st->current_frame > 0) {
-            AV* const frame = (AV*)AvARRAY(st->frame)[st->current_frame];
-            SV* tmp;
-            st->current_frame--;
-
-            /* swap st->output and TXframe_OUTPUT */
-            tmp                            = AvARRAY(frame)[TXframe_OUTPUT];
-            AvARRAY(frame)[TXframe_OUTPUT] = st->output;
-            st->output                     = tmp;
-        }
 
         if(handler) {
             PUSHMARK(SP);

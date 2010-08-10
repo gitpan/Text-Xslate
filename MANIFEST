@@ -8,7 +8,6 @@ benchmark/for.pl
 benchmark/include.pl
 benchmark/interpolate.pl
 benchmark/json.pl
-benchmark/others.pl
 benchmark/procs/fib.pl
 benchmark/procs/function.pl
 benchmark/procs/keys.pl
@@ -32,6 +31,8 @@ benchmark/template/list.mst
 benchmark/template/list.mt
 benchmark/template/list.tt
 benchmark/template/list.tx
+benchmark/x-poor-env.pl
+benchmark/x-rich-env.pl
 Changes
 example/base.tx
 example/cascade.gold
@@ -117,6 +118,9 @@ t/010_internals/018_opinfo.t
 t/010_internals/019_runtime_error.t
 t/010_internals/020_optimize.t
 t/010_internals/021_edge_cases.t
+t/010_internals/022_signal.t
+t/010_internals/023_cachepath.t
+t/010_internals/024_die_in_macros.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -234,6 +238,7 @@ t/template/myapp/cfoo.tx
 t/template/myapp/derived.tx
 t/template/oi/bad_base.tx
 t/template/oi/bad_component.tx
+t/template/other/hello.tx
 t/template/wrapper.tt
 t/template/wrapper_div.tt
 tool/opcode.pl

@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1055';
+our $VERSION = '0.1056';
 
 use Carp        ();
 use File::Spec  ();
@@ -213,22 +213,25 @@ sub find_file {
     my $cache_mtime;
     foreach my $p(@{$self->{path}}) {
         print STDOUT "  find_file: $p / $file ...\n" if _DUMP_LOAD;
+
+        my $path_id;
         if(ref $p eq 'HASH') { # virtual path
             defined(my $content = $p->{$file}) or next;
             $fullpath   = \$content;
             $orig_mtime = $^T;
+            $path_id    = 'HASH';
         }
         else {
             $fullpath = File::Spec->catfile($p, $file);
             defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
                 or next;
+            $path_id    = Text::Xslate::uri_escape($p);
         }
 
         # $file is found
-
         $cachepath = File::Spec->catfile(
             $self->{cache_dir},
-            Text::Xslate::uri_escape(ref($p) ? ref $p : $p),
+            $path_id,
             $file . 'c',
         );
         $cache_mtime = (stat($cachepath))[_ST_MTIME]; # may fail, but doesn't matter
@@ -501,7 +504,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1055.
+This document describes Text::Xslate version 0.1056.
 
 =head1 SYNOPSIS
 
@@ -560,38 +563,41 @@ Version 0.2xxx and more will be somewhat stable.
 
 =head3 High performance
 
-Xslate has a virtual machine written in XS, which is highly optimized.
-According to benchmarks, Xslate is much faster than other template
-engines (Template-Toolkit, HTML::Template::Pro, Text::MicroTemplate, etc.).
+Xslate has a virtual machine written in XS, which is highly optimized for
+rendering templates.
 
-There are benchmarks to compare template engines (see F<benchmark/> for details).
+Here is a result of F<benchmark/x-rich-env.pl> to compare various template
+engines in "rich" environment where applications are persistent and XS modules
+are available.
 
-Here is a result of F<benchmark/others.pl> to compare various template engines.
-
-    $ perl -Mblib benchmark/others.pl include
+    $ perl -Mblib benchmark/x-rich-env.pl
     Perl/5.10.1 i686-linux
     Text::Xslate/0.1055
     Text::MicroTemplate/0.13
+    Text::MicroTemplate::Extended/0.11
     Template/2.22
     Text::ClearSilver/0.10.5.4
     HTML::Template::Pro/0.9502
-    1..5
+    1..4
     ok 1 - TT: Template-Toolkit
     ok 2 - MT: Text::MicroTemplate
     ok 3 - TCS: Text::ClearSilver
     ok 4 - HTP: HTML::Template::Pro
-    ok 5 - HT: HTML::Template
     Benchmarks with 'include' (datasize=100)
-              Rate     TT     HT     MT    TCS    HTP Xslate
-    TT       149/s     --   -37%   -78%   -94%   -94%   -99%
-    HT       237/s    59%     --   -66%   -91%   -91%   -99%
-    MT       693/s   365%   193%     --   -72%   -74%   -96%
-    TCS     2511/s  1584%   961%   262%     --    -6%   -87%
-    HTP     2666/s  1688%  1026%   285%     6%     --   -86%
-    Xslate 18963/s 12618%  7911%  2636%   655%   611%     --
+              Rate     TT     MT    TCS    HTP Xslate
+    TT       131/s     --   -71%   -94%   -95%   -99%
+    MT       444/s   240%     --   -80%   -84%   -97%
+    TCS     2181/s  1570%   391%     --   -20%   -88%
+    HTP     2739/s  1997%   516%    26%     --   -85%
+    Xslate 17772/s 13505%  3899%   715%   549%     --
 
-You can see Xslate is 127 times faster than Template-Toolkit, and 7 times faster
-than HTML::Template::Pro and Text::ClearSilver, which are implemented in XS.
+According to this result, Xslate is 100+ times faster than Template-Toolkit.
+Text::MicroTemplate is a very fast template engine written in pure Perl, but
+XS-based modules, namely Text::ClearSilver, HTML::Template::Pro and Xslate
+are faster than Text::MicroTemplate. Moreover, Xslate is even faster than
+Text::ClearSilver and HTML::Template::Pro.
+
+There are benchmark scripts in the F<benchmark/> directory.
 
 =head3 Auto escaping to HTML meta characters
 
@@ -995,6 +1001,8 @@ Thanks to typester for the various inspirations.
 Thanks to clouder for the patch of adding C<AND> and C<OR> to TTerse.
 
 Thanks to punytan for the documentation improvement.
+
+Thanks to chiba for the bug reports and patches.
 
 =head1 AUTHOR
 

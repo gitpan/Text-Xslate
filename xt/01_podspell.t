@@ -49,6 +49,7 @@ XSS
 Mojo
 SCALARs
 namespace
+CGI
 
 # personal name
 lestrrat
@@ -64,3 +65,5 @@ Maki
 Daisuke
 typester
 clouder
+punytan
+chiba
