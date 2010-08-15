@@ -412,7 +412,7 @@ sub _init_basic_symbols {
     }
 
     # common separators
-    $parser->symbol(';');
+    $parser->symbol(';')->set_nud(\&nud_separator);
     $parser->define_pair('(' => ')');
     $parser->define_pair('{' => '}');
     $parser->define_pair('[' => ']');
@@ -599,28 +599,30 @@ sub tokanize {
 
     local *_ = \$parser->{input};
 
-    my $i = 0;
-    s{\G (\s) }{ $1 eq "\n" and ++$i; "" }xmsge;
-    $parser->following_newline($i);
+    TRY: {
+        my $i = 0;
+        s{\G (\s) }{ $1 eq "\n" and ++$i; "" }xmsge;
+        $parser->following_newline($i);
 
-    my $id_rx = $parser->identity_pattern;
-    if(s/\A ($id_rx)//xms){
-        return [ name => $1 ];
-    }
-    elsif(s/\A $COMMENT //xmso) {
-        goto &tokanize; # tail recursion
-    }
-    elsif(s/\A ($NUMBER | $STRING)//xmso){
-        return [ literal => $1 ];
-    }
-    elsif(s/\A ($OPERATOR_TOKEN)//xmso){
-        return [ operator => $1 ];
-    }
-    elsif(s/\A (\S+)//xms) {
-        Carp::confess("Oops: Unexpected token '$1'");
-    }
-    else { # empty
-        return [ special => '(end)' ];
+        my $id_rx = $parser->identity_pattern;
+        if(s/\A ($id_rx)//xms){
+            return [ name => $1 ];
+        }
+        elsif(s/\A $COMMENT //xmso) {
+            redo TRY; # retry
+        }
+        elsif(s/\A ($NUMBER | $STRING)//xmso){
+            return [ literal => $1 ];
+        }
+        elsif(s/\A ($OPERATOR_TOKEN)//xmso){
+            return [ operator => $1 ];
+        }
+        elsif(s/\A (\S+)//xms) {
+            Carp::confess("Oops: Unexpected token '$1'");
+        }
+        else { # empty
+            return [ special => '(end)' ];
+        }
     }
 }
 
@@ -1292,6 +1294,11 @@ sub nud_current_line {
         arity => 'literal',
         value => $self->line,
     );
+}
+
+sub nud_separator {
+    my($self, $symbol) = @_;
+    $self->_error("Invalid expression found", $symbol);
 }
 
 # -> VARS { STATEMENTS }
