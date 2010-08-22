@@ -3,33 +3,42 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1058';
+our $VERSION = '0.1999_01';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
 }
+use Text::Xslate::Util qw(
+    $DEBUG
+    $NUMBER $STRING
+    p
+);
+
+use constant _PP_OPCODE  => scalar($DEBUG =~ /\b pp=opcode  \b/xms);
+use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
+use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
+                            : _PP_BOOSTER ? 'Booster'
+                            :               'Booster'; # default
+use constant _PP_ERROR_VERBOSE => scalar($DEBUG =~ /\b pp=verbose \b/xms);
+
+use constant _DUMP_LOAD => scalar($DEBUG =~ /\b dump=load \b/xms);
 
 use Text::Xslate::PP::Const qw(:all);
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::Type::Raw;
-use Text::Xslate::Util qw($DEBUG p make_error);
 use Text::Xslate;
 
 use Carp ();
-
-use constant _PP_OPCODE  => scalar($DEBUG =~ /\b pp=opcode  \b/xms);
-use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
-
-use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
-                            : _PP_BOOSTER ? 'Booster'
-                            :               'Opcode'; # default
-
-use constant _DUMP_LOAD => scalar($DEBUG =~ /\b dump=load \b/xms);
 
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
 my $state_class = 'Text::Xslate::PP::' . _PP_BACKEND;
 
+if(_PP_ERROR_VERBOSE) {
+    Carp->import('verbose');
+}
+
+# fix up @ISA
 {
     package
         Text::Xslate;
@@ -37,7 +46,10 @@ my $state_class = 'Text::Xslate::PP::' . _PP_BACKEND;
         # the compiler use %Text::Xslate::OPS in order to optimize the code
         *OPS = \%Text::Xslate::PP::OPS;
     }
-    unshift our @ISA, 'Text::Xslate::PP';
+    our @ISA = qw(Text::Xslate::PP);
+    package
+        Text::Xslate::PP;
+    our @ISA = qw(Text::Xslate::Engine);
 }
 
 our $_depth = 0;
@@ -116,135 +128,25 @@ sub current_line {
 
 # >> copied and modified from Text::Xslate
 
-use Text::Xslate::Util qw(
-    $NUMBER $STRING
-    literal_to_value
-);
-
-my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
-
-BEGIN {
-    *_ST_MTIME = sub() { 9 }; # see perldoc -f stat
-}
-
-# load compiled templates if they are fresh enough
-sub _load_compiled {
-    my($self, $fi, $threshold) = @_;
-
-    if($self->{cache} >= 2) {
-        # threshold is the most latest modified time of all the related caches,
-        # so if the cache level >= 2, they seems always fresh.
-        $threshold = 9**9**9;
-    }
-    else {
-        $threshold ||= $fi->{cache_mtime};
-    }
-    # see also tx_load_template() in xs/Text-Xslate.xs
-    if(!( defined($fi->{cache_mtime}) and $self->{cache} >= 1
-            and $threshold >= $fi->{orig_mtime} )) {
-        printf "  _load_compiled: no fresh cache: %s, %s", $threshold, Text::Xslate::Util::p($fi) if _DUMP_LOAD;
-        $fi->{cache_mtime} = undef;
-        return undef;
-    }
-
-    my $cachepath = $fi->{cachepath};
-    open my($in), '<' . $self->{input_layer}, $cachepath
-        or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
-
-    if(scalar(<$in>) ne $self->_magic_token($fi->{fullpath})) {
-        return undef;
-    }
-
-    $self->{_loaded_subref}->{ $cachepath } = undef;
-    # parse assembly
-    my @asm;
-    while(defined(my $s = <$in>)) {
-        next if $s =~ m{\A [ \t]* (?: \# | // )}xms; # comments
-        chomp $s;
-
-        if ( $s eq 'ppbooster' ){ # pp::booster code
-            {
-                local $/;
-                package Text::Xslate::PP::Booster;
-                $self->{_loaded_subref}->{ $cachepath } = eval <$in>;
-            }
-            @asm = @{ $self->{_loaded_subref}->{ $cachepath }->[0] };
-            for ( @asm ) {
-                next if $_->[0] ne 'depend';
-                my $dep_mtime = (stat $_->[1])[_ST_MTIME];
-                if(!defined $dep_mtime) {
-                    $dep_mtime = 9**9**9; # force reload
-                    Carp::carp( sprintf("Xslate: Failed to stat %s (ignored): $!", $_->[1]) );
-                }
-                if($dep_mtime > $threshold){
-                    printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
-                        $_->[1],     scalar localtime($dep_mtime),
-                        $cachepath, scalar localtime($threshold)
-                            if _DUMP_LOAD;
-                    return $self->{_loaded_subref}->{ $cachepath } = undef;
-                }
-            }
-            last;
-        }
-
-        # See ::Compiler::as_assembly()
-        # "$opname $arg #$line:$file *$symbol // $comment"
-        my($name, $value, $line, $file, $symbol) = $s =~ m{
-            \A
-                [ \t]*
-                ($IDENT)                        # an opname
-
-                # the following components are optional
-                (?: [ \t]+ ($STRING|[+-]?$NUMBER) )? # operand
-                (?: [ \t]+ \#($NUMBER)          # line number
-                    (?: [:] ($STRING))?         # file name
-                )?
-                (?: [ \t]+ \*($STRING) )?       # symbol name
-                (?: [ \t]* // [^\n]*)?          # comments (anything)
-            \z
-        }xmsog or $self->_error("LoadError: Cannot parse assembly (line $.): $s");
-
-        $value = literal_to_value($value);
-
-        # checks the modified of dependencies
-        if($name eq 'depend') {
-            my $dep_mtime = (stat $value)[_ST_MTIME];
-            if(!defined $dep_mtime) {
-                $dep_mtime = 9**9**9; # force reload
-                Carp::carp("Xslate: Failed to stat $value (ignored): $!");
-            }
-            if($dep_mtime > $threshold){
-                printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
-                    $value,     scalar localtime($dep_mtime),
-                    $cachepath, scalar localtime($threshold)
-                        if _DUMP_LOAD;
-
-                return undef;
-            }
-        }
-
-        push @asm, [ $name, $value, $line, $file, $symbol ];
-    }
-
-    if(_DUMP_LOAD) {
-        printf STDERR "  _load_compiled: cache(%s)\n",
-            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
-    }
-
-    return \@asm;
-}
-
-# << copied from Text::Xslate
-
 sub _assemble {
-    my ( $self, $proto, $name, $fullpath, $cachepath, $mtime ) = @_;
-    my $len = scalar( @$proto );
-    my $st  = $state_class->new();
+    my ( $self, $asm, $name, $fullpath, $cachepath, $mtime ) = @_;
 
     unless ( defined $name ) { # $name ... filename
         $name = '<string>';
         $fullpath = $cachepath = undef;
         $mtime    = time();
+    }
+
+    my $st  = $state_class->new();
+
+    if(_PP_BACKEND eq 'Booster'){
+        if($asm->[0][0] eq '_ppbooster') {
+            my $ppbooster = shift @{$asm};
+            $st->{ booster_code } = Text::Xslate::PP::Booster->compile($ppbooster->[1]);
+        }
+        else {
+            Carp::croak("Oops: No booster code: ", p($asm));
+        }
     }
 
     $st->symbol({ %{$self->{ function }} });
@@ -268,8 +170,9 @@ sub _assemble {
     $st->frame( [] );
     $st->current_frame( -1 );
 
-    my $mainframe = tx_push_frame( $st );
+    my $len = scalar( @$asm );
 
+    my $mainframe = tx_push_frame( $st );
     $mainframe->[ Text::Xslate::PP::TXframe_NAME ]    = 'main';
     $mainframe->[ Text::Xslate::PP::TXframe_RETADDR ] = $len;
 
@@ -281,7 +184,7 @@ sub _assemble {
     my $oi_line = -1;
     my $oi_file = $name;
     for ( my $i = 0; $i < $len; $i++ ) {
-        my $c = $proto->[ $i ];
+        my $c = $asm->[ $i ];
 
         if ( ref $c ne 'ARRAY' ) {
             Carp::croak( sprintf( "Oops: Broken code found on [%d]",  $i ) );
@@ -383,15 +286,6 @@ sub _assemble {
             push @{ $tmpl }, $code->[ $i ]->{ arg };
         }
 
-    }
-
-    if ( defined $cachepath and $self->{_loaded_subref}->{ $cachepath } ) {
-        $st->{ booster_code } = $self->{_loaded_subref}->{ $cachepath }->[1];
-    }
-    elsif ( _PP_BACKEND eq 'Booster' ) {
-        require Text::Xslate::PP::Compiler;
-        $st->{ booster_code }
-             = Text::Xslate::PP::Compiler::CodeGenerator->new()->opcode_to_perlcode( $proto );
     }
 
     push @{$code}, {
@@ -502,6 +396,26 @@ sub tx_concat {
         }
         else {
             return $lhs . $rhs;
+        }
+    }
+}
+
+sub tx_repeat {
+    my($lhs, $rhs) = @_;
+    if(!defined($lhs)) {
+        $_current_st->warn(undef, "Use of nil for repeat operator");
+    }
+    elsif(!Scalar::Util::looks_like_number($rhs)) {
+        $_current_st->error(undef, "Repeat count must be a number, not %s",
+            Text::Xslate::Util::neat($rhs));
+        return undef;
+    }
+    else {
+        if( ref( $lhs ) eq TXt_RAW ) {
+            return Text::Xslate::Util::mark_raw( Text::Xslate::Util::unmark_raw($lhs) x $rhs );
+        }
+        else {
+            return $lhs x $rhs;
         }
     }
 }
@@ -617,10 +531,19 @@ sub tx_execute {
     local $st->{local_stack};
     local $st->{SP} = [];
 
-    if ( $st->{ booster_code } ) {
+    if ( _PP_BACKEND eq 'Booster' ) {
+        if(_PP_ERROR_VERBOSE and ref $st->{ booster_code } ne 'CODE') {
+            Carp::croak("Oops: Not a CODE reference: "
+                . Text::Xslate::Util::neat($st->{ booster_code }));
+        }
         return $st->{ booster_code }->( $st );
     }
     else {
+        if(_PP_ERROR_VERBOSE and ref $st->{code}->[0]->{ exec_code } ne 'CODE') {
+            Carp::croak("Oops: Not a CODE reference: "
+                . Text::Xslate::Util::neat($st->{code}->[0]->{ exec_code }));
+        }
+
         local $st->{sa};
         local $st->{sb};
         $st->{output} = '';
@@ -637,7 +560,7 @@ sub _error_handler {
     local $SIG{__WARN__} = $_orig_warn_handler;
     local $SIG{__DIE__}  = $_orig_die_handler;
 
-    if($str =~ s/at .+Text.Xslate.PP.+ line \d+\.\n$//) {
+    if(!_PP_ERROR_VERBOSE && $str =~ s/at .+Text.Xslate.PP.+ line \d+\.\n$//) {
         $str = Carp::shortmess($str);
     }
 
@@ -654,7 +577,7 @@ sub _error_handler {
         $file = \$engine->{string_buffer};
     }
 
-    my $mess   = make_error($engine, $str, $file, $opcode->{line},
+    my $mess   = Text::Xslate::Util::make_error($engine, $str, $file, $opcode->{line},
         sprintf( "&%s[%d]", $name, $st->{pc} ));
 
     if ( !$die ) {
@@ -700,7 +623,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1058.
+This document describes Text::Xslate::PP version 0.1999_01.
 
 =head1 DESCRIPTION
 
@@ -722,12 +645,14 @@ XS/PP mode might be switched with C<< $ENV{XSLATE} = 'pp' or 'xs' >>.
 From 0.1024 on, there are two pure Perl engines.
 C<Text::Xslate::PP::Booster>, enabled by C<< $ENV{XSLATE} = 'pp=booster' >>,
 generates optimized Perl code from intermediate code.
-C<Text::Xlsate::PP::Opcode>, enabled by C<< $ENV{XSLATE = 'pp=opcode' >>,
+C<Text::Xlsate::PP::Opcode>, enabled by C<< $ENV{XSLATE} = 'pp=opcode' >>,
 executes intermediate code directly, emulating the virtual machine in pure Perl.
 
-PP::Booster is much faster than PP::Opcode, but it is less stable,
-so the default pure Perl engine is B<PP::Opcode>, but PP::Booster will become
-the default in a future if it is stable enough.
+PP::Booster is much faster than PP::Opcode, but it may be less stable.
+The default pure Perl engine is B<PP::Booster>, so if you run into problems,
+please try C<< $ENV{XSLATE} = 'pp=opcode' >>.
+
+C<< $ENV{XSLATE} = 'pp=verbose' } >> may be useful for debugging.
 
 =head1 NOTE
 
@@ -741,39 +666,25 @@ modules are not available.
 
     $ perl -Mblib benchmark/x-poor-env.pl
     Perl/5.10.1 i686-linux
-    Text::Xslate/0.1055
+    Xslate backend: Booster
+    Text::Xslate/0.1058
     Template/2.22
     HTML::Template/2.9
-    Text::MicroTemplate/0.13
+    Text::MicroTemplate/0.15
     Text::MicroTemplate::Extended/0.11
     1..3
     ok 1 - TT: Template-Toolkit
     ok 2 - MT: Text::MicroTemplate
     ok 3 - HT: HTML::Template
     Benchmarks with 'include' (datasize=100)
-             Rate     TT Xslate     HT     MT
-    TT     82.4/s     --   -37%   -64%   -87%
-    Xslate  130/s    58%     --   -43%   -80%
-    HT      230/s   179%    77%     --   -65%
-    MT      654/s   695%   404%   185%     --
-
-
-Yes, this is slow, but somewhat faster than Template-Toolkit.
-
-Moreover, there is another pure Perl engine: PP::Booster, which
-is faster than PP::Opcode.
-
-    $ perl -Mblib benchmark/x-poor-env.pl --booster
-    (snip)
-    Benchmarks with 'include' (datasize=100)
              Rate     TT     HT Xslate     MT
-    TT     83.0/s     --   -63%   -67%   -87%
-    HT      223/s   169%     --   -10%   -64%
-    Xslate  249/s   200%    12%     --   -60%
-    MT      627/s   655%   181%   152%     --
+    TT     76.1/s     --   -60%   -61%   -82%
+    HT      189/s   149%     --    -3%   -56%
+    Xslate  196/s   158%     4%     --   -54%
+    MT      429/s   463%   126%   118%     --
 
-According to this result, PP::Booster is 2 times faster than PP::Opcode,
-as fast as HTML::Template, and 3 times faster than Template-Toolkit.
+According to this result, PP::Booster is over 2 times faster than Template::Toolkit,
+and as fast as HTML::Template, but slower than Text::MicroTemplate.
 
 =head1 SEE ALSO
 

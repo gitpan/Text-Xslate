@@ -32,11 +32,12 @@ foreach my $code(
     q{ nil | html },
     q{ 1 ? raw(nil)  : "UNLIKELY" },
     q{ 1 ? html(nil) : "UNLIKELY" },
+    q{ $empty x 10 },
 ) {
     $warn = '';
 
     my $out = eval {
-        $tx->render_string("<: $code :>", { h => {'' => 'foo'}, a => [42] });
+        $tx->render_string("<: $code :>", { h => {'' => 'foo' }, a => [42] });
     };
 
     is $out,  '', $code;
@@ -123,6 +124,15 @@ like $warn, qr/\b MyObject \b/xms;
 like $warn, qr/at $FILE line \d+/, 'warns come from the file';
 is $@,  '';
 
+$warn = '';
+$out = eval {
+    $tx->render_string('<: $x % 0 :>', {x => 42});
+};
+
+is $out,  'NaN';
+like $warn, qr/Illegal modulus zero/;
+is $@,    '';
+
 note 'verbose => 2';
 
 $tx = Text::Xslate->new(
@@ -141,6 +151,7 @@ foreach my $code(
     q{ nil | html },
     q{ 1 ? raw(nil)  : "UNLIKELY" },
     q{ 1 ? html(nil) : "UNLIKELY" },
+    q{ $empty x 10 },
 ) {
     $warn = '';
     my $out = eval {
@@ -162,7 +173,7 @@ is $out,  '0';
 is $warn, '';
 is $@,    '';
 
-
 is $perl_warnings, '', "Perl doesn't produce warnings";
+
 
 done_testing;

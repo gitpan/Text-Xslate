@@ -134,6 +134,7 @@ t/020_interface/004_no_vars.t
 t/020_interface/005_util.t
 t/020_interface/006_psgi.t
 t/020_interface/007_data_section.t
+t/020_interface/008_type.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t
@@ -156,15 +157,14 @@ t/030_kolon/019_explicit_interpolate.t
 t/030_kolon/020_chomp.t
 t/030_kolon/021_overlay.t
 t/030_kolon/022_given.t
-t/030_kolon/023_escape.t
+t/030_kolon/023_bitwise.t
 t/030_kolon/024_localize_vars.t
 t/030_kolon/025_objectliteral.t
 t/030_kolon/026_constant.t
 t/030_kolon/027_lambda.t
 t/030_kolon/028_smartmatch.t
 t/030_kolon/029_blockfilter.t
-t/030_kolon/030_bitwise.t
-t/030_kolon/031_xfuncs.t
+t/030_kolon/030_xfuncs.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t

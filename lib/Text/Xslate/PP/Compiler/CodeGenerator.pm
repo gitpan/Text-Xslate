@@ -10,12 +10,13 @@ use Text::Xslate::Util qw(
 use Carp ();
 use Scalar::Util ();
 
-use Text::Xslate::PP::Const;
 use Text::Xslate::Util qw(
     $DEBUG p neat
     value_to_literal
     mark_raw unmark_raw html_escape
 );
+use Text::Xslate::PP::Const;
+use Text::Xslate::PP::Booster;
 
 use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
@@ -60,17 +61,12 @@ has stash => ( is => 'rw', default => sub { {}; } ); # store misc data
 #
 # public APIs
 #
-
 sub opcode_to_perlcode {
     my ( $self, $opcode ) = @_;
 
     my $perlcode = $self->opcode_to_perlcode_string( $opcode );
-
-    print STDERR "$perlcode\n" if _DUMP_PP;
-
-    package Text::Xslate::PP::Booster;
-
-    return eval($perlcode) || Carp::confess("Eval error: $@");
+    print STDERR $perlcode, "\n" if _DUMP_PP;
+    return Text::Xslate::PP::Booster->compile($perlcode);
 }
 
 
@@ -401,7 +397,20 @@ $CODE_MANIP{ 'div' } = sub {
 
 $CODE_MANIP{ 'mod' } = sub {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( '( %s %% %s )', $self->sb(), $self->sa() ) );
+    $self->sa( sprintf(<<'CODE', $self->sb(), $self->sa() ) );
+    do {
+        my $lhs = %s;
+        my $rhs = %s;
+        if($rhs == 0) {
+            $st->error(undef, "Illegal modulus zero");
+            'NaN';
+        }
+        else {
+            $lhs %% $rhs;
+        }
+    }
+CODE
+
     $self->optimize_to_print( 'num' );
 };
 
@@ -411,6 +420,10 @@ $CODE_MANIP{ 'concat' } = sub {
     $self->sa( sprintf( 'Text::Xslate::PP::tx_concat( %s, %s )', $self->sb(), $self->sa() ) );
 };
 
+$CODE_MANIP{ 'repeat' } = sub {
+    my ( $self, $arg, $line ) = @_;
+    $self->sa( sprintf( 'Text::Xslate::PP::tx_repeat( %s, %s )', $self->sb(), $self->sa() ) );
+};
 
 $CODE_MANIP{ 'bitor' } = sub {
     my ( $self, $arg, $line ) = @_;

@@ -30,6 +30,7 @@ TXC(mul);
 TXC(div);
 TXC(mod);
 TXC_w_sv(concat);
+TXC_w_sv(repeat);
 TXC(bitor);
 TXC(bitand);
 TXC(bitxor);
@@ -97,44 +98,45 @@ enum tx_opcode_t {
     TXOP_div, /* 24 */
     TXOP_mod, /* 25 */
     TXOP_concat, /* 26 */
-    TXOP_bitor, /* 27 */
-    TXOP_bitand, /* 28 */
-    TXOP_bitxor, /* 29 */
-    TXOP_bitneg, /* 30 */
-    TXOP_and, /* 31 */
-    TXOP_dand, /* 32 */
-    TXOP_or, /* 33 */
-    TXOP_dor, /* 34 */
-    TXOP_not, /* 35 */
-    TXOP_minus, /* 36 */
-    TXOP_max_index, /* 37 */
-    TXOP_builtin_mark_raw, /* 38 */
-    TXOP_builtin_unmark_raw, /* 39 */
-    TXOP_builtin_html_escape, /* 40 */
-    TXOP_match, /* 41 */
-    TXOP_eq, /* 42 */
-    TXOP_ne, /* 43 */
-    TXOP_lt, /* 44 */
-    TXOP_le, /* 45 */
-    TXOP_gt, /* 46 */
-    TXOP_ge, /* 47 */
-    TXOP_ncmp, /* 48 */
-    TXOP_scmp, /* 49 */
-    TXOP_fetch_symbol, /* 50 */
-    TXOP_funcall, /* 51 */
-    TXOP_macro_end, /* 52 */
-    TXOP_methodcall_s, /* 53 */
-    TXOP_make_array, /* 54 */
-    TXOP_make_hash, /* 55 */
-    TXOP_enter, /* 56 */
-    TXOP_leave, /* 57 */
-    TXOP_goto, /* 58 */
-    TXOP_depend, /* 59 */
-    TXOP_macro_begin, /* 60 */
-    TXOP_macro_nargs, /* 61 */
-    TXOP_macro_outer, /* 62 */
-    TXOP_set_opinfo, /* 63 */
-    TXOP_end, /* 64 */
+    TXOP_repeat, /* 27 */
+    TXOP_bitor, /* 28 */
+    TXOP_bitand, /* 29 */
+    TXOP_bitxor, /* 30 */
+    TXOP_bitneg, /* 31 */
+    TXOP_and, /* 32 */
+    TXOP_dand, /* 33 */
+    TXOP_or, /* 34 */
+    TXOP_dor, /* 35 */
+    TXOP_not, /* 36 */
+    TXOP_minus, /* 37 */
+    TXOP_max_index, /* 38 */
+    TXOP_builtin_mark_raw, /* 39 */
+    TXOP_builtin_unmark_raw, /* 40 */
+    TXOP_builtin_html_escape, /* 41 */
+    TXOP_match, /* 42 */
+    TXOP_eq, /* 43 */
+    TXOP_ne, /* 44 */
+    TXOP_lt, /* 45 */
+    TXOP_le, /* 46 */
+    TXOP_gt, /* 47 */
+    TXOP_ge, /* 48 */
+    TXOP_ncmp, /* 49 */
+    TXOP_scmp, /* 50 */
+    TXOP_fetch_symbol, /* 51 */
+    TXOP_funcall, /* 52 */
+    TXOP_macro_end, /* 53 */
+    TXOP_methodcall_s, /* 54 */
+    TXOP_make_array, /* 55 */
+    TXOP_make_hash, /* 56 */
+    TXOP_enter, /* 57 */
+    TXOP_leave, /* 58 */
+    TXOP_goto, /* 59 */
+    TXOP_depend, /* 60 */
+    TXOP_macro_begin, /* 61 */
+    TXOP_macro_nargs, /* 62 */
+    TXOP_macro_outer, /* 63 */
+    TXOP_set_opinfo, /* 64 */
+    TXOP_end, /* 65 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -166,6 +168,7 @@ static const U8 tx_oparg[] = {
     0U, /* div */
     0U, /* mod */
     TXCODE_W_SV, /* concat */
+    TXCODE_W_SV, /* repeat */
     0U, /* bitor */
     0U, /* bitand */
     0U, /* bitxor */
@@ -235,6 +238,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(div), newSViv(TXOP_div));
     (void)hv_stores(ops, STRINGIFY(mod), newSViv(TXOP_mod));
     (void)hv_stores(ops, STRINGIFY(concat), newSViv(TXOP_concat));
+    (void)hv_stores(ops, STRINGIFY(repeat), newSViv(TXOP_repeat));
     (void)hv_stores(ops, STRINGIFY(bitor), newSViv(TXOP_bitor));
     (void)hv_stores(ops, STRINGIFY(bitand), newSViv(TXOP_bitand));
     (void)hv_stores(ops, STRINGIFY(bitxor), newSViv(TXOP_bitxor));
@@ -305,6 +309,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_div,
     TXCODE_mod,
     TXCODE_concat,
+    TXCODE_repeat,
     TXCODE_bitor,
     TXCODE_bitand,
     TXCODE_bitxor,
@@ -381,6 +386,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(div),
         LABEL_PTR(mod),
         LABEL_PTR(concat),
+        LABEL_PTR(repeat),
         LABEL_PTR(bitor),
         LABEL_PTR(bitand),
         LABEL_PTR(bitxor),
@@ -454,6 +460,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(div                 ): TXCODE_div                 (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(mod                 ): TXCODE_mod                 (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(concat              ): TXCODE_concat              (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(repeat              ): TXCODE_repeat              (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(bitor               ): TXCODE_bitor               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(bitand              ): TXCODE_bitand              (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(bitxor              ): TXCODE_bitxor              (aTHX_ st); goto *(st->pc->exec_code);

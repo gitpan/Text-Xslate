@@ -80,44 +80,45 @@ our %OPS = (
     div              => 24,
     mod              => 25,
     concat           => 26,
-    bitor            => 27,
-    bitand           => 28,
-    bitxor           => 29,
-    bitneg           => 30,
-    and              => 31,
-    dand             => 32,
-    or               => 33,
-    dor              => 34,
-    not              => 35,
-    minus            => 36,
-    max_index        => 37,
-    builtin_mark_raw => 38,
-    builtin_unmark_raw => 39,
-    builtin_html_escape => 40,
-    match            => 41,
-    eq               => 42,
-    ne               => 43,
-    lt               => 44,
-    le               => 45,
-    gt               => 46,
-    ge               => 47,
-    ncmp             => 48,
-    scmp             => 49,
-    fetch_symbol     => 50,
-    funcall          => 51,
-    macro_end        => 52,
-    methodcall_s     => 53,
-    make_array       => 54,
-    make_hash        => 55,
-    enter            => 56,
-    leave            => 57,
-    goto             => 58,
-    depend           => 59,
-    macro_begin      => 60,
-    macro_nargs      => 61,
-    macro_outer      => 62,
-    set_opinfo       => 63,
-    end              => 64,
+    repeat           => 27,
+    bitor            => 28,
+    bitand           => 29,
+    bitxor           => 30,
+    bitneg           => 31,
+    and              => 32,
+    dand             => 33,
+    or               => 34,
+    dor              => 35,
+    not              => 36,
+    minus            => 37,
+    max_index        => 38,
+    builtin_mark_raw => 39,
+    builtin_unmark_raw => 40,
+    builtin_html_escape => 41,
+    match            => 42,
+    eq               => 43,
+    ne               => 44,
+    lt               => 45,
+    le               => 46,
+    gt               => 47,
+    ge               => 48,
+    ncmp             => 49,
+    scmp             => 50,
+    fetch_symbol     => 51,
+    funcall          => 52,
+    macro_end        => 53,
+    methodcall_s     => 54,
+    make_array       => 55,
+    make_hash        => 56,
+    enter            => 57,
+    leave            => 58,
+    goto             => 59,
+    depend           => 60,
+    macro_begin      => 61,
+    macro_nargs      => 62,
+    macro_outer      => 63,
+    set_opinfo       => 64,
+    end              => 65,
 ); # %OPS
 
 our @OPCODE = (
@@ -148,44 +149,45 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_div,                 # 24
     \&Text::Xslate::PP::Opcode::op_mod,                 # 25
     \&Text::Xslate::PP::Opcode::op_concat,              # 26
-    \&Text::Xslate::PP::Opcode::op_bitor,               # 27
-    \&Text::Xslate::PP::Opcode::op_bitand,              # 28
-    \&Text::Xslate::PP::Opcode::op_bitxor,              # 29
-    \&Text::Xslate::PP::Opcode::op_bitneg,              # 30
-    \&Text::Xslate::PP::Opcode::op_and,                 # 31
-    \&Text::Xslate::PP::Opcode::op_dand,                # 32
-    \&Text::Xslate::PP::Opcode::op_or,                  # 33
-    \&Text::Xslate::PP::Opcode::op_dor,                 # 34
-    \&Text::Xslate::PP::Opcode::op_not,                 # 35
-    \&Text::Xslate::PP::Opcode::op_minus,               # 36
-    \&Text::Xslate::PP::Opcode::op_max_index,           # 37
-    \&Text::Xslate::PP::Opcode::op_builtin_mark_raw,    # 38
-    \&Text::Xslate::PP::Opcode::op_builtin_unmark_raw,  # 39
-    \&Text::Xslate::PP::Opcode::op_builtin_html_escape, # 40
-    \&Text::Xslate::PP::Opcode::op_match,               # 41
-    \&Text::Xslate::PP::Opcode::op_eq,                  # 42
-    \&Text::Xslate::PP::Opcode::op_ne,                  # 43
-    \&Text::Xslate::PP::Opcode::op_lt,                  # 44
-    \&Text::Xslate::PP::Opcode::op_le,                  # 45
-    \&Text::Xslate::PP::Opcode::op_gt,                  # 46
-    \&Text::Xslate::PP::Opcode::op_ge,                  # 47
-    \&Text::Xslate::PP::Opcode::op_ncmp,                # 48
-    \&Text::Xslate::PP::Opcode::op_scmp,                # 49
-    \&Text::Xslate::PP::Opcode::op_fetch_symbol,        # 50
-    \&Text::Xslate::PP::Opcode::op_funcall,             # 51
-    \&Text::Xslate::PP::Opcode::op_macro_end,           # 52
-    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 53
-    \&Text::Xslate::PP::Opcode::op_make_array,          # 54
-    \&Text::Xslate::PP::Opcode::op_make_hash,           # 55
-    \&Text::Xslate::PP::Opcode::op_enter,               # 56
-    \&Text::Xslate::PP::Opcode::op_leave,               # 57
-    \&Text::Xslate::PP::Opcode::op_goto,                # 58
-    \&Text::Xslate::PP::Opcode::op_depend,              # 59
-    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 60
-    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 61
-    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 62
-    \&Text::Xslate::PP::Opcode::op_set_opinfo,          # 63
-    \&Text::Xslate::PP::Opcode::op_end,                 # 64
+    \&Text::Xslate::PP::Opcode::op_repeat,              # 27
+    \&Text::Xslate::PP::Opcode::op_bitor,               # 28
+    \&Text::Xslate::PP::Opcode::op_bitand,              # 29
+    \&Text::Xslate::PP::Opcode::op_bitxor,              # 30
+    \&Text::Xslate::PP::Opcode::op_bitneg,              # 31
+    \&Text::Xslate::PP::Opcode::op_and,                 # 32
+    \&Text::Xslate::PP::Opcode::op_dand,                # 33
+    \&Text::Xslate::PP::Opcode::op_or,                  # 34
+    \&Text::Xslate::PP::Opcode::op_dor,                 # 35
+    \&Text::Xslate::PP::Opcode::op_not,                 # 36
+    \&Text::Xslate::PP::Opcode::op_minus,               # 37
+    \&Text::Xslate::PP::Opcode::op_max_index,           # 38
+    \&Text::Xslate::PP::Opcode::op_builtin_mark_raw,    # 39
+    \&Text::Xslate::PP::Opcode::op_builtin_unmark_raw,  # 40
+    \&Text::Xslate::PP::Opcode::op_builtin_html_escape, # 41
+    \&Text::Xslate::PP::Opcode::op_match,               # 42
+    \&Text::Xslate::PP::Opcode::op_eq,                  # 43
+    \&Text::Xslate::PP::Opcode::op_ne,                  # 44
+    \&Text::Xslate::PP::Opcode::op_lt,                  # 45
+    \&Text::Xslate::PP::Opcode::op_le,                  # 46
+    \&Text::Xslate::PP::Opcode::op_gt,                  # 47
+    \&Text::Xslate::PP::Opcode::op_ge,                  # 48
+    \&Text::Xslate::PP::Opcode::op_ncmp,                # 49
+    \&Text::Xslate::PP::Opcode::op_scmp,                # 50
+    \&Text::Xslate::PP::Opcode::op_fetch_symbol,        # 51
+    \&Text::Xslate::PP::Opcode::op_funcall,             # 52
+    \&Text::Xslate::PP::Opcode::op_macro_end,           # 53
+    \&Text::Xslate::PP::Opcode::op_methodcall_s,        # 54
+    \&Text::Xslate::PP::Opcode::op_make_array,          # 55
+    \&Text::Xslate::PP::Opcode::op_make_hash,           # 56
+    \&Text::Xslate::PP::Opcode::op_enter,               # 57
+    \&Text::Xslate::PP::Opcode::op_leave,               # 58
+    \&Text::Xslate::PP::Opcode::op_goto,                # 59
+    \&Text::Xslate::PP::Opcode::op_depend,              # 60
+    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 61
+    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 62
+    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 63
+    \&Text::Xslate::PP::Opcode::op_set_opinfo,          # 64
+    \&Text::Xslate::PP::Opcode::op_end,                 # 65
 ); # @OPCODE
 
 our @OPARGS = (
@@ -216,6 +218,7 @@ our @OPARGS = (
     0,             # div
     0,             # mod
     TXCODE_W_SV,   # concat
+    TXCODE_W_SV,   # repeat
     0,             # bitor
     0,             # bitand
     0,             # bitxor

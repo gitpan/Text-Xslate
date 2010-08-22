@@ -53,6 +53,7 @@ my %binary = (
     '%'  => 'mod',
 
     '~'  => 'concat',
+    'x'  => 'repeat',
 
     '+|' => 'bitor',
     '+&' => 'bitand',
@@ -127,13 +128,10 @@ has dependencies => (
     init_arg => undef,
 );
 
-has escape_mode => (
-    is  => 'rw',
-    isa => enum([qw(html none)]),
-
+has type => (
+    is      => 'rw',
+    isa     => enum([qw(html xml text)]),
     default => 'html',
-
-    init_arg => 'escape',
 );
 
 has syntax => (
@@ -282,7 +280,7 @@ sub opcode { # build an opcode
     my $file   = $args{file};
     if(not defined $file) {
         $file = $self->filename;
-        if($file ne $self->current_file) {
+        if(defined $file and $file ne $self->current_file) {
             $self->current_file($file);
         }
         else {
@@ -564,7 +562,7 @@ sub _generate_command {
     my @code;
 
     my $proc = $node->id;
-    if($proc eq 'print' and $self->escape_mode ne 'html') {
+    if($proc eq 'print' and $self->type eq 'text') {
         $proc = 'print_raw';
     }
 

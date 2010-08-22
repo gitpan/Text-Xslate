@@ -16,8 +16,12 @@ use constant _DUMP_PP => scalar($DEBUG =~ /\b dump=pp \b/xms);
 
 no warnings 'recursion';
 
-our @CARP_NOT = qw(Text::Xslate);
-
+require Text::Xslate::PP;
+if(!Text::Xslate::PP::_PP_ERROR_VERBOSE()) {
+    our @CARP_NOT = qw(
+        Text::Xslate
+    );
+}
 our $_current_frame;
 
 
@@ -241,14 +245,29 @@ sub op_div {
 
 
 sub op_mod {
-    $_[0]->{sa} = $_[0]->{sb} % $_[0]->{sa};
-    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+    my($st) = @_;
+    my $lhs = int $st->{sb};
+    my $rhs = int $st->{sa};
+    if($rhs == 0) {
+        $st->error(undef, "Illegal modulus zero");
+        $st->{sa} = 'NaN';
+    }
+    else {
+        $st->{sa} = $lhs % $rhs;
+    }
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
 
 sub op_concat {
     my($st) = @_;
     $st->{sa} = Text::Xslate::PP::tx_concat($st->{sb}, $st->{sa});
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
+}
+
+sub op_repeat {
+    my($st) = @_;
+    $st->{sa} = Text::Xslate::PP::tx_repeat($st->{sb}, $st->{sa});
     goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
 
