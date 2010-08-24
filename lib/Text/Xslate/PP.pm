@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1999_01';
+our $VERSION = '0.1999_02';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -332,6 +332,9 @@ sub _assemble {
     sub uri_escape {
         my($s) = @_;
         return $s if not defined $s;
+        # XXX: This must be the same as uri_escape() in XS.
+        #      See also tx_uri_escape() in xs/Text-Xslate.xs.
+        utf8::encode($s) if utf8::is_utf8($s);
         $s =~ s/($uri_unsafe_rfc3986)/sprintf '%%' . '%02X', ord $1/xmsgeo;
         return $s;
     }
@@ -623,7 +626,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1999_01.
+This document describes Text::Xslate::PP version 0.1999_02.
 
 =head1 DESCRIPTION
 

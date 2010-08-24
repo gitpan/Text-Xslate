@@ -197,6 +197,7 @@ t/100_plugin/100_error.t
 t/200_app/001_hello.t
 t/200_app/002_tree.t
 t/200_app/003_runner.t
+t/200_app/004_encoding.t
 t/200_app/simple/dont_touch.tx
 t/200_app/simple/goodbye.tx
 t/200_app/simple/hello.tx

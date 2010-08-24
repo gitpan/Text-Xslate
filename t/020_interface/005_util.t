@@ -7,6 +7,7 @@ use Text::Xslate::Util qw(
     value_to_literal
     read_around
     html_builder
+    uri_escape
 );
 
 my @set = (
@@ -83,6 +84,20 @@ X
 
 my $hb = html_builder { "<br />" };
 is $hb->(), "<br />";
+
+# uri_escape
+
+is uri_escape(undef), undef;
+is uri_escape(""), "";
+is uri_escape("abc"), "abc";
+is uri_escape("\0foo\0"), "%00foo%00";
+
+# it encodes the arg as UTF-8 if perl string is passed
+is uri_escape(qq{"Camel" is \x{99F1}\x{99DD} in Japanese}),
+               q{%22Camel%22%20is%20%E9%A7%B1%E9%A7%9D%20in%20Japanese};
+
+# it doesn't touch the encoding of the arg if byte stream is passed
+is uri_escape("\xE9p\xE9k"), q{%E9p%E9k}; # "camel" in Japanese kanji (Shift_JIS)
 
 
 done_testing;

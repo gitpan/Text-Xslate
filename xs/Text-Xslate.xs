@@ -106,7 +106,7 @@ tx_funcall(pTHX_ tx_state_t* const st, SV* const func, const char* const name);
 static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key);
 
-static inline bool
+STATIC_INLINE bool
 tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv);
 
 static void
@@ -118,7 +118,7 @@ tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src);
 static SV*
 tx_html_escape(pTHX_ SV* const str);
 
-static inline I32
+STATIC_INLINE I32
 tx_sv_eq(pTHX_ SV* const a, SV* const b);
 
 static I32
@@ -252,7 +252,7 @@ tx_call_sv(pTHX_ tx_state_t* const st, SV* const sv, I32 const flags, const char
     SV* retval;
     call_sv(sv, G_SCALAR | G_EVAL | flags);
     retval = TX_pop();
-    if(UNLIKELY(!!sv_true(ERRSV))) {
+    if(TX_CATCH_ERROR()) {
         tx_error(aTHX_ st, "%"SVf "\n"
             "\t... exception cought on %s", ERRSV, name);
     }
@@ -354,7 +354,7 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     return retval ? retval : &PL_sv_undef;
 }
 
-static inline bool
+STATIC_INLINE bool
 tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv) {
     if(SvROK(sv) && SvOBJECT(SvRV(sv))) {
         return SvTYPE(SvRV(sv)) <= SVt_PVMG
@@ -469,8 +469,14 @@ tx_html_escape(pTHX_ SV* const str) {
     }
 }
 
+
 static SV*
 tx_uri_escape(pTHX_ SV* const src) {
+    /* TODO:
+        Currently it is encoded to UTF-8, but
+        the output encoding can be specified in a future (?).
+     */
+
     SvGETMAGIC(src);
     if(SvOK(src)) {
         STRLEN len;
@@ -482,7 +488,12 @@ tx_uri_escape(pTHX_ SV* const src) {
 
         while(pv != end) {
             if(char_trait[(U8)*pv] & TXct_URI_UNSAFE) {
-                sv_catpvf(dest, "%%" "%02X", (U8)*pv);
+                const char* const hd = PL_hexdigit + 16; /* "123456789ABCDEF" */
+                char p[4];
+                p[0] = '%';
+                p[1] = hd[((U8)*pv & 0xF0) >> 4]; /* high 4 bits */
+                p[2] = hd[((U8)*pv & 0x0F)];      /* low  4 bits */
+                sv_catpvn(dest, p, 3);
             }
             else {
                 sv_catpvn(dest, pv, 1);
@@ -515,7 +526,7 @@ tx_sv_eq_nomg(pTHX_ SV* const a, SV* const b) {
     }
 }
 
-static inline I32
+STATIC_INLINE I32
 tx_sv_eq(pTHX_ SV* const a, SV* const b) {
     SvGETMAGIC(a);
     SvSETMAGIC(b);
@@ -871,7 +882,7 @@ tx_invoke_load_file(pTHX_ SV* const self, SV* const name, SV* const mtime) {
     PUTBACK;
 
     call_method("load_file", G_EVAL | G_VOID);
-    if(sv_true(ERRSV)){
+    if(TX_CATCH_ERROR()){
         dMY_CXT;
         SV* const msg = PL_diehook == MY_CXT.die_handler
             ? sv_2mortal(newRV_inc(sv_mortalcopy(ERRSV)))

@@ -15,18 +15,20 @@ extern "C" {
 #undef PERL_CORE
 
 #ifdef __cplusplus
-}
+} /* extern "C" */
 #endif
 
 #include "ppport.h"
 
 /* portability stuff */
 
-#if !defined(__GNUC__)
-#    if (!defined(__cplusplus__) || !defined(__STDC_VERSION__) ||  (__STDC_VERSION__ < 199901L)) && !defined(inline)
-#        define inline
-#    endif
-#endif
+#ifndef STATIC_INLINE /* from 5.13.4 */
+#   if !(defined(__GNUC__) || defined(__cplusplus__) || (defined(__STDC_VERSION__) &&  (__STDC_VERSION__ >= 199901L)))
+#       define STATIC_INLINE static inline
+#   else
+#       define STATIC_INLINE static
+#   endif
+#endif /* STATIC_INLINE */
 
 #ifndef __attribute__format__
 #define __attribute__format__(a,b,c) /* nothing */
@@ -93,6 +95,8 @@ extern "C" {
 
 #define TX_current_framex(st) ((AV*)AvARRAY((st)->frame)[(st)->current_frame])
 #define TX_current_frame()    TX_current_framex(TX_st)
+
+#define TX_CATCH_ERROR() UNLIKELY(!!sv_true(ERRSV))
 
 /* template object, stored in $self->{template}{$file} */
 enum tx_tobj_ix {

@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1999_01';
+our $VERSION = '0.1999_02';
 
 use Carp        ();
 use File::Spec  ();
@@ -315,7 +315,8 @@ sub _load_source {
         my $cachedir      = File::Spec->catpath($volume, $dir, '');
         if(not -e $cachedir) {
             require File::Path;
-            File::Path::mkpath($cachedir);
+            eval { File::Path::mkpath($cachedir) }
+                or Carp::carp("Xslate: Cannot make directory $cachepath (ignored): $@");
         }
 
         # use input_layer for caches
@@ -508,7 +509,7 @@ Text::Xslate - High performance template engine
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1999_01.
+This document describes Text::Xslate version 0.1999_02.
 
 =head1 SYNOPSIS
 
