@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.1999_04';
+our $VERSION = '0.1999_05';
 
 use Carp        ();
 use File::Spec  ();
@@ -505,11 +505,11 @@ __END__
 
 =head1 NAME
 
-Text::Xslate - High scalable template engine for Perl5
+Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.1999_04.
+This document describes Text::Xslate version 0.1999_05.
 
 =head1 SYNOPSIS
 
@@ -771,7 +771,7 @@ Note that I<$file> may be cached according to the cache level.
 Renders a template string with variables, and returns the result.
 I<\%vars> is optional.
 
-Note that I<$string> is never cached, so this may be not suitable for
+Note that I<$string> is never cached, so this method may not be suitable for
 productions.
 
 =head3 B<< $tx->load_file($file) :Void >>

@@ -1,5 +1,5 @@
 ---
-abstract: 'High scalable template engine for Perl5'
+abstract: 'Scalable template engine for Perl5'
 author:
   - 'Fuji, Goro (gfx) <gfuji(at)cpan.org>'
 build_requires:
@@ -36,4 +36,4 @@ requires:
 resources:
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.1999_04
+version: 0.1999_05

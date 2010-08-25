@@ -1,12 +1,15 @@
-# for developers: "make test_with_env" does all the extra tests
+# for developers:
+#   "cpanm < author/requires.cpanm" will install all the modules required
+#   "make test_with_env" does all the extra tests (with pure Perl, Moose, etc.)
 use strict;
 use warnings;
 BEGIN{
-    $INC{'Module/Install/ExtraTests.pm'} = 1;# M::I::ExtraTests considered harmful!
+    $INC{'Module/Install/ExtraTests.pm'} = 1;# considered harmful!
 }
 use inc::Module::Install;
 use Module::Install::XSUtil 0.24;
 use Module::Install::AuthorTests;
+use Module::Install::Repository;
 
 all_from 'lib/Text/Xslate.pm';
 
