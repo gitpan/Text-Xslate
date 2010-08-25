@@ -155,7 +155,7 @@ sub cc_warnings{
 
     if(_is_gcc()){
         # Note: MSVC++ doesn't support C99, so -Wdeclaration-after-statement helps ensure C89 specs.
-        $self->cc_append_to_ccflags(qw(-Wall));
+        $self->cc_append_to_ccflags(qw(-Wall -Winit-self));
 
         no warnings 'numeric';
         my $gccversion = _gccversion();
