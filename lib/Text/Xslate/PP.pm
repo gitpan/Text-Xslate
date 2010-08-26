@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.1999_05';
+our $VERSION = '0.1999_06';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -626,7 +626,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.1999_05.
+This document describes Text::Xslate::PP version 0.1999_06.
 
 =head1 DESCRIPTION
 
@@ -699,9 +699,8 @@ L<Text::Xslate::PP::Booster>
 
 =head1 AUTHOR
 
-Makamaka Hannyaharamitu E<lt>makamaka at cpan.orgE<gt>
-
-Text::Xslate was written by Fuji, Goro (gfx).
+Text::Xslate::PP stuff is originally written by Makamaka Hannyaharamitu
+E<lt>makamaka at cpan.orgE<gt>, and also maintained by Fuji, Goro (gfx).
 
 =head1 LICENSE AND COPYRIGHT
 
