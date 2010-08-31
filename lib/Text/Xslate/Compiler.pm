@@ -231,11 +231,13 @@ sub compile {
     my $header = delete $self->{header};
     my $footer = delete $self->{footer};
 
-    if($header) {
-        substr $input, 0, 0, $self->_cat_files($header);
-    }
-    if($footer) {
-        $input .= $self->_cat_files($footer);
+    if(!$args{from_include}) {
+        if($header) {
+            substr $input, 0, 0, $self->_cat_files($header);
+        }
+        if($footer) {
+            $input .= $self->_cat_files($footer);
+        }
     }
 
     my @code; # main code
@@ -812,7 +814,8 @@ sub _generate_if {
 
     if($OPTIMIZE) {
         if($self->_code_is_literal(@cond)) {
-            if($cond[0][1]) {
+            my $value = $cond[0][1];
+            if($cond_true eq 'and' ? $value : !$value) {
                 return @then;
             }
             else {
@@ -1355,7 +1358,7 @@ __END__
 
 =head1 NAME
 
-Text::Xslate::Compiler - The Xslate compiler
+Text::Xslate::Compiler - An Xslate compiler to generate intermediate code
 
 =head1 DESCRIPTION
 

@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2000';
+our $VERSION = '0.2001';
 
 use Carp        ();
 use File::Spec  ();
@@ -259,7 +259,9 @@ sub find_file {
 
 
 sub load_file {
-    my($self, $file, $mtime) = @_;
+    my($self, $file, $mtime, $from_include) = @_;
+
+    local $self->{from_include} = $from_include;
 
     print STDOUT "load_file($file)\n" if _DUMP_LOAD;
 
@@ -488,7 +490,7 @@ sub _compiler {
 
 sub compile {
     my $self = shift;
-    return $self->_compiler->compile(@_);
+    return $self->_compiler->compile(@_, from_include => $self->{from_include});
 }
 
 sub _error {
@@ -509,7 +511,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2000.
+This document describes Text::Xslate version 0.2001.
 
 =head1 SYNOPSIS
 
@@ -572,8 +574,8 @@ are available.
 
     $ perl -Mblib benchmark/x-rich-env.pl
     Perl/5.10.1 i686-linux
-    Text::Xslate/0.1055
-    Text::MicroTemplate/0.13
+    Text::Xslate/0.2000
+    Text::MicroTemplate/0.16
     Text::MicroTemplate::Extended/0.11
     Template/2.22
     Text::ClearSilver/0.10.5.4
@@ -585,11 +587,11 @@ are available.
     ok 4 - HTP: HTML::Template::Pro
     Benchmarks with 'include' (datasize=100)
               Rate     TT     MT    TCS    HTP Xslate
-    TT       131/s     --   -71%   -94%   -95%   -99%
-    MT       444/s   240%     --   -80%   -84%   -97%
-    TCS     2181/s  1570%   391%     --   -20%   -88%
-    HTP     2739/s  1997%   516%    26%     --   -85%
-    Xslate 17772/s 13505%  3899%   715%   549%     --
+    TT       129/s     --   -85%   -95%   -95%   -99%
+    MT       844/s   556%     --   -64%   -68%   -95%
+    TCS     2355/s  1730%   179%     --   -10%   -87%
+    HTP     2620/s  1936%   210%    11%     --   -85%
+    Xslate 17772/s 13708%  2005%   655%   578%     --
 
 According to this result, Xslate is 100+ times faster than Template-Toolkit.
 Text::MicroTemplate is a very fast template engine written in pure Perl, but

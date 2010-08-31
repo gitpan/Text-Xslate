@@ -1,55 +1,5 @@
 /* xslate.h */
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define PERL_NO_GET_CONTEXT /* we want efficiency */
-#include <EXTERN.h>
-
-#include <perl.h>
-#define NO_XSLOCKS /* for exceptions */
-/* PERL_CORE makes the interpreter variable access faster.
-   See also Class::XSAccessor. */
-#define PERL_CORE
-#include <XSUB.h>
-#undef PERL_CORE
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#include "ppport.h"
-
-/* portability stuff */
-
-#ifndef STATIC_INLINE /* from 5.13.4 */
-#   if defined(__GNUC__) || defined(__cplusplus__) || (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L))
-#       define STATIC_INLINE static inline
-#   else
-#       define STATIC_INLINE static
-#   endif
-#endif /* STATIC_INLINE */
-
-#ifndef __attribute__format__
-#define __attribute__format__(a,b,c) /* nothing */
-#endif
-
-#ifndef LIKELY /* they are just a compiler's hint */
-#define LIKELY(x)   (x)
-#define UNLIKELY(x) (x)
-#endif
-
-#ifndef newSVpvs_share
-#define newSVpvs_share(s) Perl_newSVpvn_share(aTHX_ STR_WITH_LEN(s), 0U)
-#endif
-
-#if PERL_BCDVERSION < 0x5008005
-#define LooksLikeNumber(x) (SvOK(x) && looks_like_number(x))
-#else
-#define LooksLikeNumber(x) looks_like_number(x)
-#endif
-
-/* xslate stuff */
+#include "perlxs.h"
 
 #if defined(__GNUC__) && !defined(TX_NO_DTC)
 /* enable DTC optimization */
@@ -93,7 +43,8 @@ extern "C" {
 
 #define TX_pop()   (*(PL_stack_sp--))
 
-#define TX_current_framex(st) ((AV*)AvARRAY((st)->frame)[(st)->current_frame])
+#define TX_frame_at(st, ix) ((AV*)AvARRAY((st)->frames)[ix])
+#define TX_current_framex(st) TX_frame_at((st), (st)->current_frame)
 #define TX_current_frame()    TX_current_framex(TX_st)
 
 #define TX_CATCH_ERROR() UNLIKELY(!!sv_true(ERRSV))
@@ -189,7 +140,7 @@ struct tx_state_s {
     HV* vars;    /* template variables */
 
     /* stack frame */
-    AV* frame;         /* see enum txframeo_ix */
+    AV* frames;        /* see enum txframeo_ix */
     I32 current_frame; /* current frame index */
     SV** pad;          /* AvARRAY(frame[current_frame]) + 3 */
 

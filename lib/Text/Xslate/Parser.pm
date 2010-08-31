@@ -518,6 +518,7 @@ sub init_basic_operators {
 
 sub init_symbols {
     my($parser) = @_;
+    my $s;
 
     # syntax specific separators
     $parser->symbol('{');
@@ -531,7 +532,10 @@ sub init_symbols {
     $parser->init_basic_operators();
 
     # statements
-    $parser->symbol('if')       ->set_std(\&std_if);
+    $s = $parser->symbol('if');
+    $s->set_std(\&std_if);
+    $s->can_be_modifier(1);
+
     $parser->symbol('for')      ->set_std(\&std_for);
     $parser->symbol('while' )   ->set_std(\&std_while);
     $parser->symbol('given')    ->set_std(\&std_given);
@@ -1083,9 +1087,15 @@ sub define_function {
 }
 
 sub finish_statement {
-    my($parser) = @_;
+    my($parser, $expr) = @_;
 
     my $t = $parser->token;
+    if($t->can_be_modifier) {
+        $parser->advance();
+        $expr = $t->std($parser, $expr);
+        $t    = $parser->token;
+    }
+
     if($t->is_block_end or $parser->statement_is_finished) {
         # noop
     }
@@ -1095,7 +1105,7 @@ sub finish_statement {
     else {
         $parser->_unexpected("a semicolon or block end", $t);
     }
-   return;
+   return $expr;
 }
 
 sub statement { # process one or more statements
@@ -1115,9 +1125,12 @@ sub statement { # process one or more statements
         return $t->std($parser);
     }
 
-    my $expr = $parser->expression(0);
-    $parser->finish_statement();
+    my $expr = $parser->auto_command( $parser->expression(0) );
+    return $parser->finish_statement($expr);
+}
 
+sub auto_command {
+    my($parser, $expr) = @_;
     if($expr->is_statement) {
         # expressions can produce pure statements (e.g. assignment)
         return $expr;
@@ -1473,11 +1486,17 @@ sub std_override { # synonym to 'around'
 }
 
 sub std_if {
-    my($parser, $symbol) = @_;
+    my($parser, $symbol, $expr) = @_;
 
     my $if = $symbol->clone(arity => "if");
 
     $if->first( $parser->expression(0) );
+
+    if(defined $expr) { # statement modifier
+        $if->second([$expr]);
+        return $if;
+    }
+
     $if->second( $parser->block() );
 
     my $top_if = $if;
@@ -1602,13 +1621,12 @@ sub std_include {
 
     my $arg  = $parser->expression(0);
     my $vars = $parser->localize_vars();
-
-    $parser->finish_statement();
-    return $symbol->clone(
+    my $stmt = $symbol->clone(
         first  => [$arg],
         second => $vars,
         arity  => 'command',
     );
+    return $parser->finish_statement($stmt);
 }
 
 sub std_command {
@@ -1617,9 +1635,8 @@ sub std_command {
     if($parser->token->id ne ";") {
         $args = $parser->expression_list();
     }
-
-    $parser->finish_statement();
-    return $symbol->clone(first => $args, arity => 'command');
+    my $stmt = $symbol->clone(first => $args, arity => 'command');
+    return $parser->finish_statement($stmt);
 }
 
 sub barename {
@@ -1696,21 +1713,20 @@ sub std_cascade {
     }
 
     my $vars = $parser->localize_vars();
-
-    $parser->finish_statement();
-    return $symbol->clone(
+    my $stmt = $symbol->clone(
         arity  => 'cascade',
         first  => $base,
         second => $components,
         third  => $vars,
     );
+    return $parser->finish_statement($stmt);
 }
 
 # markers for the compiler
 sub std_marker {
     my($parser, $symbol) = @_;
-    $parser->finish_statement();
-    return $symbol->clone(arity => 'marker');
+    my $stmt = $symbol->clone(arity => 'marker');
+    return $parser->finish_statement($stmt);
 }
 
 # iterator elements

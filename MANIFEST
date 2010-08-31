@@ -96,6 +96,7 @@ Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
 META.yml
+perlxs.h
 README
 script/xslate
 t/000_load.t
@@ -124,6 +125,7 @@ t/010_internals/022_signal.t
 t/010_internals/023_cachepath.t
 t/010_internals/024_die_in_macros.t
 t/010_internals/025_reset_hooks.t
+t/010_internals/026_issue16_deep_recursion.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -165,6 +167,7 @@ t/030_kolon/027_lambda.t
 t/030_kolon/028_smartmatch.t
 t/030_kolon/029_blockfilter.t
 t/030_kolon/030_xfuncs.t
+t/030_kolon/031_post_if.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -186,6 +189,7 @@ t/040_tterse/018_process.t
 t/040_tterse/019_switch.t
 t/040_tterse/020_chomp.t
 t/040_tterse/021_fake_use.t
+t/040_tterse/022_post_if.t
 t/040_tterse/100_not_supported.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
