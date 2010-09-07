@@ -3,7 +3,7 @@
 #define NEED_newSV_type
 #include "xslate.h"
 
-#include "xslate_char_trait.h"
+#include "uri_unsafe.h"
 
 /* aliases */
 #define TXCODE_literal_i   TXCODE_literal
@@ -67,11 +67,6 @@ tx_lvar_get_safe(pTHX_ tx_state_t* const st, I32 const lvar_ix) {
 
 #define TX_UNMARK_RAW(sv) SvRV(sv)
 
-#define TX_CopyToken(s, d, c) STMT_START {  \
-        Copy(s "", d, sizeof(s) - 1, char); \
-        c += sizeof(s) - 1;                 \
-    } STMT_END
-
 #define MY_CXT_KEY "Text::Xslate::_guts" XS_VERSION
 typedef struct {
     I32 depth;
@@ -109,7 +104,7 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key);
 STATIC_INLINE bool
 tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv);
 
-static void
+STATIC_INLINE void
 tx_sv_cat(pTHX_ SV* const dest, SV* const src);
 
 static void
@@ -390,7 +385,7 @@ tx_unmark_raw(pTHX_ SV* const str) {
 }
 
 /* does sv_catsv_nomg(dest, src), but significantly faster */
-static void
+STATIC_INLINE void
 tx_sv_cat(pTHX_ SV* const dest, SV* const src) {
     if(!SvUTF8(dest) && SvUTF8(src)) {
         sv_utf8_upgrade(dest);
@@ -402,8 +397,8 @@ tx_sv_cat(pTHX_ SV* const dest, SV* const src) {
         STRLEN const dest_cur = SvCUR(dest);
         char* const d         = SvGROW(dest, dest_cur + len + 1 /* count '\0' */);
 
-        Copy(pv, d + dest_cur, len + 1 /* copy '\0' */, char);
         SvCUR_set(dest, dest_cur + len);
+        Copy(pv, d + dest_cur, len + 1 /* copy '\0' */, char);
     }
 }
 
@@ -412,45 +407,46 @@ tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src) {
     STRLEN len;
     const char*       cur = SvPV_const(src, len);
     const char* const end = cur + len;
-    STRLEN dest_cur       = SvCUR(dest);
+    STRLEN const dest_cur = SvCUR(dest);
+    char* d;
 
-    (void)SvGROW(dest, dest_cur + len);
+    (void)SvGROW(dest, dest_cur + ( len * ( sizeof("&quot;") - 1) ) + 1);
     if(!SvUTF8(dest) && SvUTF8(src)) {
         sv_utf8_upgrade(dest);
     }
 
+    d = SvPVX(dest) + dest_cur;
+
+#define CopyToken(token, to) STMT_START {          \
+        Copy(token "", to, sizeof(token)-1, char); \
+        to += sizeof(token)-1;                     \
+    } STMT_END
+
     while(cur != end) {
-        /* preallocate the buffer for at least max parts_len + 1 */
-        char* const d = SvGROW(dest, dest_cur + 8) + dest_cur;
-        if(char_trait[(U8)*cur] & TXct_HTML_META) {
-            switch(*cur) {
-            case '<':
-                TX_CopyToken("&lt;",   d, dest_cur);
-                break;
-            case '>':
-                TX_CopyToken("&gt;",   d, dest_cur);
-                break;
-            case '&':
-                TX_CopyToken("&amp;",  d, dest_cur);
-                break;
-            case '"':
-                TX_CopyToken("&quot;", d, dest_cur);
-                break;
-            case '\'':
-                TX_CopyToken("&apos;", d, dest_cur);
-                break;
-            default:
-                assert(!"Not reached");
-            }
+        const char c = *(cur++);
+        if(c == '&') {
+            CopyToken("&amp;", d);
+        }
+        else if(c == '<') {
+            CopyToken("&lt;", d);
+        }
+        else if(c == '>') {
+            CopyToken("&gt;", d);
+        }
+        else if(c == '"') {
+            CopyToken("&quot;", d);
+        }
+        else if(c == '\'') {
+            CopyToken("&apos;", d);
         }
         else {
-            *d = *cur;
-            dest_cur++;
+            *(d++) = c;
         }
-
-        cur++;
     }
-    SvCUR_set(dest, dest_cur);
+
+#undef CopyToken
+
+    SvCUR_set(dest, d - SvPVX(dest));
     *SvEND(dest) = '\0';
 }
 
@@ -485,7 +481,7 @@ tx_uri_escape(pTHX_ SV* const src) {
         SvPOK_on(dest);
 
         while(pv != end) {
-            if(char_trait[(U8)*pv] & TXct_URI_UNSAFE) {
+            if(is_uri_unsafe(*pv)) {
                 /* identical to PL_hexdigit + 16 */
                 static const char hexdigit[] = "0123456789ABCDEF";
                 char p[3];

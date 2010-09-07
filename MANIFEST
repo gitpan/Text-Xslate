@@ -61,7 +61,6 @@ inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/Metadata.pm
-inc/Module/Install/Repository.pm
 inc/Module/Install/Scripts.pm
 inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
@@ -249,13 +248,14 @@ t/template/oi/bad_component.tx
 t/template/other/hello.tx
 t/template/wrapper.tt
 t/template/wrapper_div.tt
-tool/opcode.pl
-tool/opcode_for_pp.pl
+tool/opcode.PL
+tool/opcode_for_pp.PL
+tool/uri_unsafe.PL
+uri_unsafe.h
 xs/Text-Xslate.xs
 xs/xslate_methods.xs
 xs/xslate_opcode.inc
 xslate.h
-xslate_char_trait.h
 xslate_ops.h
 xt/01_podspell.t
 xt/02_pod.t

@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.2001';
+our $VERSION = '0.2002';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -26,7 +26,7 @@ use constant _DUMP_LOAD => scalar($DEBUG =~ /\b dump=load \b/xms);
 use Text::Xslate::PP::Const qw(:all);
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::Type::Raw;
-use Text::Xslate;
+use Text::Xslate ();
 
 use Carp ();
 
@@ -626,7 +626,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.2001.
+This document describes Text::Xslate::PP version 0.2002.
 
 =head1 DESCRIPTION
 
