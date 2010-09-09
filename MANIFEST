@@ -34,6 +34,8 @@ benchmark/template/list.tx
 benchmark/x-poor-env.pl
 benchmark/x-rich-env.pl
 Changes
+example/autolink.gold
+example/autolink.pl
 example/base.tx
 example/cascade.gold
 example/cascade.pl
