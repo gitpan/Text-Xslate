@@ -97,7 +97,6 @@ Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
 META.yml
-perlxs.h
 README
 script/xslate
 t/000_load.t
@@ -257,6 +256,7 @@ uri_unsafe.h
 xs/Text-Xslate.xs
 xs/xslate_methods.xs
 xs/xslate_opcode.inc
+xshelper.h
 xslate.h
 xslate_ops.h
 xt/01_podspell.t
