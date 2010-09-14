@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2005';
+our $VERSION = '0.2006';
 
 use Carp        ();
 use File::Spec  ();
@@ -186,12 +186,6 @@ sub _merge_hash {
     return;
 }
 
-
-sub flush_memory_cache {
-    my($self) = @_;
-    %{$self->{template}} = ();
-    return;
-}
 
 sub load_string { # for <string>
     my($self, $string) = @_;
@@ -512,7 +506,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2005.
+This document describes Text::Xslate version 0.2006.
 
 =head1 SYNOPSIS
 

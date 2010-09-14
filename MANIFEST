@@ -126,6 +126,7 @@ t/010_internals/023_cachepath.t
 t/010_internals/024_die_in_macros.t
 t/010_internals/025_reset_hooks.t
 t/010_internals/026_issue16_deep_recursion.t
+t/010_internals/027_infinite_warn.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
