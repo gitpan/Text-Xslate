@@ -127,6 +127,7 @@ t/010_internals/024_die_in_macros.t
 t/010_internals/025_reset_hooks.t
 t/010_internals/026_issue16_deep_recursion.t
 t/010_internals/027_infinite_warn.t
+t/010_internals/028_taint.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -248,6 +249,7 @@ t/template/myapp/derived.tx
 t/template/oi/bad_base.tx
 t/template/oi/bad_component.tx
 t/template/other/hello.tx
+t/template/taint.tx
 t/template/wrapper.tt
 t/template/wrapper_div.tt
 tool/opcode.PL
