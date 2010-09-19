@@ -137,6 +137,15 @@ tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv
 static tx_state_t*
 tx_load_template(pTHX_ SV* const self, SV* const name, bool const from_include);
 
+#ifndef save_op
+#define save_op() my_save_op(aTHX)
+static void
+my_save_op(pTHX) { /* copied from scope.c */
+    SSCHECK(2);
+    SSPUSHPTR(PL_op);
+    SSPUSHINT(SAVEt_OP);
+}
+#endif
 
 #include "xs/xslate_opcode.inc"
 
@@ -1325,21 +1334,15 @@ CODE:
 
     TAINT_NOT; /* All the SVs we'll create here are safe */
 
+    /* $_[0]: engine */
     if(!(SvROK(self) && SvTYPE(SvRV(self)) == SVt_PVHV)) {
         croak("Xslate: Invalid xslate instance: %s",
             tx_neat(aTHX_ self));
     }
 
-    if(!SvOK(vars)) {
-        vars = sv_2mortal(newRV_noinc((SV*)newHV()));
-    }
-    else if(!(SvROK(vars) && SvTYPE(SvRV(vars)) == SVt_PVHV)) {
-        croak("Xslate: Template variables must be a HASH reference, not %s",
-            tx_neat(aTHX_ vars));
-    }
-
-
+    /* $_[1]: template source */
     if(ix == 1) { /* render_string() */
+        dXSTARG;
         PUSHMARK(SP);
         EXTEND(SP, 2);
         PUSHs(self);
@@ -1347,14 +1350,22 @@ CODE:
         PUTBACK;
         call_method("load_string", G_VOID | G_DISCARD);
         SPAGAIN;
-        source = &PL_sv_undef;
+        source = TARG;
+        sv_setpvs(source, "<string>");
     }
 
     SvGETMAGIC(source);
     if(!SvOK(source)) {
-        dXSTARG;
-        sv_setpvs(TARG, "<string>");
-        source = TARG;
+        croak("Xslate: Template name is not given");
+    }
+
+    /* $_[2]: template variable */
+    if(!SvOK(vars)) {
+        vars = sv_2mortal(newRV_noinc((SV*)newHV()));
+    }
+    else if(!(SvROK(vars) && SvTYPE(SvRV(vars)) == SVt_PVHV)) {
+        croak("Xslate: Template variables must be a HASH reference, not %s",
+            tx_neat(aTHX_ vars));
     }
 
     st = tx_load_template(aTHX_ self, source, FALSE);

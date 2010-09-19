@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '0.2007';
+our $VERSION = '0.2008';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -79,7 +79,7 @@ sub options {
 sub render_string {
     my($self, $string, $vars) = @_;
     $self->load_string($string);
-    return $self->render(undef, $vars);
+    return $self->render('<string>', $vars);
 }
 
 sub render {
@@ -87,13 +87,16 @@ sub render {
 
     Carp::croak("Usage: Text::Xslate::render(self, name, vars)")
         if !( @_ == 2 or @_ == 3 );
+    unless ( ref $self ) {
+        Carp::croak( "Invalid xslate instance" );
+    }
 
     if(!defined $vars) {
         $vars = {};
     }
 
     if ( !defined $name ) {
-        $name = '<string>';
+        Carp::croak("Xslate: Template name is not given");
     }
 
     unless ( ref $vars eq 'HASH' ) {
@@ -626,7 +629,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 0.2007.
+This document describes Text::Xslate::PP version 0.2008.
 
 =head1 DESCRIPTION
 

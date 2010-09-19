@@ -54,6 +54,7 @@ TXC(gt);
 TXC(ge);
 TXC(ncmp);
 TXC(scmp);
+TXC(range);
 TXC_w_key(fetch_symbol); /* functions, macros, constants */
 TXC(funcall); /* call a function or a macro */
 TXC(macro_end);
@@ -122,21 +123,22 @@ enum tx_opcode_t {
     TXOP_ge, /* 48 */
     TXOP_ncmp, /* 49 */
     TXOP_scmp, /* 50 */
-    TXOP_fetch_symbol, /* 51 */
-    TXOP_funcall, /* 52 */
-    TXOP_macro_end, /* 53 */
-    TXOP_methodcall_s, /* 54 */
-    TXOP_make_array, /* 55 */
-    TXOP_make_hash, /* 56 */
-    TXOP_enter, /* 57 */
-    TXOP_leave, /* 58 */
-    TXOP_goto, /* 59 */
-    TXOP_depend, /* 60 */
-    TXOP_macro_begin, /* 61 */
-    TXOP_macro_nargs, /* 62 */
-    TXOP_macro_outer, /* 63 */
-    TXOP_set_opinfo, /* 64 */
-    TXOP_end, /* 65 */
+    TXOP_range, /* 51 */
+    TXOP_fetch_symbol, /* 52 */
+    TXOP_funcall, /* 53 */
+    TXOP_macro_end, /* 54 */
+    TXOP_methodcall_s, /* 55 */
+    TXOP_make_array, /* 56 */
+    TXOP_make_hash, /* 57 */
+    TXOP_enter, /* 58 */
+    TXOP_leave, /* 59 */
+    TXOP_goto, /* 60 */
+    TXOP_depend, /* 61 */
+    TXOP_macro_begin, /* 62 */
+    TXOP_macro_nargs, /* 63 */
+    TXOP_macro_outer, /* 64 */
+    TXOP_set_opinfo, /* 65 */
+    TXOP_end, /* 66 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -192,6 +194,7 @@ static const U8 tx_oparg[] = {
     0U, /* ge */
     0U, /* ncmp */
     0U, /* scmp */
+    0U, /* range */
     TXCODE_W_KEY, /* fetch_symbol */
     0U, /* funcall */
     0U, /* macro_end */
@@ -262,6 +265,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(ge), newSViv(TXOP_ge));
     (void)hv_stores(ops, STRINGIFY(ncmp), newSViv(TXOP_ncmp));
     (void)hv_stores(ops, STRINGIFY(scmp), newSViv(TXOP_scmp));
+    (void)hv_stores(ops, STRINGIFY(range), newSViv(TXOP_range));
     (void)hv_stores(ops, STRINGIFY(fetch_symbol), newSViv(TXOP_fetch_symbol));
     (void)hv_stores(ops, STRINGIFY(funcall), newSViv(TXOP_funcall));
     (void)hv_stores(ops, STRINGIFY(macro_end), newSViv(TXOP_macro_end));
@@ -333,6 +337,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_ge,
     TXCODE_ncmp,
     TXCODE_scmp,
+    TXCODE_range,
     TXCODE_fetch_symbol,
     TXCODE_funcall,
     TXCODE_macro_end,
@@ -410,6 +415,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(ge),
         LABEL_PTR(ncmp),
         LABEL_PTR(scmp),
+        LABEL_PTR(range),
         LABEL_PTR(fetch_symbol),
         LABEL_PTR(funcall),
         LABEL_PTR(macro_end),
@@ -484,6 +490,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(ge                  ): TXCODE_ge                  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(ncmp                ): TXCODE_ncmp                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(scmp                ): TXCODE_scmp                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(range               ): TXCODE_range               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(fetch_symbol        ): TXCODE_fetch_symbol        (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(funcall             ): TXCODE_funcall             (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_end           ): TXCODE_macro_end           (aTHX_ st); goto *(st->pc->exec_code);
