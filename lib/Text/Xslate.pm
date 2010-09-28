@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2008_01';
+our $VERSION = '0.2008_02';
 
 use Carp              ();
 use File::Spec        ();
@@ -28,6 +28,10 @@ our @EXPORT_OK = qw(
     html_builder
 );
 
+# $format_version + $fullpath + $compiler_and_parser_options
+my $FORMAT_VERSION = '1.0';
+my $XSLATE_MAGIC   = qq{xslate;$FORMAT_VERSION;%s;%s;};
+
 # load backend (XS or PP)
 if(!exists $INC{'Text/Xslate/PP.pm'}) {
     my $pp = ($Text::Xslate::Util::DEBUG =~ /\b pp \b/xms or $ENV{PERL_ONLY});
@@ -42,6 +46,10 @@ if(!exists $INC{'Text/Xslate/PP.pm'}) {
         require 'Text/Xslate/PP.pm';
     }
 }
+
+# workaround warnings about numeric when it is a developpers' version
+# it must be here because the bootstrap routine requires the under bar.
+$VERSION =~ s/_//;
 
 package Text::Xslate::Engine;
 
@@ -68,10 +76,8 @@ BEGIN {
     *_DEFAULT_CACHE_DIR = sub() { $cache_dir };
 }
 
-my $IDENT   = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
+my $IDENT = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
 
-# version-path-{compiler options}
-my $XSLATE_MAGIC    = qq{.xslate "%s-%s-{%s}"\n};
 
 # the real defaults are dfined in the parser
 my %parser_option = (
@@ -346,7 +352,7 @@ sub _load_compiled {
     if($self->{cache} >= 2) {
         # threshold is the most latest modified time of all the related caches,
         # so if the cache level >= 2, they seems always fresh.
-        $threshold = 9**9**9;
+        $threshold = 9**9**9; # force to purge the cache
     }
     else {
         $threshold ||= $fi->{cache_mtime};
@@ -354,7 +360,8 @@ sub _load_compiled {
     # see also tx_load_template() in xs/Text-Xslate.xs
     if(!( defined($fi->{cache_mtime}) and $self->{cache} >= 1
             and $threshold >= $fi->{orig_mtime} )) {
-        printf "  _load_compiled: no fresh cache: %s, %s", $threshold, Text::Xslate::Util::p($fi) if _DUMP_LOAD;
+        printf "  _load_compiled: no fresh cache: %s, %s",
+            $threshold, Text::Xslate::Util::p($fi) if _DUMP_LOAD;
         $fi->{cache_mtime} = undef;
         return undef;
     }
@@ -363,12 +370,13 @@ sub _load_compiled {
     open my($in), '<:raw', $cachepath
         or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
 
-    if(scalar(<$in>) ne $self->_magic_token($fi->{fullpath})) {
+    my $magic = $self->_magic_token($fi->{fullpath});
+    my $data;
+    read $in, $data, length($magic);
+    if($data ne $magic) {
         return undef;
     }
-
-    my $data;
-    {
+    else {
         local $/;
         $data = <$in>;
         close $in;
@@ -384,22 +392,20 @@ sub _load_compiled {
         my $c = $unpacker->data();
         $unpacker->reset();
 
-        utf8::decode($c->[1]) if $is_utf8 && defined $c->[1];
         # my($name, $arg, $line, $file, $symbol) = @{$c};
+        utf8::decode($c->[1]) if $is_utf8 && defined $c->[1];
         if($c->[0] eq 'depend') {
-            my $arg = $c->[1];
-            my $dep_mtime = (stat $arg)[_ST_MTIME];
+            my $dep_mtime = (stat $c->[1])[_ST_MTIME];
             if(!defined $dep_mtime) {
-                $dep_mtime = 9**9**9; # force reload
-                Carp::carp("Xslate: Failed to stat $arg (ignored): $!");
+                Carp::carp("Xslate: Failed to stat $c->[1] (ignored): $!");
+                return undef; # purge the cache
             }
             if($dep_mtime > $threshold){
                 printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
-                    $arg,       scalar localtime($dep_mtime),
+                    $c->[1],    scalar localtime($dep_mtime),
                     $cachepath, scalar localtime($threshold)
                         if _DUMP_LOAD;
-
-                return undef;
+                return undef; # purge the cache
             }
         }
         push @asm, $c;
@@ -415,6 +421,7 @@ sub _load_compiled {
 
 sub _save_compiled {
     my($self, $out, $asm, $fullpath, $is_utf8) = @_;
+    local $\;
     print $out $self->_magic_token($fullpath);
     print $out Data::MessagePack->pack($is_utf8 ? 1 : 0);
     foreach my $c(@{$asm}) {
@@ -426,21 +433,19 @@ sub _save_compiled {
 sub _magic_token {
     my($self, $fullpath) = @_;
 
-    my $opt = join(',',
+    my $opt = Data::MessagePack->pack([
         ref($self->{compiler}) || $self->{compiler},
-        (map { ref $_ ? "[@{$_}]" : $_ } $self->_extract_options(\%compiler_option)),
         $self->_extract_options(\%parser_option),
-    );
+        $self->_extract_options(\%compiler_option),
+    ]);
 
     if(ref $fullpath) { # ref to content string
         require 'Digest/MD5.pm';
         my $md5 = Digest::MD5->new();
         $md5->add(${$fullpath});
-        $fullpath = ref($fullpath) . ':' . $md5->hexdigest();
+        $fullpath = join ':', ref($fullpath), $md5->hexdigest();
     }
-
-    return sprintf $XSLATE_MAGIC,
-        $VERSION, $fullpath, $opt;
+    return sprintf $XSLATE_MAGIC, $fullpath, $opt;
 }
 
 sub _extract_options {
@@ -501,7 +506,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2008_01.
+This document describes Text::Xslate version 0.2008_02.
 
 =head1 SYNOPSIS
 
@@ -887,7 +892,7 @@ See L<xslate(1)> for details.
 
 =head1 TEMPLATE SYNTAX
 
-Several syntaxes are provided for templates.
+There are multiple template syntaxes available in Xslate.
 
 =over
 
@@ -972,11 +977,13 @@ Xslate command:
 
 L<xlsate>
 
-The Xslate web site:
+The Xslate web site and public repository:
 
 L<http://xslate.org/>
 
-Other template modules that Xslate is influenced by:
+L<http://github.com/gfx/p5-Text-Xslate>
+
+Other template modules that Xslate has been influenced by:
 
 L<Text::MicroTemplate>
 
@@ -1003,7 +1010,8 @@ L<http://xslate.org/benchmark.html>
 =head1 ACKNOWLEDGEMENT
 
 Thanks to lestrrat for the suggestion to the interface of C<render()>,
-the contribution of App::Xslate, and a lot of suggestions.
+the contribution of Text::Xslate::Runner (was App::Xslate), and a lot of
+suggestions.
 
 Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug finding.
 
@@ -1023,13 +1031,17 @@ Thanks to chiba for the bug reports and patches.
 
 Thanks to turugina for the patch to fix Win32 problems
 
+Thanks to Sam Graham to the bug reports.
+
+Thanks to Mons Anderson to the bug reports and patches.
+
 =head1 AUTHOR
 
 Fuji, Goro (gfx) E<lt>gfuji(at)cpan.orgE<gt>
 
-Makamaka Hannyaharamitu (makamaka)
+Makamaka Hannyaharamitu (makamaka) (Text::Xslate::PP)
 
-Maki, Daisuke (lestrrat)
+Maki, Daisuke (lestrrat) (Text::Xslate::Runner)
 
 =head1 LICENSE AND COPYRIGHT
 

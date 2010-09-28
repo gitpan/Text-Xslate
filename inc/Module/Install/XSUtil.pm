@@ -31,6 +31,9 @@ my %Requires = (
 
 my %ToInstall;
 
+my $UseC99       = 0;
+my $UseCplusplus = 0;
+
 sub _verbose{
     print STDERR q{# }, @_, "\n";
 }
@@ -180,10 +183,12 @@ sub cc_warnings{
 
         my $gccversion = _gccversion();
         if($gccversion >= 4.0){
-            # Note: MSVC++ doesn't support C99, so -Wdeclaration-after-statement helps
+            # Note: MSVC++ doesn't support C99,
+            # so -Wdeclaration-after-statement helps
             # ensure C89 specs.
-            $self->cc_append_to_ccflags(qw(-Wextra -Wdeclaration-after-statement));
-            if($gccversion >= 4.1) {
+            $self->cc_append_to_ccflags(qw(-Wdeclaration-after-statement));
+            $self->cc_append_to_ccflags(qw(-Wextra));
+            if($gccversion >= 4.1 && !$UseCplusplus) {
                 $self->cc_append_to_ccflags(qw(-Wc++-compat));
             }
         }
@@ -238,7 +243,7 @@ sub requires_c99 {
         exit;
     }
     $self->_xs_initialize();
-
+    $UseC99 = 1;
     return;
 }
 
@@ -758,4 +763,4 @@ sub const_cccmd {
 1;
 __END__
 
-#line 969
+#line 974
