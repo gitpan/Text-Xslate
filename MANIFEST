@@ -128,6 +128,7 @@ t/010_internals/025_reset_hooks.t
 t/010_internals/026_issue16_deep_recursion.t
 t/010_internals/027_infinite_warn.t
 t/010_internals/028_taint.t
+t/010_internals/029_large_file.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -252,6 +253,7 @@ t/template/other/hello.tx
 t/template/taint.tx
 t/template/wrapper.tt
 t/template/wrapper_div.tt
+tool/disasm.pl
 tool/opcode.PL
 tool/opcode_for_pp.PL
 tool/uri_unsafe.PL

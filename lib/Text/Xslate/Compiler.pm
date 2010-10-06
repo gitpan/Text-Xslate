@@ -592,7 +592,11 @@ sub _generate_command {
         }
     }
     if(defined(my $vars = $node->second)) {
-        @code = ($self->opcode('enter'), $self->_localize_vars($vars), @code, $self->opcode('leave'));
+        @code = ($self->opcode('enter'),
+            $self->_localize_vars($vars),
+            @code,
+            $self->opcode('leave'),
+        );
     }
 
     if(!@code) {
@@ -1297,6 +1301,7 @@ sub _optimize_vmcode {
         elsif($name eq 'literal') {
             if(is_int($c->[$i][1])) {
                 $c->[$i][0] = 'literal_i';
+                $c->[$i][1] = int($c->[$i][1]); # force int
             }
         }
         elsif($name eq 'fetch_field') {
