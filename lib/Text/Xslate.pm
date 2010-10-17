@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2009';
+our $VERSION = '0.2010';
 
 use Carp              ();
 use File::Spec        ();
@@ -28,9 +28,10 @@ our @EXPORT_OK = qw(
     html_builder
 );
 
-# $format_version + $fullpath + $compiler_and_parser_options
-my $FORMAT_VERSION = '1.0';
-my $XSLATE_MAGIC   = qq{xslate;$FORMAT_VERSION;%s;%s;};
+my $BYTECODE_VERSION = '1.1';
+
+# $bytecode_version + $fullpath + $compiler_and_parser_options
+my $XSLATE_MAGIC   = qq{xslate;$BYTECODE_VERSION;%s;%s;};
 
 # load backend (XS or PP)
 if(!exists $INC{'Text/Xslate/PP.pm'}) {
@@ -76,9 +77,6 @@ BEGIN {
     *_DEFAULT_CACHE_DIR = sub() { $cache_dir };
 }
 
-my $IDENT = qr/(?: [a-zA-Z_][a-zA-Z0-9_\@]* )/xms;
-
-
 # the real defaults are dfined in the parser
 my %parser_option = (
     line_start => undef,
@@ -100,6 +98,8 @@ my %builtin = (
     mark_raw   => \&Text::Xslate::Util::mark_raw,
     unmark_raw => \&Text::Xslate::Util::unmark_raw,
     uri        => \&Text::Xslate::Util::uri_escape,
+    ref        => \&_builtin_ref,
+
     dump       => \&Text::Xslate::Util::p,
 );
 
@@ -189,7 +189,6 @@ sub _merge_hash {
     }
     return;
 }
-
 
 sub load_string { # for <string>
     my($self, $string) = @_;
@@ -489,6 +488,10 @@ sub compile {
     return $self->_compiler->compile(@_, from_include => $self->{from_include});
 }
 
+sub _builtin_ref {
+    return ref($_[0]);
+}
+
 sub _error {
     die make_error(@_);
 }
@@ -507,7 +510,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2009.
+This document describes Text::Xslate version 0.2010.
 
 =head1 SYNOPSIS
 
