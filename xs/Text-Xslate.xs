@@ -108,7 +108,7 @@ static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key);
 
 STATIC_INLINE bool
-tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv);
+tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv); /* doesn't handle magics */
 
 STATIC_INLINE void
 tx_sv_cat(pTHX_ SV* const dest, SV* const src);
@@ -762,6 +762,7 @@ tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv
     /* clear temporary buffers */
     sv_setsv(st.targ, NULL);
 
+    /* store the current buffer size as a hint size */
     base->hint_size = SvCUR(st.output);
 }
 

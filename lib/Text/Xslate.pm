@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2012';
+our $VERSION = '0.2013';
 
 use Carp              ();
 use File::Spec        ();
@@ -515,7 +515,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2012.
+This document describes Text::Xslate version 0.2013.
 
 =head1 SYNOPSIS
 
@@ -961,6 +961,26 @@ Perl 5.8.1 or later.
 
 If you have a C compiler, the XS backend will be used. Otherwise the pure Perl
 backend will be used.
+
+=head1 TODO
+
+=over
+
+=item *
+
+Context controls. e.g. C<< <: [ $foo->bar @list ] :> >>.
+
+=item *
+
+Augment modifiers.
+
+=item *
+
+Loop controls.
+
+=back
+
+=cut
 
 =head1 BUGS
 

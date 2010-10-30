@@ -1,37 +1,38 @@
 #line 1
-package Module::Install::ExtendsMakeTest;
+package Module::Install::TestTarget;
 use 5.006_002;
 use strict;
-our $VERSION = '0.02';
+#use warnings; # XXX: warnings.pm produces a lot of 'redefine' warnings!
+our $VERSION = '0.10';
 
 use base qw(Module::Install::Base);
 use Config;
 use Carp qw(croak);
 
-our($TEST_TARGET, $ORIG_TEST_VIA_HARNESS);
+our($ORIG_TEST_VIA_HARNESS);
 
 our $TEST_DYNAMIC = {
     env                => '',
     includes           => '',
-    modules            => '',
-    before_run_codes   => '',
-    after_run_codes    => '',
-    before_run_scripts => '',
-    after_run_scripts  => '',
+    load_modules       => '',
+    insert_on_prepare  => '',
+    insert_on_finalize => '',
+    run_on_prepare     => '',
+    run_on_finalize    => '',
 };
 
 # override the default `make test`
-sub replace_default_make_test {
+sub default_test_target {
     my ($self, %args) = @_;
     my %test = _build_command_parts(%args);
     $TEST_DYNAMIC = \%test;
 }
 
 # create a new test target
-sub extends_make_test {
-    my ($self, %args) = @_;
-    my $target = $args{target} || croak 'target must be spesiced at extends_make_test()';
-    my $alias  = $args{alias}  || '';
+sub test_target {
+    my ($self, $target, %args) = @_;
+    croak 'target must be spesiced at test_target()' unless $target;
+    my $alias = $args{alias}  || '';
 
     my $test = _assemble(_build_command_parts(%args));
 
@@ -53,7 +54,7 @@ sub _build_command_parts {
         *MY::test_via_harness = \&_test_via_harness;
     }
 
-    for my $key (qw/includes modules before_run_scripts after_run_scripts before_run_codes after_run_codes tests/) {
+    for my $key (qw/includes load_modules run_on_prepare run_on_finalize insert_on_prepare insert_on_finalize tests/) {
         $args{$key} ||= [];
         $args{$key} = [$args{$key}] unless ref $args{$key} eq 'ARRAY';
     }
@@ -61,12 +62,12 @@ sub _build_command_parts {
 
     my %test;
     $test{includes} = @{$args{includes}} ? join '', map { qq|"-I$_" | } @{$args{includes}} : '';
-    $test{modules}  = @{$args{modules}}  ? join '', map { qq|"-M$_" | } @{$args{modules}}  : '';
+    $test{load_modules}  = @{$args{load_modules}}  ? join '', map { qq|"-M$_" | } @{$args{load_modules}}  : '';
     $test{tests}    = @{$args{tests}}    ? join '', map { qq|"$_" |   } @{$args{tests}}    : '$(TEST_FILES)';
-    for my $key (qw/before_run_scripts after_run_scripts/) {
+    for my $key (qw/run_on_prepare run_on_finalize/) {
         $test{$key} = @{$args{$key}} ? join '', map { qq|do '$_'; | } @{$args{$key}} : '';
     }
-    for my $key (qw/before_run_codes after_run_codes/) {
+    for my $key (qw/insert_on_prepare insert_on_finalize/) {
         my $codes = join '', map { _build_funcall($_) } @{$args{$key}};
         $test{$key} = _quote($codes);
     }
@@ -113,17 +114,17 @@ sub _assemble {
     my $command = MY->$ORIG_TEST_VIA_HARNESS($args{perl} || '$(FULLPERLRUN)', $args{tests});
 
     # inject includes and modules before the first switch
-    $command =~ s/("- \S+? ")/$args{includes}$args{modules}$1/xms;
+    $command =~ s/("- \S+? ")/$args{includes}$args{load_modules}$1/xms;
 
     # inject snipetts in the one-liner
     $command =~ s{("-e" \s+ ") (.+) (")}{
         join '', $1,
             $args{env},
-            $args{before_run_scripts},
-            $args{before_run_codes},
+            $args{run_on_prepare},
+            $args{insert_on_prepare},
             $2,
-            $args{after_run_scripts},
-            $args{after_run_codes},
+            $args{run_on_finalize},
+            $args{insert_on_finalize},
             $3,
     }xmse;
     return $command;
@@ -140,4 +141,4 @@ sub _test_via_harness {
 1;
 __END__
 
-#line 339
+#line 372

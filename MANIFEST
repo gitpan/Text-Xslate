@@ -61,15 +61,16 @@ inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Can.pm
-inc/Module/Install/ExtendsMakeTest.pm
 inc/Module/Install/Makefile.pm
 inc/Module/Install/Metadata.pm
 inc/Module/Install/Scripts.pm
+inc/Module/Install/TestTarget.pm
 inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Bridge.pm
 lib/Text/Xslate/Compiler.pm
+lib/Text/Xslate/HashWithDefault.pm
 lib/Text/Xslate/Manual.pod
 lib/Text/Xslate/Manual/Builtin.pod
 lib/Text/Xslate/Manual/Cookbook.pod
@@ -141,6 +142,7 @@ t/020_interface/005_util.t
 t/020_interface/006_psgi.t
 t/020_interface/007_data_section.t
 t/020_interface/008_type.t
+t/020_interface/009_hash_with_default.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t
