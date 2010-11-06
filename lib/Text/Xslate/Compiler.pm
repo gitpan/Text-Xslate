@@ -178,6 +178,11 @@ has file => (
     init_arg => undef,
 );
 
+has input_layer => (
+    is      => 'ro',
+    default => ':utf8',
+);
+
 sub _build_parser {
     my($self) = @_;
     my $syntax = $self->syntax;
@@ -1044,6 +1049,9 @@ sub _generate_binary {
 sub _generate_range {
     my($self, $node) = @_;
 
+    $self->can_be_in_list_context
+        or $self->_error("Range operator must be in list context");
+
     my @lhs  = $self->compile_ast($node->first);
 
     local $self->{lvar_id} = $self->lvar_use(1);
@@ -1199,6 +1207,20 @@ sub requires {
     my($self, @files) = @_;
     push @{ $self->dependencies }, @files;
     return;
+}
+
+sub can_be_in_list_context {
+    my $i = 2;
+    while(my $funcname = (caller ++$i)[3]) {
+        if($funcname =~ /::_generate_(\w+) \z/xms) {
+            return any_in($1,  qw(
+                methodcall
+                call
+                composer
+            ));
+        }
+    }
+    return 0;
 }
 
 # optimizatin stuff
@@ -1385,7 +1407,7 @@ sub _error {
     my($self, $message, $node) = @_;
 
     my $line = ref($node) ? $node->line : $node;
-    die make_error($self, $message, $self->file, $line);
+    die $self->make_error($message, $self->file, $line);
 }
 
 no Any::Moose;

@@ -52,6 +52,7 @@ example/hello.tx
 example/list.gold
 example/list.pl
 example/list.tx
+example/mojo.psgi
 example/simple.gold
 example/simple.psgi
 example/uri_escape.gold
@@ -143,6 +144,7 @@ t/020_interface/006_psgi.t
 t/020_interface/007_data_section.t
 t/020_interface/008_type.t
 t/020_interface/009_hash_with_default.t
+t/020_interface/010_err_encoding.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t

@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2013';
+our $VERSION = '0.2014';
 
 use Carp              ();
 use File::Spec        ();
@@ -51,6 +51,9 @@ if(!exists $INC{'Text/Xslate/PP.pm'}) {
 # workaround warnings about numeric when it is a developpers' version
 # it must be here because the bootstrap routine requires the under bar.
 $VERSION =~ s/_//;
+
+# for error messages (see T::X::Util)
+sub input_layer { ref($_[0]) ? $_[0]->{input_layer} : ':utf8' }
 
 package Text::Xslate::Engine;
 
@@ -468,10 +471,13 @@ sub _compiler {
         require Any::Moose;
         Any::Moose::load_class($compiler);
 
+        my $input_layer = $self->input_layer;
         $compiler = $compiler->new(
-            engine => $self,
+            engine      => $self,
+            input_layer => $input_layer,
             $self->_extract_options(\%compiler_option),
             parser_option => {
+                input_layer => $input_layer,
                 $self->_extract_options(\%parser_option),
             },
         );
@@ -515,7 +521,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2013.
+This document describes Text::Xslate version 0.2014.
 
 =head1 SYNOPSIS
 
@@ -1004,7 +1010,7 @@ L<Text::Xslate::Syntax::TTerse>
 
 Xslate command:
 
-L<xlsate>
+L<xslate>
 
 The Xslate web site and public repository:
 
