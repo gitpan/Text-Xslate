@@ -132,6 +132,7 @@ t/010_internals/026_issue16_deep_recursion.t
 t/010_internals/027_infinite_warn.t
 t/010_internals/028_taint.t
 t/010_internals/029_large_file.t
+t/010_internals/030_die_in_funcs.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -176,6 +177,7 @@ t/030_kolon/028_smartmatch.t
 t/030_kolon/029_blockfilter.t
 t/030_kolon/030_xfuncs.t
 t/030_kolon/031_post_if.t
+t/030_kolon/032_include_bareword.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t

@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2014';
+our $VERSION = '0.2015';
 
 use Carp              ();
 use File::Spec        ();
@@ -521,7 +521,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2014.
+This document describes Text::Xslate version 0.2015.
 
 =head1 SYNOPSIS
 
@@ -718,7 +718,8 @@ If C<< $level >= 2 >>, all the possible errors will be warned.
 
 =item C<< suffix => $ext // '.tx' >>
 
-Specify the template suffix, which is used for template cascading.
+Specify the template suffix, which is used for C<cascade> and C<include>
+in Kolon.
 
 =item C<< syntax => $name // 'Kolon' >>
 
@@ -983,6 +984,10 @@ Augment modifiers.
 =item *
 
 Loop controls.
+
+=item *
+
+Default arguments and named arguments for macros.
 
 =back
 
