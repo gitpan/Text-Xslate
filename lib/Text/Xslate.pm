@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '0.2015';
+our $VERSION = '0.3000';
 
 use Carp              ();
 use File::Spec        ();
@@ -141,7 +141,7 @@ sub new {
         if(exists $args{$key}) {
             $used++;
         }
-        if(!defined($args{$key}) && defined($options->{$key})) {
+        elsif(defined($options->{$key})) {
             $args{$key} = $options->{$key};
         }
     }
@@ -437,7 +437,7 @@ sub _save_compiled {
 sub _magic_token {
     my($self, $fullpath) = @_;
 
-    my $opt = Data::MessagePack->pack([
+    $self->{serial_opt} ||= Data::MessagePack->pack([
         ref($self->{compiler}) || $self->{compiler},
         $self->_extract_options(\%parser_option),
         $self->_extract_options(\%compiler_option),
@@ -449,14 +449,14 @@ sub _magic_token {
         $md5->add(${$fullpath});
         $fullpath = join ':', ref($fullpath), $md5->hexdigest();
     }
-    return sprintf $XSLATE_MAGIC, $fullpath, $opt;
+    return sprintf $XSLATE_MAGIC, $fullpath, $self->{serial_opt};
 }
 
 sub _extract_options {
     my($self, $opt_ref) = @_;
     my @options;
     foreach my $name(sort keys %{$opt_ref}) {
-        if(defined($self->{$name})) {
+        if(exists $self->{$name}) {
             push @options, $name => $self->{$name};
         }
     }
@@ -521,7 +521,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 0.2015.
+This document describes Text::Xslate version 0.3000.
 
 =head1 SYNOPSIS
 
@@ -635,7 +635,8 @@ engine and even add a new syntax via extending the parser.
 
 =head3 B<< Text::Xslate->new(%options) :XslateEngine >>
 
-Creates a new xslate template engine with options.
+Creates a new xslate template engine with options. You can reuse the instance
+for multiple call of C<render()>.
 
 Possible options are:
 
@@ -742,7 +743,8 @@ This option is passed to the compiler directly.
 
 =item C<< line_start => $token // $parser_defined_str >>
 
-Specify the token to start line code as a string, which C<quotemeta> will be applied to.
+Specify the token to start line code as a string, which C<quotemeta> will be applied to. If you give C<undef> to this option, the line code style will be
+disabled.
 
 This option is passed to the parser via the compiler.
 

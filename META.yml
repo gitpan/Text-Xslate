@@ -38,4 +38,4 @@ resources:
   homepage: http://xslate.org/
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 0.2015
+version: 0.3000
