@@ -29,6 +29,7 @@ benchmark/template/list.cs
 benchmark/template/list.ht
 benchmark/template/list.mst
 benchmark/template/list.mt
+benchmark/template/list.tj
 benchmark/template/list.tt
 benchmark/template/list.tx
 benchmark/x-poor-env.pl
@@ -222,6 +223,8 @@ t/300_examples/003_metakolon.t
 t/300_examples/004_tterse.t
 t/300_examples/100_eg_pl.t
 t/300_examples/101_eg_psgi.t
+t/900_bugs/001_super.t
+t/900_bugs/002_addfunc.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

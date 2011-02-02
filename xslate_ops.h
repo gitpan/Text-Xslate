@@ -72,6 +72,7 @@ TXC_w_key(macro_begin);
 TXC_w_sviv(macro_nargs);
 TXC_w_sviv(macro_outer);
 TXC(set_opinfo);
+TXC(super);
 TXC(end);
 
 enum tx_opcode_t {
@@ -144,7 +145,8 @@ enum tx_opcode_t {
     TXOP_macro_nargs, /* 66 */
     TXOP_macro_outer, /* 67 */
     TXOP_set_opinfo, /* 68 */
-    TXOP_end, /* 69 */
+    TXOP_super, /* 69 */
+    TXOP_end, /* 70 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -218,6 +220,7 @@ static const U8 tx_oparg[] = {
     TXCODE_W_SVIV, /* macro_nargs */
     TXCODE_W_SVIV, /* macro_outer */
     0U, /* set_opinfo */
+    0U, /* super */
     0U, /* end */
 }; /* tx_oparg[] */
 
@@ -292,6 +295,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(macro_nargs), newSViv(TXOP_macro_nargs));
     (void)hv_stores(ops, STRINGIFY(macro_outer), newSViv(TXOP_macro_outer));
     (void)hv_stores(ops, STRINGIFY(set_opinfo), newSViv(TXOP_set_opinfo));
+    (void)hv_stores(ops, STRINGIFY(super), newSViv(TXOP_super));
     (void)hv_stores(ops, STRINGIFY(end), newSViv(TXOP_end));
 } /* tx_register_ops() */
 
@@ -367,6 +371,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_macro_nargs,
     TXCODE_macro_outer,
     TXCODE_set_opinfo,
+    TXCODE_super,
     TXCODE_end,
     NULL
 }; /* tx_optable[] */
@@ -448,6 +453,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(macro_nargs),
         LABEL_PTR(macro_outer),
         LABEL_PTR(set_opinfo),
+        LABEL_PTR(super),
         LABEL_PTR(end)
     }; /* end of ops_address_table */
     if(UNLIKELY(st == NULL)) {
@@ -526,6 +532,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(macro_nargs         ): TXCODE_macro_nargs         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_outer         ): TXCODE_macro_outer         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(set_opinfo          ): TXCODE_set_opinfo          (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(super               ): TXCODE_super               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(end): TXCODE_end(aTHX_ st);
     return NULL;
 } /* end of tx_runops() */

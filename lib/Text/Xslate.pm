@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.0000';
+our $VERSION = '1.0001';
 
 use Carp              ();
 use File::Spec        ();
@@ -441,6 +441,7 @@ sub _magic_token {
         ref($self->{compiler}) || $self->{compiler},
         $self->_extract_options(\%parser_option),
         $self->_extract_options(\%compiler_option),
+        [sort keys %{ $self->{function} } ],
     ]);
 
     if(ref $fullpath) { # ref to content string
@@ -521,11 +522,11 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.0000.
+This document describes Text::Xslate version 1.0001.
 
 =head1 SYNOPSIS
 
-    use Text::Xslate;
+    use Text::Xslate qw(mark_raw);
 
     my $tx = Text::Xslate->new(
         # the following options are optional.
@@ -541,6 +542,9 @@ This document describes Text::Xslate version 1.0000.
             { title => 'Programming Perl'      },
             # ...
         ],
+
+        # mark HTML components as raw not to escape its HTML tags
+        gadget => mark_raw('<div class="gadget">...</div>'),
     );
 
     # for files

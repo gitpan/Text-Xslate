@@ -122,7 +122,8 @@ our %OPS = (
     macro_nargs      => 66,
     macro_outer      => 67,
     set_opinfo       => 68,
-    end              => 69,
+    super            => 69,
+    end              => 70,
 ); # %OPS
 
 our @OPCODE = (
@@ -195,7 +196,8 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 66
     \&Text::Xslate::PP::Opcode::op_macro_outer,         # 67
     \&Text::Xslate::PP::Opcode::op_set_opinfo,          # 68
-    \&Text::Xslate::PP::Opcode::op_end,                 # 69
+    \&Text::Xslate::PP::Opcode::op_super,               # 69
+    \&Text::Xslate::PP::Opcode::op_end,                 # 70
 ); # @OPCODE
 
 our @OPARGS = (
@@ -268,6 +270,7 @@ our @OPARGS = (
     TXCODE_W_SVIV, # macro_nargs
     TXCODE_W_SVIV, # macro_outer
     0,             # set_opinfo
+    0,             # super
     0,             # end
 ); # @OPARGS
 

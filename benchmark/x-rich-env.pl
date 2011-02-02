@@ -13,10 +13,12 @@ use Getopt::Long;
 use Test::More;
 use Benchmark qw(:all);
 use FindBin qw($Bin);
+use Storable ();
 use Config; printf "Perl/%vd %s\n", $^V, $Config{archname};
 
 GetOptions(
-    'mst' => \my $try_mst,
+    'mst'        => \my $try_mst,
+    'tenjin'     => \my $try_tenjin,
 
     'size=i'     => \my $n,
     'template=s' => \my $tmpl,
@@ -46,6 +48,9 @@ warn "MobaSiF::Template is not available ($@)\n" if $try_mst && $@;
 my $has_htp = eval q{ use HTML::Template::Pro; 1 };
 warn "HTML::Template::Pro is not available ($@)\n" if $@;
 
+my $has_tenjin = ($try_tenjin && eval q{ use Tenjin; 1 });
+warn "Tenjin is not available ($@)\n" if $try_tenjin && $@;
+
 foreach my $mod(qw(
     Text::Xslate
     Text::MicroTemplate
@@ -54,6 +59,7 @@ foreach my $mod(qw(
     Text::ClearSilver
     MobaSiF::Template
     HTML::Template::Pro
+    Tenjin
 )){
     print $mod, '/', $mod->VERSION, "\n" if $mod->VERSION;
 }
@@ -74,6 +80,15 @@ my $tt = Template->new(
     COMPILE_EXT  => '.out',
 );
 
+my $htp;
+if($has_htp) {
+    $htp = HTML::Template::Pro->new(
+        path           => [$path],
+        filename       => "$tmpl.ht",
+        case_sensitive => 1,
+    );
+}
+
 my $tcs;
 if($has_tcs) {
     $tcs = Text::ClearSilver->new(
@@ -88,13 +103,12 @@ if($has_mst) {
     MobaSiF::Template::Compiler::compile($mst_in, $mst_bin);
 }
 
-my $htp;
-if($has_htp) {
-    $htp = HTML::Template::Pro->new(
-        path           => [$path],
-        filename       => "$tmpl.ht",
-        case_sensitive => 1,
-    );
+my $tenjin;
+if($has_tenjin) {
+    $tenjin = Tenjin->new({
+        path => [$path],
+        strict => 1,
+    });
 }
 
 my $vars = {
@@ -105,6 +119,7 @@ my $vars = {
         }) x $n
    ],
 };
+my $vars_tenjin = Storable::dclone($vars);
 
 {
     my $expected = $tx->render("$tmpl.tx", $vars);
@@ -114,6 +129,7 @@ my $vars = {
     $tests++ if $has_tcs;
     $tests++ if $has_mst;
     $tests++ if $has_htp;
+    $tests++ if $has_tenjin;
     plan tests => $tests;
 
     $tt->process("$tmpl.tt", $vars, \my $out) or die $tt->error;
@@ -141,6 +157,11 @@ my $vars = {
         $out = $htp->output();
         $out =~ s/\n+/\n/g;
         is $out, $expected, 'HTP: HTML::Template::Pro';
+    }
+    if($has_tenjin) {
+        $out = $tenjin->render("$tmpl.tj", $vars_tenjin);
+        $out =~ s/\n+/\n/g;
+        is $out, $expected, 'Tenjin';
     }
 }
 
@@ -177,6 +198,12 @@ cmpthese -1 => {
         HTP => sub {
             $htp->param($vars);
             my $body = $htp->output();
+            return;
+        },
+    ) : (),
+    $has_tenjin ? (
+        Tenjin => sub {
+            my $body = $tenjin->render("$tmpl.tj", $vars_tenjin);
             return;
         },
     ) : (),
