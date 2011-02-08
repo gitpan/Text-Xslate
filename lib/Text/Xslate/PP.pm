@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.0003';
+our $VERSION = '1.0004';
 $VERSION =~ s/_//; # for developpers versions
 
 BEGIN{
@@ -343,6 +343,9 @@ sub _assemble {
         $s =~ s/($uri_unsafe_rfc3986)/sprintf '%%' . '%02X', ord $1/xmsgeo;
         return $s;
     }
+
+    sub is_array_ref { ref($_[0]) eq 'ARRAY' }
+    sub is_hash_ref  { ref($_[0]) eq 'HASH'  }
 }
 
 #
@@ -354,8 +357,8 @@ sub tx_check_itr_ar {
     return $ar if ref($ar) eq 'ARRAY';
 
     if ( defined $ar ) {
-        if(Scalar::Util::blessed($ar) && overload::Method($ar, '@{}')) {
-            return \@{$ar};
+        if(my $x = Text::Xslate::PP::sv_is_ref($ar, 'ARRAY', '@{}')) {
+            return $x;
         }
 
         $st->error( [$frame, $line],
@@ -366,6 +369,18 @@ sub tx_check_itr_ar {
         $st->warn( [$frame, $line], "Use of nil to iterate" );
     }
     return [];
+}
+
+sub sv_is_ref {
+    my($sv, $t, $ov) = @_;
+    return $sv if ref($sv) eq $t;
+
+    if(Scalar::Util::blessed($sv)
+        && (my $m = overload::Method($sv, $ov))) {
+        $sv = $sv->$m(undef, undef);
+        return $sv if ref($sv) eq $t;
+    }
+    return undef;
 }
 
 sub tx_sv_eq {
@@ -650,7 +665,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.0003.
+This document describes Text::Xslate::PP version 1.0004.
 
 =head1 DESCRIPTION
 

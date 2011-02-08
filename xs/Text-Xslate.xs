@@ -102,14 +102,35 @@ tx_load_lvar(pTHX_ tx_state_t* const st, I32 const lvar_ix);
 static AV*
 tx_push_frame(pTHX_ tx_state_t* const st);
 
+static void
+tx_pop_frame(pTHX_ tx_state_t* const st, bool const replace_output);
+
 static SV*
 tx_funcall(pTHX_ tx_state_t* const st, SV* const func, const char* const name);
 
 static SV*
 tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key);
 
-STATIC_INLINE bool
-tx_sv_is_array_ref(pTHX_ SV* const sv);
+static bool
+tx_sv_has_amg(pTHX_ SV* const sv, const int amg_id);
+
+/* tx_sv_is_ref() respects overloading */
+static SV*
+tx_sv_is_ref(pTHX_ SV* const sv, svtype const svt, int const amg_id);
+
+STATIC_INLINE int
+tx_sv_is_array_ref(pTHX_ SV* const sv) {
+    assert(sv);
+    return SvROK(sv) && SvTYPE(SvRV(sv)) == SVt_PVAV && !SvOBJECT(SvRV(sv));
+    // return tx_sv_is_ref(aTHX_ sv, SVt_PVAV, to_av_amg);
+}
+
+STATIC_INLINE int
+tx_sv_is_hash_ref(pTHX_ SV* const sv) {
+    assert(sv);
+    return SvROK(sv) && SvTYPE(SvRV(sv)) == SVt_PVHV && !SvOBJECT(SvRV(sv));
+    // return tx_sv_is_ref(aTHX_ sv, SVt_PVHV, to_hv_amg);
+}
 
 STATIC_INLINE bool
 tx_str_is_raw(pTHX_ pMY_CXT_ SV* const sv); /* doesn't handle magics */
@@ -183,10 +204,7 @@ tx_call_error_handler(pTHX_ SV* const handler, SV* const msg) {
     PUSHMARK(SP);
     XPUSHs(msg);
     PUTBACK;
-    call_sv(handler, G_VOID);
-    SPAGAIN;
-    (void)POPs; /* discard */
-    PUTBACK;
+    call_sv(handler, G_VOID | G_DISCARD);
 }
 
 /* for trivial errors, ignored by default */
@@ -260,6 +278,22 @@ tx_push_frame(pTHX_ tx_state_t* const st) {
     /* switch the pad */
     st->pad = AvARRAY(newframe) + TXframe_START_LVAR;
     return newframe;
+}
+
+static void
+tx_pop_frame(pTHX_ tx_state_t* const st, bool const replace_output) {
+    AV* const top  = TX_frame_at(st, st->current_frame);
+    SV** const ary = AvARRAY(top);
+
+    /* switch the pad */
+    st->pad = AvARRAY(TX_frame_at(st, --st->current_frame))
+                + TXframe_START_LVAR;
+
+    if(replace_output) {
+        SV* const tmp       = ary[TXframe_OUTPUT];
+        ary[TXframe_OUTPUT] = st->output;
+        st->output          = tmp;
+    }
 }
 
 SV* /* thin wrapper of Perl_call_sv() */
@@ -370,11 +404,41 @@ tx_fetch(pTHX_ tx_state_t* const st, SV* const var, SV* const key) {
     return retval ? retval : &PL_sv_undef;
 }
 
-STATIC_INLINE bool
-tx_sv_is_array_ref(pTHX_ SV* const sv) {
-    return SvROK(sv)
-    && SvTYPE(SvRV(sv)) == SVt_PVAV
-    && !SvOBJECT(SvRV(sv));
+
+static bool
+tx_sv_has_amg(pTHX_ SV* const sv, const int amg_id) {
+    if(SvAMAGIC(sv)) {
+        const MAGIC* const mg = mg_find((SV*)SvSTASH(SvRV(sv)),
+            PERL_MAGIC_overload_table);
+        const AMT* const amt  = (AMT*)mg->mg_ptr;
+        assert(amt);
+        assert(AMT_AMAGIC(amt));
+        return amt->table[amg_id] ? TRUE : FALSE;
+    }
+    return FALSE;
+}
+
+static SV*
+tx_sv_is_ref(pTHX_ SV* const sv, svtype const svt, const int amg_id) {
+    if(SvROK(sv)) {
+        SV* const r = SvRV(sv);
+        if(SvOBJECT(r)) {
+            if(tx_sv_has_amg(aTHX_ sv, amg_id)) {
+                /* AMG_CALLunary() */
+                SV* const tmpsv = amagic_call(sv,
+                    &PL_sv_undef, amg_id, AMGf_noright | AMGf_unary);
+                if(SvROK(tmpsv)
+                        && SvTYPE(SvRV(tmpsv)) == svt
+                        && !SvOBJECT(SvRV(tmpsv))) {
+                    return tmpsv;
+                }
+            }
+        }
+        else if(SvTYPE(r) == svt) {
+            return sv;
+        }
+    }
+    return NULL;
 }
 
 STATIC_INLINE bool
@@ -729,8 +793,10 @@ static void
 tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv) {
     dXCPT;
     tx_state_t st;
+
     StructCopy(base, &st, tx_state_t);
 
+    //PerlIO_stdoutf("# 0x%p %d %d\n", base, (int)MY_CXT.depth, (int)st.current_frame);
     st.output = output;
     st.vars   = hv;
 
@@ -757,15 +823,9 @@ tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv
     MY_CXT.depth--;
 
     XCPT_CATCH {
-        /* unwind the stack frame to fix up TXframe_OUTPUT */
+        /* unwind the stack frames */
         while(st.current_frame > 0) {
-            AV* const frame = TX_frame_at(&st, st.current_frame--);
-            SV* tmp;
-
-            /* swap st->output and TXframe_OUTPUT */
-            tmp                            = AvARRAY(frame)[TXframe_OUTPUT];
-            AvARRAY(frame)[TXframe_OUTPUT] = st.output;
-            st.output                      = tmp;
+            tx_pop_frame(aTHX_ &st, TRUE);
         }
         XCPT_RETHROW;
     }
@@ -802,7 +862,6 @@ tx_mg_free(pTHX_ SV* const sv, MAGIC* const mg){
     tx_code_t* const code     = st->code;
     I32 const len             = st->code_len;
     I32 i;
-
     for(i = 0; i < len; i++) {
         /* opcode */
         if( tx_oparg[ info[i].optype ] & TXARGf_SV ) {
@@ -1009,7 +1068,7 @@ tx_load_template(pTHX_ SV* const self, SV* const name, bool const from_include) 
     }
 
     sv = hv_iterval(ttable, he);
-    if(!tx_sv_is_array_ref(aTHX_ sv)) {
+    if(!(SvROK(sv) && SvTYPE(SvRV(sv)) == SVt_PVAV)) {
         why = "template entry is invalid";
         goto err;
     }
@@ -1217,7 +1276,7 @@ CODE:
 
     for(i = 0; i < len; i++) {
         SV* const code = *av_fetch(proto, i, TRUE);
-        if(tx_sv_is_array_ref(aTHX_ code)) {
+        if(SvROK(code) && SvTYPE(SvRV(code)) == SVt_PVAV) {
             AV* const av     = (AV*)SvRV(code);
             SV* const opname = *av_fetch(av, 0, TRUE);
             SV** const arg   =  av_fetch(av, 1, FALSE);
@@ -1558,6 +1617,20 @@ uri_escape(SV* str)
 CODE:
 {
     ST(0) = tx_uri_escape(aTHX_ str);
+}
+
+void
+is_array_ref(SV* sv)
+CODE:
+{
+    ST(0) = boolSV( tx_sv_is_array_ref(aTHX_ sv));
+}
+
+void
+is_hash_ref(SV* sv)
+CODE:
+{
+    ST(0) = boolSV( tx_sv_is_hash_ref(aTHX_ sv));
 }
 
 MODULE = Text::Xslate    PACKAGE = Text::Xslate::Type::Raw

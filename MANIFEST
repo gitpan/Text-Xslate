@@ -226,6 +226,9 @@ t/300_examples/100_eg_pl.t
 t/300_examples/101_eg_psgi.t
 t/900_bugs/001_super.t
 t/900_bugs/002_addfunc.t
+t/900_bugs/003_frame_access.t
+t/900_bugs/004_errorhandling.t
+t/900_bugs/005_rec_include.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

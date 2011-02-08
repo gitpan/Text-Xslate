@@ -512,12 +512,16 @@ $CODE_MANIP{ 'builtin_uri' } = sub  {
 
 $CODE_MANIP{ 'builtin_is_array_ref' } = sub  {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'ref( %s ) eq "ARRAY"', $self->sa ) );
+    $self->sa( sprintf(
+        'Text::Xslate::Util::is_array_ref(%s)',
+        $self->sa ) );
 };
 
 $CODE_MANIP{ 'builtin_is_hash_ref' } = sub  {
     my ( $self, $arg, $line ) = @_;
-    $self->sa( sprintf( 'ref( %s ) eq "HASH"', $self->sa ) );
+    $self->sa( sprintf(
+        'Text::Xslate::Util::is_hash_ref(%s)',
+        $self->sa ) );
 };
 
 $CODE_MANIP{ 'match' } = sub {
@@ -716,10 +720,10 @@ $CODE_MANIP{ 'funcall' } = sub {
 
 $CODE_MANIP{ 'methodcall_s' } = sub {
     my ( $self, $arg, $line ) = @_;
-    require Text::Xslate::PP::Method;
 
-    $self->sa(
-        sprintf('Text::Xslate::PP::Method::tx_methodcall( $st, [%s, %s], %s, %s )', $self->frame_and_line,
+    $self->sa( sprintf(
+        'Text::Xslate::PP::Method::tx_methodcall( $st, [%s, %s], %s, %s )',
+            $self->frame_and_line,
             value_to_literal($arg), join( ', ', @{ pop @{ $self->SP } } ) )
     );
 };

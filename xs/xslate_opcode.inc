@@ -164,7 +164,9 @@ TXC(include) {
     tx_state_t* const st = tx_load_template(aTHX_ TX_st->engine, TX_st_sa, TRUE);
 
     ENTER;
+    //tx_push_frame(aTHX_ st);
     tx_execute(aTHX_ aMY_CXT_ st, TX_st->output, TX_st->vars);
+    //tx_pop_frame(aTHX_ st, FALSE);
     LEAVE;
 
     TX_RETURN_NEXT();
@@ -173,19 +175,14 @@ TXC(include) {
 TXC_w_var(for_start) {
     SV* avref    = TX_st_sa;
     IV  const id = TX_op_arg_iv;
+    SV* tmpsv;
 
     SvGETMAGIC(avref);
-    if(!tx_sv_is_array_ref(aTHX_ avref)) {
+    if((tmpsv = tx_sv_is_ref(aTHX_ avref, SVt_PVAV, to_av_amg))) {
+        avref = tmpsv;
+    }
+    else {
         if(SvOK(avref)) {
-            /* cf. tryAMAGICunDEREF(to_av) in pp.h */
-            if(SvAMAGIC(avref)) {
-                SV* const tmpsv = AMG_CALLun(avref, to_av);
-
-                if(tx_sv_is_array_ref(aTHX_ tmpsv)) {
-                    avref = tmpsv;
-                    goto avref_ok;
-                }
-            }
             tx_error(aTHX_ TX_st,
                 "Iterating data must be an ARRAY reference, not %s",
                 tx_neat(aTHX_ avref));
@@ -196,7 +193,6 @@ TXC_w_var(for_start) {
         avref = sv_2mortal(newRV_noinc((SV*)newAV()));
     }
 
-    avref_ok:
     (void)   TX_lvar(id+TXfor_ITEM); /* allocate the space */
     sv_setiv(TX_lvar(id+TXfor_ITER), -1); /* (re)set iterator */
     sv_setsv(TX_lvar(id+TXfor_ARRAY), avref);
@@ -468,11 +464,7 @@ TXC(builtin_is_array_ref) {
 TXC(builtin_is_hash_ref) {
     SV* const sv = TX_st_sa;
     SvGETMAGIC(sv);
-    TX_st_sa = boolSV(
-        SvROK(sv)
-        && SvTYPE(SvRV(sv)) == SVt_PVHV
-        && !SvOBJECT(SvRV(sv))
-    );
+    TX_st_sa = boolSV( tx_sv_is_hash_ref(aTHX_ sv) );
     TX_RETURN_NEXT();
 }
 
@@ -596,18 +588,11 @@ TXC(funcall) { /* call a function or a macro */
 }
 
 TXC(macro_end) {
-    AV* const oldframe  = TX_current_frame();
-    AV* const cframe    = TX_frame_at(TX_st, --TX_st->current_frame); /* pop frame */
-    SV* const retaddr   = AvARRAY(oldframe)[TXframe_RETADDR];
-    SV* tmp;
-
-    TX_st->pad = AvARRAY(cframe) + TXframe_START_LVAR; /* switch the pad */
+    SV* const retaddr = AvARRAY(TX_current_frame())[TXframe_RETADDR];
 
     TX_st_sa = tx_mark_raw(aTHX_ TX_st->output);
 
-    tmp                               = AvARRAY(oldframe)[TXframe_OUTPUT];
-    AvARRAY(oldframe)[TXframe_OUTPUT] = TX_st->output;
-    TX_st->output                     = tmp;
+    tx_pop_frame(aTHX_ TX_st, TRUE);
 
     TX_RETURN_PC( INT2PTR(tx_pc_t, SvUVX(retaddr)) );
 }

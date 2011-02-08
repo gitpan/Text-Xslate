@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.0003';
+our $VERSION = '1.0004';
 
 use Carp              ();
 use File::Spec        ();
@@ -60,6 +60,7 @@ package Text::Xslate::Engine;
 use Text::Xslate::Util qw(
     import_from
     make_error
+    dump
 );
 
 BEGIN {
@@ -101,10 +102,10 @@ my %builtin = (
     mark_raw     => \&Text::Xslate::Util::mark_raw,
     unmark_raw   => \&Text::Xslate::Util::unmark_raw,
     uri          => \&Text::Xslate::Util::uri_escape,
-    is_array_ref => \&_builtin_is_array_ref,
-    is_hash_ref  => \&_builtin_is_hash_ref,
+    is_array_ref => \&Text::Xslate::Util::is_array_ref,
+    is_hash_ref  => \&Text::Xslate::Util::is_hash_ref,
 
-    dump       => \&Text::Xslate::Util::p,
+    dump         => \&Text::Xslate::Util::dump,
 );
 
 sub default_functions { +{} } # overridable
@@ -496,21 +497,10 @@ sub compile {
     return $self->_compiler->compile(@_, from_include => $self->{from_include});
 }
 
-sub _builtin_is_array_ref {
-    return ref($_[0]) eq 'ARRAY';
-}
-
-sub _builtin_is_hash_ref {
-    return ref($_[0]) eq 'HASH';
-}
-
 sub _error {
     die make_error(@_);
 }
 
-sub dump :method {
-    goto &Text::Xslate::Util::p;
-}
 
 package Text::Xslate;
 1;
@@ -522,7 +512,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.0003.
+This document describes Text::Xslate version 1.0004.
 
 =head1 SYNOPSIS
 
