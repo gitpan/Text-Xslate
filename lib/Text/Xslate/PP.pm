@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.0004';
+our $VERSION = '1.0005';
 $VERSION =~ s/_//; # for developpers versions
 
 BEGIN{
@@ -177,9 +177,7 @@ sub _assemble {
 
     my $len = scalar( @$asm );
 
-    my $mainframe = tx_push_frame( $st );
-    $mainframe->[ Text::Xslate::PP::TXframe_NAME ]    = 'main';
-    $mainframe->[ Text::Xslate::PP::TXframe_RETADDR ] = $len;
+    $st->push_frame('main', $len);
 
     $st->code_len( $len );
 
@@ -462,16 +460,6 @@ sub tx_repeat {
     }
 }
 
-sub tx_push_frame {
-    my ( $st ) = @_;
-
-    if ( $st->current_frame > 100 ) {
-        Carp::croak("Macro call is too deep (> 100)");
-    }
-
-    return $st->frame->[ $st->current_frame( $st->current_frame + 1 ) ] ||= [];
-}
-
 
 sub tx_load_template {
     my ( $self, $name, $from_include ) = @_;
@@ -564,8 +552,8 @@ sub tx_execute {
         Carp::croak("Execution is too deep (> 100)");
     }
 
-    $st->{pc}   = 0;
-    $st->{vars} = $vars;
+    local $st->{pc}   = 0;
+    local $st->{vars} = $vars;
 
     local $_depth      = $_depth + 1;
     local $_current_st = $st;
@@ -588,7 +576,7 @@ sub tx_execute {
 
         local $st->{sa};
         local $st->{sb};
-        $st->{output} = '';
+        local $st->{output} = '';
         $st->{code}->[0]->{ exec_code }->( $st );
         return $st->{output};
     }
@@ -665,7 +653,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.0004.
+This document describes Text::Xslate::PP version 1.0005.
 
 =head1 DESCRIPTION
 

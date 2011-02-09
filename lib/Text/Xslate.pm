@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.0004';
+our $VERSION = '1.0005';
 
 use Carp              ();
 use File::Spec        ();
@@ -512,7 +512,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.0004.
+This document describes Text::Xslate version 1.0005.
 
 =head1 SYNOPSIS
 
@@ -622,47 +622,6 @@ This mechanism is also called as template inheritance.
 
 Xslate is highly extensible. You can add functions and methods to the template
 engine and even add a new syntax via extending the parser.
-
-=head2 Optimizations Employed By Text::Xslate
-
-Here are some optimizations worth noting that makes Text::Xslate run so fast,
-in no particular order:
-
-=head3 Pre-Compiled Templates
-
-Text::Xslate is among the template engines that pre-compile the templates.
-This is similar to, say, Template::Toolkit, but Text::Xslate compiles the
-templates to C structures and stores them as binary data.
-
-=head3 Built On Top Of A Virtual Machine
-
-Text::Xslate is built on top of virtual machine that executes bytecode, and
-this virtual machine is fine-tuned I<specifically> for template processing.
-
-The virtual machine also employs optimizations such as direct-threading
-style coding to shave off any extra milliseconds that the engine might take
-otherwise
-
-=head3 Custom Byte Codes For Oft-Used Operations
-
-Some operations which are used very often are optimized into its own
-byte code. For example (as described elsewhere) Text::Xslate automatically
-escapes HTML unless you tell it not to. Text::Xslate implements this process
-which involves escaping the string I<while> appending the result to the
-output buffer in C, as a custom byte code. This lets you avoid the penalties
-usually involved in such operations.
-
-=head3 Pre-Allocation Of Output Buffers
-
-One of the main things to consider to reduce performance degradation
-while processing a template is to avoid the number of calls to C<malloc()>.
-One of the tricks that Text::Xslate employs to reduce the number of calls to
-C<malloc()> is to pre-allocate the output buffer in an intelligent manner:
-For example, Text::Xslate assumes that most templates will be rendered to be
-about the same as the previous run, so when a template is rendered it uses
-the size allocated for the previous rendering as an approximation of how much
-space the current rendering will require. This allows to greatly reduce the
-number of C<malloc()> calls required to render a template.
 
 =head1 INTERFACE
 
@@ -806,6 +765,18 @@ This option is passed to the compiler.
 Specify the footer template files, which are inserted to the foot of each template.
 
 This option is passed to the compiler.
+
+=item C<< warn_handler => \&cb >>
+
+Specify the callback I<&cb> which is called on warnings.
+
+This option is experimental.
+
+=item C<< die_handler => \&cb >>
+
+Specify the callback I<&cb> which is called on fatal errors.
+
+This option is experimental.
 
 =back
 
@@ -1020,7 +991,7 @@ Augment modifiers.
 
 =item *
 
-Loop controls.
+Loop controls (last / next).
 
 =item *
 
@@ -1029,6 +1000,16 @@ Default arguments and named arguments for macros.
 =back
 
 =cut
+
+=head1 SUPPORT
+
+WEB: L<http://xslate.org/>
+
+IRC: #xslate @ irc.perl.org
+
+REPOSITORY:
+    http://github.com/gfx/p5-Text-Xslate/
+    git://github.com/gfx/p5-Text-Xslate.git
 
 =head1 BUGS
 
@@ -1053,12 +1034,6 @@ L<Text::Xslate::Syntax::TTerse>
 Xslate command:
 
 L<xslate>
-
-The Xslate web site and public repository:
-
-L<http://xslate.org/>
-
-L<http://github.com/gfx/p5-Text-Xslate>
 
 Other template modules that Xslate has been influenced by:
 
@@ -1098,9 +1073,9 @@ Thanks to tokuhirom for the ideas, feature requests, encouragement, and bug find
 
 Thanks to gardejo for the proposal to the name B<template cascading>.
 
-Thanks to jjn1056 to the concept of template overlay (now implemented as C<cascade with ...>).
-
 Thanks to makamaka for the contribution of Text::Xslate::PP.
+
+Thanks to jjn1056 to the concept of template overlay (now implemented as C<cascade with ...>).
 
 Thanks to typester for the various inspirations.
 
@@ -1117,6 +1092,12 @@ Thanks to Sam Graham for the bug reports.
 Thanks to Mons Anderson for the bug reports and patches.
 
 Thanks to hirose31 for the feature requests and bug reports.
+
+Thahks to c9s for the contribution of the documents.
+
+Thanks to shiba_yu36 for the bug reports.
+
+Thanks to kane46taka for the bug reports.
 
 =head1 AUTHOR
 
