@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.0005';
+our $VERSION = '1.0006';
 
 use Carp              ();
 use File::Spec        ();
@@ -512,7 +512,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.0005.
+This document describes Text::Xslate version 1.0006.
 
 =head1 SYNOPSIS
 
@@ -716,6 +716,8 @@ If C<< $level >= 2 >>, all the possible errors will be warned.
 Specify the template suffix, which is used for C<cascade> and C<include>
 in Kolon.
 
+Note that this is used statically. That is, the compiler uses it but the runtime engine doesn't.
+
 =item C<< syntax => $name // 'Kolon' >>
 
 Specifies the template syntax you want to use.
@@ -834,6 +836,10 @@ This method is significant when it is called by template functions and methods.
 
 Returns the current line number while executing. Otherwise returns C<undef>.
 This method is significant when it is called by template functions and methods.
+
+=head3 B<< Text::Xslate->print(...) >>
+
+Adds the argument into the output buffer. This method is available on executing.
 
 =head2 Exportable functions
 
@@ -1093,11 +1099,13 @@ Thanks to Mons Anderson for the bug reports and patches.
 
 Thanks to hirose31 for the feature requests and bug reports.
 
-Thahks to c9s for the contribution of the documents.
+Thanks to c9s for the contribution of the documents.
 
 Thanks to shiba_yu36 for the bug reports.
 
 Thanks to kane46taka for the bug reports.
+
+Thanks to cho45 for the bug reports.
 
 =head1 AUTHOR
 

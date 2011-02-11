@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.0005';
+our $VERSION = '1.0006';
 $VERSION =~ s/_//; # for developpers versions
 
 BEGIN{
@@ -129,6 +129,19 @@ sub current_line {
     return defined($_current_st)
         ? $_current_st->code->[ $_current_st->{ pc } ]->{line}
         : undef;
+}
+
+sub print {
+    shift;
+    if(defined $_current_st) {
+        foreach my $s(@_) {
+            $_current_st->print($s);
+        }
+    }
+    else {
+        Carp::croak('You cannot call print() method outside render()');
+    }
+    return '';
 }
 
 # >> copied and modified from Text::Xslate
@@ -448,7 +461,6 @@ sub tx_repeat {
     elsif(!Scalar::Util::looks_like_number($rhs)) {
         $_current_st->error(undef, "Repeat count must be a number, not %s",
             Text::Xslate::Util::neat($rhs));
-        return undef;
     }
     else {
         if( ref( $lhs ) eq TXt_RAW ) {
@@ -458,6 +470,7 @@ sub tx_repeat {
             return $lhs x $rhs;
         }
     }
+    return '';
 }
 
 
@@ -653,7 +666,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.0005.
+This document describes Text::Xslate::PP version 1.0006.
 
 =head1 DESCRIPTION
 

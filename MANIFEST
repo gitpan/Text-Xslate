@@ -43,6 +43,7 @@ example/cascade.pl
 example/cascade.tx
 example/data_section.gold
 example/data_section.pl
+example/err_handler.pl
 example/fillinform.gold
 example/fillinform.pl
 example/form.gold
@@ -181,6 +182,7 @@ t/030_kolon/030_xfuncs.t
 t/030_kolon/031_post_if.t
 t/030_kolon/032_include_bareword.t
 t/030_kolon/033_ov_forloop.t
+t/030_kolon/034_print.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -229,6 +231,7 @@ t/900_bugs/002_addfunc.t
 t/900_bugs/003_frame_access.t
 t/900_bugs/004_errorhandling.t
 t/900_bugs/005_rec_include.t
+t/900_bugs/006_complex_lex.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

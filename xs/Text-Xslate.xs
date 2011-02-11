@@ -84,6 +84,7 @@ typedef struct {
     /* original error handlers */
     SV* orig_warn_handler;
     SV* orig_die_handler;
+    SV* make_error;
 } my_cxt_t;
 START_MY_CXT
 
@@ -140,6 +141,9 @@ tx_sv_cat(pTHX_ SV* const dest, SV* const src);
 
 static void
 tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src);
+
+STATIC_INLINE void
+tx_print(pTHX_ tx_state_t* const st, SV* const sv);
 
 static SV*
 tx_html_escape(pTHX_ SV* const str);
@@ -545,6 +549,30 @@ tx_sv_cat_with_html_escape_force(pTHX_ SV* const dest, SV* const src) {
 
     SvCUR_set(dest, d - SvPVX(dest));
     *SvEND(dest) = '\0';
+}
+
+STATIC_INLINE void
+tx_print(pTHX_ tx_state_t* const st, SV* const sv) {
+    dMY_CXT;
+    SV* const out = st->output;
+
+    SvGETMAGIC(sv);
+    if(tx_str_is_raw(aTHX_ aMY_CXT_ sv)) {
+        SV* const arg = TX_UNMARK_RAW(sv);
+        if(SvOK(arg)) {
+            tx_sv_cat(aTHX_ out, arg);
+        }
+        else {
+            tx_warn(aTHX_ st, "Use of nil to print");
+        }
+    }
+    else if(SvOK(sv)) {
+        tx_sv_cat_with_html_escape_force(aTHX_ out, sv);
+    }
+    else {
+        tx_warn(aTHX_ st, "Use of nil to print");
+        /* does nothing */
+    }
 }
 
 static SV*
@@ -1146,8 +1174,12 @@ tx_my_cxt_init(pTHX_ pMY_CXT_ bool const cloning PERL_UNUSED_DECL) {
     MY_CXT.depth = 0;
     MY_CXT.raw_stash     = gv_stashpvs(TX_RAW_CLASS, GV_ADDMULTI);
     MY_CXT.macro_stash   = gv_stashpvs(TX_MACRO_CLASS, GV_ADDMULTI);
-    MY_CXT.warn_handler  = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_warn", GV_ADDMULTI));
-    MY_CXT.die_handler   = SvREFCNT_inc_NN((SV*)get_cv("Text::Xslate::Engine::_die",  GV_ADDMULTI));
+    MY_CXT.warn_handler  = SvREFCNT_inc_NN(
+        (SV*)get_cv("Text::Xslate::Engine::_warn", GV_ADD));
+    MY_CXT.die_handler   = SvREFCNT_inc_NN(
+        (SV*)get_cv("Text::Xslate::Engine::_die",  GV_ADD));
+    MY_CXT.make_error    = SvREFCNT_inc_NN(
+        (SV*)get_cv("Text::Xslate::Engine::make_error",  GV_ADD));
 }
 
 /* Because overloading stuff of old xsubpp didn't work,
@@ -1501,6 +1533,23 @@ ALIAS:
     current_line   = 2
 
 void
+print(klass, ...)
+CODE:
+{
+    dMY_CXT;
+    int i;
+    tx_state_t* const st = MY_CXT.current_st;
+    if(!st) {
+        croak("You cannot call print() method outside render()");
+    }
+
+    for(i = 1; i < items; i++) {
+        tx_print(aTHX_ st, ST(i));
+    }
+    XSRETURN_NO; /* return false as an empty string */
+}
+
+void
 _warn(SV* msg)
 ALIAS:
     _warn = 0
@@ -1556,9 +1605,7 @@ CODE:
             file = sv_2mortal(newRV_inc(*svp));
         }
     }
-    if(!SvOK(name)) { // FIXME: something's wrong
-        name = newSVpvs_flags("(oops)", SVs_TEMP);
-    }
+    /* TODO: append the stack info to msg */
     /* $full_message = make_error(engine, msg, file, line, vm_pos) */
     PUSHMARK(SP);
     EXTEND(SP, 6);
@@ -1566,9 +1613,14 @@ CODE:
     PUSHs(msg);
     PUSHs(file);
     mPUSHi(st->info[ pc_pos ].line);
-    mPUSHs(newSVpvf("&%"SVf"[%"UVuf"]", name, pc_pos));
+    if(tx_verbose(aTHX_ st) >= 3) {
+        if(!SvOK(name)) { // FIXME: something's wrong
+            name = newSVpvs_flags("(oops)", SVs_TEMP);
+        }
+        mPUSHs(newSVpvf("&%"SVf"[%"UVuf"]", name, pc_pos));
+    }
     PUTBACK;
-    call_pv("Text::Xslate::Util::make_error", G_SCALAR);
+    call_sv(MY_CXT.make_error, G_SCALAR);
     SPAGAIN;
     full_message = POPs;
     PUTBACK;
@@ -1587,7 +1639,6 @@ CODE:
         }
     }
     else {
-        /* TODO: append the stack info to msg */
         if(handler) {
             PUSHMARK(SP);
             XPUSHs(full_message);
@@ -1660,7 +1711,8 @@ BOOT:
         XS_Text__Xslate__fallback, file);
 
     /* *{'(""'} = \&as_string */
-    as_string = sv_2mortal(newRV_inc((SV*)get_cv( TX_RAW_CLASS "::as_string", GV_ADD)));
+    as_string = sv_2mortal(newRV_inc(
+        (SV*)get_cv( TX_RAW_CLASS "::as_string", GV_ADD)));
     sv_setsv_mg(
         (SV*)gv_fetchpvs( TX_RAW_CLASS "::(\"\"", GV_ADDMULTI, SVt_PVCV),
         as_string);
