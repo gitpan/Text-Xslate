@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.0008';
+our $VERSION = '1.0009';
 $VERSION =~ s/_//; # for developpers versions
 
 BEGIN{
@@ -18,7 +18,7 @@ use constant _PP_OPCODE  => scalar($DEBUG =~ /\b pp=opcode  \b/xms);
 use constant _PP_BOOSTER => scalar($DEBUG =~ /\b pp=booster \b/xms);
 use constant _PP_BACKEND =>   _PP_OPCODE  ? 'Opcode'
                             : _PP_BOOSTER ? 'Booster'
-                            :               'Booster'; # default
+                            :               'Opcode'; # default
 use constant _PP_ERROR_VERBOSE => scalar($DEBUG =~ /\b pp=verbose \b/xms);
 
 use constant _DUMP_LOAD => scalar($DEBUG =~ /\b dump=load \b/xms);
@@ -35,6 +35,7 @@ use Carp         ();
 require sprintf('Text/Xslate/PP/%s.pm', _PP_BACKEND);
 
 my $state_class = 'Text::Xslate::PP::' . _PP_BACKEND;
+$state_class->VERSION($VERSION); # ensure the version
 
 if(_PP_ERROR_VERBOSE) {
     Carp->import('verbose');
@@ -666,7 +667,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.0008.
+This document describes Text::Xslate::PP version 1.0009.
 
 =head1 DESCRIPTION
 

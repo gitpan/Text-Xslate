@@ -4,9 +4,10 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.0008';
+our $VERSION = '1.0009';
 
 use Carp              ();
+use Fcntl             ();
 use File::Spec        ();
 use Exporter          ();
 use Data::MessagePack ();
@@ -295,6 +296,7 @@ sub slurp {
 
     open my($source), '<' . $self->{input_layer}, $fullpath
         or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
+    flock($source, Fcntl::LOCK_SH());
     local $/;
     return scalar <$source>;
 }
@@ -326,7 +328,10 @@ sub _load_source {
                 or Carp::carp("Xslate: Cannot make directory $cachepath (ignored): $@");
         }
 
-        if(open my($out), '>:raw', $cachepath) {
+        if(sysopen my($out), $cachepath, Fcntl::O_WRONLY() | Fcntl::O_CREAT()) {
+            flock $out, Fcntl::LOCK_EX();
+            truncate $out, 0 or Carp::croak("Xslate: failed to truncate: $!");
+            binmode($out);
             $self->_save_compiled($out, $asm, $fullpath, utf8::is_utf8($source));
 
             if(!close $out) {
@@ -373,6 +378,7 @@ sub _load_compiled {
     my $cachepath = $fi->{cachepath};
     open my($in), '<:raw', $cachepath
         or $self->_error("LoadError: Cannot open $cachepath for reading: $!");
+    flock($in, Fcntl::LOCK_SH());
 
     my $magic = $self->_magic_token($fi->{fullpath});
     my $data;
@@ -512,18 +518,13 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.0008.
+This document describes Text::Xslate version 1.0009.
 
 =head1 SYNOPSIS
 
     use Text::Xslate qw(mark_raw);
 
-    my $tx = Text::Xslate->new(
-        # the following options are optional.
-        path       => ['.'],
-        cache_dir  => "$ENV{HOME}/.xslate_cache",
-        cache      => 1,
-    );
+    my $tx = Text::Xslate->new();
 
     my %vars = (
         title => 'A list of books',
@@ -800,8 +801,16 @@ Note that I<$file> may be cached according to the cache level.
 Renders a template string with given variables, and returns the result.
 I<\%vars> is optional.
 
-Note that I<$string> is never cached, so this method may not be suitable for
-productions.
+Note that I<$string> is never cached, so this method should be avoided in
+production environment. If you want in-memory templates, consider the I<path>
+option for HASH references which are cached as you expect:
+
+    my %vpath = (
+        'hello.tx' => 'Hello, <: $lang :> world!',
+    );
+
+    my $tx = Text::Xslate->new( path => \%vpath );
+    print $tx->render('hello.tx', { lang => 'Xslate' });
 
 =head3 B<< $tx->load_file($file) :Void >>
 
