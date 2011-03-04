@@ -233,6 +233,7 @@ t/900_bugs/004_errorhandling.t
 t/900_bugs/005_rec_include.t
 t/900_bugs/006_complex_lex.t
 t/900_bugs/007_uuv.t
+t/900_bugs/008_include_var.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
