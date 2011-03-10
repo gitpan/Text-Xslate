@@ -182,6 +182,7 @@ t/030_kolon/033_ov_forloop.t
 t/030_kolon/034_print.t
 t/030_kolon/035_include_w_vars.t
 t/030_kolon/036_foreach_else.t
+t/030_kolon/037_loop_ctl.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -204,6 +205,7 @@ t/040_tterse/019_switch.t
 t/040_tterse/020_chomp.t
 t/040_tterse/021_fake_use.t
 t/040_tterse/022_post_if.t
+t/040_tterse/023_loop_ctl.t
 t/040_tterse/100_not_supported.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
