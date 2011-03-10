@@ -2,7 +2,7 @@ package Text::Xslate::PP::Opcode;
 use Any::Moose;
 extends qw(Text::Xslate::PP::State);
 
-our $VERSION = '1.0012';
+our $VERSION = '1.0099_01';
 
 use Carp ();
 use Scalar::Util ();
@@ -66,6 +66,25 @@ sub op_localize_s {
     my $key    = $st->op_arg;
     my $newval = $st->{sa};
     $st->localize($key, $newval);
+
+    goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
+}
+
+sub op_localize_vars {
+    my($st) = @_;
+    my $new_vars = $st->{sa};
+    my $old_vars = $st->vars;
+
+    if(ref($new_vars) ne 'HASH') {
+        $st->warn(undef, "Variable map must be a HASH reference");
+    }
+
+    push @{ $st->{local_stack} }, bless sub {
+            $st->vars($old_vars);
+            return;
+        }, 'Text::Xslate::PP::Guard';
+
+    $st->vars($new_vars);
 
     goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
 }
@@ -185,6 +204,8 @@ sub op_for_iter {
             goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
         }
         else {
+            # finish the loop
+            $st->{sa} = ( $i > 0 ); # for 'for-else' block
             tx_access_lvar( $st, $id + TXfor_ITEM,  undef );
             tx_access_lvar( $st, $id + TXfor_ITER,  undef );
             tx_access_lvar( $st, $id + TXfor_ARRAY, undef );

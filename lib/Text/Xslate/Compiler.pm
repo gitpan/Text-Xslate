@@ -632,6 +632,7 @@ sub _generate_include {
             : $self->compile_ast($file) ),
         $self->opcode( $node->id => undef, line => $node->line ),
     );
+
     if(defined(my $vars = $node->second)) {
         @code = ($self->opcode('enter'),
             $self->_localize_vars($vars),
@@ -712,6 +713,26 @@ sub _generate_for {
         $self->opcode( for_iter  => scalar(@block_code) + 2 ),
         @block_code,
         $self->opcode( goto      => -(scalar(@block_code) + 2), comment => "end for" );
+
+    return @code;
+}
+
+sub _generate_for_else {
+    my($self, $node) = @_;
+
+    my $for_block  = $node->first;
+    my $else_block = $node->second;
+
+    my @code = (
+        $self->compile_ast($for_block),
+    );
+
+    # 'for' block sets __a with true if the loop count > 0
+    my @else = $self->compile_ast($else_block);
+    push @code, (
+        $self->opcode( or => scalar(@else) + 1, comment => 'for-else' ),
+        @else,
+    );
 
     return @code;
 }
@@ -1203,6 +1224,17 @@ sub _localize_vars {
     my($self, $vars) = @_;
     my @localize;
     my @pairs = @{$vars};
+
+    if( (@pairs % 2) != 0 ) {
+        if(@pairs == 1) {
+            return $self->compile_ast(@pairs),
+                $self->opcode( 'localize_vars' );
+        }
+        else {
+            $self->_error("You must pass pairs of expressions to include");
+        }
+    }
+
     while(my($key, $expr) = splice @pairs, 0, 2) {
         if(!any_in($key->arity, qw(literal variable))) {
             $self->_error("You must pass a simple name to localize variables", $key);

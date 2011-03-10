@@ -81,9 +81,6 @@ lib/Text/Xslate/Manual/Debugging.pod
 lib/Text/Xslate/Manual/FAQ.pod
 lib/Text/Xslate/Parser.pm
 lib/Text/Xslate/PP.pm
-lib/Text/Xslate/PP/Booster.pm
-lib/Text/Xslate/PP/Compiler.pm
-lib/Text/Xslate/PP/Compiler/CodeGenerator.pm
 lib/Text/Xslate/PP/Const.pm
 lib/Text/Xslate/PP/Method.pm
 lib/Text/Xslate/PP/Opcode.pm
@@ -183,6 +180,8 @@ t/030_kolon/031_post_if.t
 t/030_kolon/032_include_bareword.t
 t/030_kolon/033_ov_forloop.t
 t/030_kolon/034_print.t
+t/030_kolon/035_include_w_vars.t
+t/030_kolon/036_foreach_else.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t

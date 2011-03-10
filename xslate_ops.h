@@ -10,6 +10,7 @@ TXC_w_var(save_to_lvar);
 TXC_w_var(load_lvar);
 TXC_w_var(load_lvar_to_sb);
 TXC_w_key(localize_s);
+TXC(localize_vars);
 TXC(push);
 TXC(pushmark);
 TXC(nil);
@@ -83,70 +84,71 @@ enum tx_opcode_t {
     TXOP_load_lvar, /* 4 */
     TXOP_load_lvar_to_sb, /* 5 */
     TXOP_localize_s, /* 6 */
-    TXOP_push, /* 7 */
-    TXOP_pushmark, /* 8 */
-    TXOP_nil, /* 9 */
-    TXOP_literal, /* 10 */
-    TXOP_literal_i, /* 11 */
-    TXOP_fetch_s, /* 12 */
-    TXOP_fetch_field, /* 13 */
-    TXOP_fetch_field_s, /* 14 */
-    TXOP_print, /* 15 */
-    TXOP_print_raw, /* 16 */
-    TXOP_print_raw_s, /* 17 */
-    TXOP_include, /* 18 */
-    TXOP_for_start, /* 19 */
-    TXOP_for_iter, /* 20 */
-    TXOP_add, /* 21 */
-    TXOP_sub, /* 22 */
-    TXOP_mul, /* 23 */
-    TXOP_div, /* 24 */
-    TXOP_mod, /* 25 */
-    TXOP_concat, /* 26 */
-    TXOP_repeat, /* 27 */
-    TXOP_bitor, /* 28 */
-    TXOP_bitand, /* 29 */
-    TXOP_bitxor, /* 30 */
-    TXOP_bitneg, /* 31 */
-    TXOP_and, /* 32 */
-    TXOP_dand, /* 33 */
-    TXOP_or, /* 34 */
-    TXOP_dor, /* 35 */
-    TXOP_not, /* 36 */
-    TXOP_minus, /* 37 */
-    TXOP_max_index, /* 38 */
-    TXOP_builtin_mark_raw, /* 39 */
-    TXOP_builtin_unmark_raw, /* 40 */
-    TXOP_builtin_uri, /* 41 */
-    TXOP_builtin_is_array_ref, /* 42 */
-    TXOP_builtin_is_hash_ref, /* 43 */
-    TXOP_builtin_html_escape, /* 44 */
-    TXOP_match, /* 45 */
-    TXOP_eq, /* 46 */
-    TXOP_ne, /* 47 */
-    TXOP_lt, /* 48 */
-    TXOP_le, /* 49 */
-    TXOP_gt, /* 50 */
-    TXOP_ge, /* 51 */
-    TXOP_ncmp, /* 52 */
-    TXOP_scmp, /* 53 */
-    TXOP_range, /* 54 */
-    TXOP_fetch_symbol, /* 55 */
-    TXOP_funcall, /* 56 */
-    TXOP_macro_end, /* 57 */
-    TXOP_methodcall_s, /* 58 */
-    TXOP_make_array, /* 59 */
-    TXOP_make_hash, /* 60 */
-    TXOP_enter, /* 61 */
-    TXOP_leave, /* 62 */
-    TXOP_goto, /* 63 */
-    TXOP_depend, /* 64 */
-    TXOP_macro_begin, /* 65 */
-    TXOP_macro_nargs, /* 66 */
-    TXOP_macro_outer, /* 67 */
-    TXOP_set_opinfo, /* 68 */
-    TXOP_super, /* 69 */
-    TXOP_end, /* 70 */
+    TXOP_localize_vars, /* 7 */
+    TXOP_push, /* 8 */
+    TXOP_pushmark, /* 9 */
+    TXOP_nil, /* 10 */
+    TXOP_literal, /* 11 */
+    TXOP_literal_i, /* 12 */
+    TXOP_fetch_s, /* 13 */
+    TXOP_fetch_field, /* 14 */
+    TXOP_fetch_field_s, /* 15 */
+    TXOP_print, /* 16 */
+    TXOP_print_raw, /* 17 */
+    TXOP_print_raw_s, /* 18 */
+    TXOP_include, /* 19 */
+    TXOP_for_start, /* 20 */
+    TXOP_for_iter, /* 21 */
+    TXOP_add, /* 22 */
+    TXOP_sub, /* 23 */
+    TXOP_mul, /* 24 */
+    TXOP_div, /* 25 */
+    TXOP_mod, /* 26 */
+    TXOP_concat, /* 27 */
+    TXOP_repeat, /* 28 */
+    TXOP_bitor, /* 29 */
+    TXOP_bitand, /* 30 */
+    TXOP_bitxor, /* 31 */
+    TXOP_bitneg, /* 32 */
+    TXOP_and, /* 33 */
+    TXOP_dand, /* 34 */
+    TXOP_or, /* 35 */
+    TXOP_dor, /* 36 */
+    TXOP_not, /* 37 */
+    TXOP_minus, /* 38 */
+    TXOP_max_index, /* 39 */
+    TXOP_builtin_mark_raw, /* 40 */
+    TXOP_builtin_unmark_raw, /* 41 */
+    TXOP_builtin_uri, /* 42 */
+    TXOP_builtin_is_array_ref, /* 43 */
+    TXOP_builtin_is_hash_ref, /* 44 */
+    TXOP_builtin_html_escape, /* 45 */
+    TXOP_match, /* 46 */
+    TXOP_eq, /* 47 */
+    TXOP_ne, /* 48 */
+    TXOP_lt, /* 49 */
+    TXOP_le, /* 50 */
+    TXOP_gt, /* 51 */
+    TXOP_ge, /* 52 */
+    TXOP_ncmp, /* 53 */
+    TXOP_scmp, /* 54 */
+    TXOP_range, /* 55 */
+    TXOP_fetch_symbol, /* 56 */
+    TXOP_funcall, /* 57 */
+    TXOP_macro_end, /* 58 */
+    TXOP_methodcall_s, /* 59 */
+    TXOP_make_array, /* 60 */
+    TXOP_make_hash, /* 61 */
+    TXOP_enter, /* 62 */
+    TXOP_leave, /* 63 */
+    TXOP_goto, /* 64 */
+    TXOP_depend, /* 65 */
+    TXOP_macro_begin, /* 66 */
+    TXOP_macro_nargs, /* 67 */
+    TXOP_macro_outer, /* 68 */
+    TXOP_set_opinfo, /* 69 */
+    TXOP_super, /* 70 */
+    TXOP_end, /* 71 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -158,6 +160,7 @@ static const U8 tx_oparg[] = {
     TXCODE_W_VAR, /* load_lvar */
     TXCODE_W_VAR, /* load_lvar_to_sb */
     TXCODE_W_KEY, /* localize_s */
+    0U, /* localize_vars */
     0U, /* push */
     0U, /* pushmark */
     0U, /* nil */
@@ -233,6 +236,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(load_lvar), newSViv(TXOP_load_lvar));
     (void)hv_stores(ops, STRINGIFY(load_lvar_to_sb), newSViv(TXOP_load_lvar_to_sb));
     (void)hv_stores(ops, STRINGIFY(localize_s), newSViv(TXOP_localize_s));
+    (void)hv_stores(ops, STRINGIFY(localize_vars), newSViv(TXOP_localize_vars));
     (void)hv_stores(ops, STRINGIFY(push), newSViv(TXOP_push));
     (void)hv_stores(ops, STRINGIFY(pushmark), newSViv(TXOP_pushmark));
     (void)hv_stores(ops, STRINGIFY(nil), newSViv(TXOP_nil));
@@ -309,6 +313,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_load_lvar,
     TXCODE_load_lvar_to_sb,
     TXCODE_localize_s,
+    TXCODE_localize_vars,
     TXCODE_push,
     TXCODE_pushmark,
     TXCODE_nil,
@@ -391,6 +396,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(load_lvar),
         LABEL_PTR(load_lvar_to_sb),
         LABEL_PTR(localize_s),
+        LABEL_PTR(localize_vars),
         LABEL_PTR(push),
         LABEL_PTR(pushmark),
         LABEL_PTR(nil),
@@ -470,6 +476,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(load_lvar           ): TXCODE_load_lvar           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(load_lvar_to_sb     ): TXCODE_load_lvar_to_sb     (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(localize_s          ): TXCODE_localize_s          (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(localize_vars       ): TXCODE_localize_vars       (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(push                ): TXCODE_push                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(pushmark            ): TXCODE_pushmark            (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(nil                 ): TXCODE_nil                 (aTHX_ st); goto *(st->pc->exec_code);
