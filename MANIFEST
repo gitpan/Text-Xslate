@@ -57,8 +57,6 @@ example/list.tx
 example/mojo.psgi
 example/simple.gold
 example/simple.psgi
-example/uri_escape.gold
-example/uri_escape.pl
 HACKING
 inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
