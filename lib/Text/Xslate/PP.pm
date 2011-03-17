@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.0099_03';
+our $VERSION = '1.1000';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -29,9 +29,6 @@ use Carp         ();
 
 
 my $state_class = 'Text::Xslate::PP::Opcode';
-$VERSION eq $state_class->VERSION
-    or die "Version mismatch (" . __PACKAGE__ . "/$VERSION v.s. "
-         . "$state_class/" . $state_class->VERSION . ")";
 
 $VERSION =~ s/_//; # for developpers versions
 
@@ -634,7 +631,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.0099_03.
+This document describes Text::Xslate::PP version 1.1000.
 
 =head1 DESCRIPTION
 
