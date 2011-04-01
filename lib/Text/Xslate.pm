@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.1000';
+our $VERSION = '1.001';
 
 use Carp              ();
 use Fcntl             ();
@@ -112,11 +112,12 @@ my %builtin = (
 sub default_functions { +{} } # overridable
 
 sub options { # overridable
+    my($self) = @_;
     return {
         # name       => default
         suffix       => '.tx',
         path         => ['.'],
-        input_layer  => ':utf8',
+        input_layer  => $self->input_layer,
         cache        => 1, # 0: not cached, 1: checks mtime, 2: always cached
         cache_dir    => _DEFAULT_CACHE_DIR,
         module       => undef,
@@ -518,7 +519,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.1000.
+This document describes Text::Xslate version 1.001.
 
 =head1 SYNOPSIS
 
@@ -555,8 +556,13 @@ This document describes Text::Xslate version 1.1000.
 
 =head1 DESCRIPTION
 
-B<Text::Xslate> is a template engine, tuned for persistent applications,
+B<Xslate> is a template engine, tuned for persistent applications,
 safe as an HTML generator, and with rich features.
+
+There are a lot of template engines in CPAN, for example Template-Toolkit,
+Text::MicroTemplate, HTML::Template, and so on, but all of them have
+demerits at some points. This is why Xslate is developed and now it is
+well-honed as the standard template engine for web applications.
 
 The concept of Xslate is strongly influenced by Text::MicroTemplate
 and Template-Toolkit 2, but the central philosophy of Xslate is different
@@ -621,9 +627,9 @@ but is more powerful.
 
 This mechanism is also called as template inheritance.
 
-=head3 Easy to enhance
+=head3 Easiness to enhance
 
-Xslate is highly extensible. You can add functions and methods to the template
+Xslate is ready to enhance. You can add functions and methods to the template
 engine and even add a new syntax via extending the parser.
 
 =head1 INTERFACE
@@ -817,26 +823,6 @@ option for HASH references which are cached as you expect:
 Loads I<$file> into memory for following C<render()>.
 Compiles and saves it as disk caches if needed.
 
-It is a good idea to load templates before applications fork.
-Here is an example to to load all the templates which is in a given path:
-
-    my $path = ...;
-    my $tx = Text::Xslate->new(
-        path      => [$path],
-        cache_dir =>  $path,
-    );
-
-    find sub {
-        if(/\.tx$/) {
-            my $file = $File::Find::name;
-            $file =~ s/\Q$path\E .//xsm; # fix path names
-            $tx->load_file($file);
-        }
-    }, $path;
-
-    # fork and render ...
-
-
 =head3 B<< Text::Xslate->current_engine :XslateEngine >>
 
 Returns the current Xslate engine while executing. Otherwise returns C<undef>.
@@ -1013,6 +999,21 @@ Augment modifiers.
 =item *
 
 Default arguments and named arguments for macros.
+
+=item *
+
+External macros.
+
+Just idea: in the new macro concept, macros and external templates will be
+the same in internals:
+
+    : macro foo($lang) { "Hello, " ~ $lang ~ " world!" }
+    : include foo { lang => 'Xslate' }
+    : # => 'Hello, Xslate world!'
+
+    : extern bar 'my/bar.tx';     # 'extern bar $file' is ok
+    : bar( value => 42 );         # calls an external template
+    : include bar { value => 42 } # ditto
 
 =back
 
