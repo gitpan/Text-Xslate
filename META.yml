@@ -29,7 +29,6 @@ requires:
   Any::Moose: 0.13
   Data::MessagePack: 0.30
   Mouse: 0.61
-  MouseX::Getopt: 0.2601
   Scalar::Util: 1.14
   XSLoader: 0.1
   parent: 0.221
@@ -38,4 +37,4 @@ resources:
   homepage: http://xslate.org/
   license: http://dev.perl.org/licenses/
   repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 1.1001
+version: 1.1002
