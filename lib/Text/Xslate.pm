@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.1002';
+our $VERSION = '1.1003';
 
 use Carp              ();
 use Fcntl             ();
@@ -69,6 +69,9 @@ BEGIN {
 
     my $dump_load = scalar($Text::Xslate::Util::DEBUG =~ /\b dump=load \b/xms);
     *_DUMP_LOAD = sub(){ $dump_load };
+
+    my $save_src = scalar($Text::Xslate::Util::DEBUG =~ /\b save_src \b/xms);
+    *_SAVE_SRC  = sub() { $save_src };
 
     *_ST_MTIME = sub() { 9 }; # see perldoc -f stat
 
@@ -197,11 +200,14 @@ sub _merge_hash {
     return;
 }
 
-sub load_string { # for <string>
+sub load_string { # called in render_string()
     my($self, $string) = @_;
     if(not defined $string) {
         $self->_error("LoadError: Template string is not given");
     }
+    $self->note('  _load_string: %s', join '\n', split /\n/, $string)
+        if _DUMP_LOAD;
+    $self->{source}{'<string>'} = $string if _SAVE_SRC;
     $self->{string_buffer} = $string;
     my $asm = $self->compile($string);
     $self->_assemble($asm, '<string>', \$string, undef, undef);
@@ -221,7 +227,7 @@ sub find_file {
     my $orig_mtime;
     my $cache_mtime;
     foreach my $p(@{$self->{path}}) {
-        print STDOUT "  find_file: $p / $file ...\n" if _DUMP_LOAD;
+        $self->note("  find_file: %s / %s ...\n", $p, $file) if _DUMP_LOAD;
 
         my $path_id;
         if(ref $p eq 'HASH') { # virtual path
@@ -253,9 +259,11 @@ sub find_file {
         $self->_error("LoadError: Cannot find '$file' (path: @{$self->{path}})");
     }
 
-    print STDOUT "  find_file: $fullpath (", ($cache_mtime || 0), ")\n" if _DUMP_LOAD;
+    $self->note("  find_file: %s (%d)\n",
+        $fullpath, $cache_mtime || 0) if _DUMP_LOAD;
 
     return {
+        name        => ref($fullpath) ? $file : $fullpath,
         fullpath    => $fullpath,
         cachepath   => $cachepath,
 
@@ -270,7 +278,7 @@ sub load_file {
 
     local $self->{from_include} = $from_include;
 
-    print STDOUT "load_file($file)\n" if _DUMP_LOAD;
+    $self->note("load_file(%s)\n", $file) if _DUMP_LOAD;
 
     if($file eq '<string>') { # simply reload it
         return $self->load_string($self->{string_buffer});
@@ -307,6 +315,8 @@ sub _load_source {
     my $fullpath  = $fi->{fullpath};
     my $cachepath = $fi->{cachepath};
 
+    $self->note("  _load_source: try %s ...\n", $fullpath) if _DUMP_LOAD;
+
     # This routine is called when the cache is no longer valid (or not created yet)
     # so it should be ensured that the cache, if exists, does not exist
     if(-e $cachepath) {
@@ -315,9 +325,11 @@ sub _load_source {
     }
 
     my $source = $self->slurp($fullpath);
+    $self->{source}{$fi->{name}} = $source if _SAVE_SRC;
 
     my $asm = $self->compile($source,
         file => $fullpath,
+        name => $fi->{name},
     );
 
     if($self->{cache} >= 1) {
@@ -348,8 +360,8 @@ sub _load_source {
         }
     }
     if(_DUMP_LOAD) {
-        printf STDERR "  _load_source: cache(%s)\n",
-            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
+        $self->note("  _load_source: cache(%s)\n",
+            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef');
     }
 
     return $asm;
@@ -370,8 +382,8 @@ sub _load_compiled {
     # see also tx_load_template() in xs/Text-Xslate.xs
     if(!( defined($fi->{cache_mtime}) and $self->{cache} >= 1
             and $threshold >= $fi->{orig_mtime} )) {
-        printf "  _load_compiled: no fresh cache: %s, %s",
-            $threshold, Text::Xslate::Util::p($fi) if _DUMP_LOAD;
+        $self->note( "  _load_compiled: no fresh cache: %s, %s",
+            $threshold || 0, Text::Xslate::Util::p($fi) ) if _DUMP_LOAD;
         $fi->{cache_mtime} = undef;
         return undef;
     }
@@ -413,9 +425,9 @@ sub _load_compiled {
                 return undef; # purge the cache
             }
             if($dep_mtime > $threshold){
-                printf "  _load_compiled: %s(%s) is newer than %s(%s)\n",
+                $self->note("  _load_compiled: %s(%s) is newer than %s(%s)\n",
                     $c->[1],    scalar localtime($dep_mtime),
-                    $cachepath, scalar localtime($threshold)
+                    $cachepath, scalar localtime($threshold) )
                         if _DUMP_LOAD;
                 return undef; # purge the cache
             }
@@ -424,8 +436,8 @@ sub _load_compiled {
     }
 
     if(_DUMP_LOAD) {
-        printf STDERR "  _load_compiled: cache(%s)\n",
-            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef';
+        $self->note("  _load_compiled: cache(%s)\n",
+            defined $fi->{cache_mtime} ? $fi->{cache_mtime} : 'undef');
     }
 
     return \@asm;
@@ -455,7 +467,9 @@ sub _magic_token {
     if(ref $fullpath) { # ref to content string
         require 'Digest/MD5.pm';
         my $md5 = Digest::MD5->new();
-        $md5->add(${$fullpath});
+        my $s = ${$fullpath};
+        utf8::encode($s);
+        $md5->add($s);
         $fullpath = join ':', ref($fullpath), $md5->hexdigest();
     }
     return sprintf $XSLATE_MAGIC, $fullpath, $self->{serial_opt};
@@ -508,6 +522,10 @@ sub _error {
     die make_error(@_);
 }
 
+sub note {
+    my($self, @args) = @_;
+    printf STDERR @args;
+}
 
 package Text::Xslate;
 1;
@@ -519,7 +537,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.1002.
+This document describes Text::Xslate version 1.1003.
 
 =head1 SYNOPSIS
 
@@ -817,6 +835,8 @@ option for HASH references which are cached as you expect:
 
     my $tx = Text::Xslate->new( path => \%vpath );
     print $tx->render('hello.tx', { lang => 'Xslate' });
+
+Note that I<$string> must be a text string, not a binary string.
 
 =head3 B<< $tx->load_file($file) :Void >>
 

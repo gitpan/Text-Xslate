@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.1002';
+our $VERSION = '1.1003';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -95,7 +95,7 @@ sub render {
         Carp::croak( sprintf("Xslate: Template variables must be a HASH reference, not %s", $vars ) );
     }
 
-    my $st = tx_load_template( $self, $name, 0 );
+    my $st = $self->tx_load_template( $name, 0 );
 
     local $_orig_die_handler  = $SIG{__DIE__};
     local $_orig_warn_handler = $SIG{__WARN__};
@@ -631,7 +631,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.1002.
+This document describes Text::Xslate::PP version 1.1003.
 
 =head1 DESCRIPTION
 
