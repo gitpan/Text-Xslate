@@ -3,11 +3,12 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.1005';
+our $VERSION = '1.1005_01';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
 }
+
 use Text::Xslate::Util qw(
     $DEBUG
     p
@@ -21,12 +22,14 @@ use Text::Xslate::PP::Const qw(:all);
 use Text::Xslate::PP::State;
 use Text::Xslate::PP::Type::Raw;
 use Text::Xslate::PP::Opcode;
-use Text::Xslate ();
+use Text::Xslate::PP::Method;
 
 use Scalar::Util ();
 use overload     ();
 use Carp         ();
 
+# it must be loaded dynamically
+require Text::Xslate;
 
 my $state_class = 'Text::Xslate::PP::Opcode';
 
@@ -63,6 +66,11 @@ our %html_escape = (
     "'" => '&#39;', # IE8 doesn't support &apos; in title
 );
 our $html_metachars = sprintf '[%s]', join '', map { quotemeta } keys %html_escape;
+
+sub _register_builtin_methods {
+    my($self, $funcs) = @_;
+    Text::Xslate::PP::Method::tx_register_builtin_methods($funcs);
+}
 
 #
 # public APIs
@@ -631,7 +639,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.1005.
+This document describes Text::Xslate::PP version 1.1005_01.
 
 =head1 DESCRIPTION
 

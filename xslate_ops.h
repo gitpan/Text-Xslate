@@ -45,7 +45,7 @@ TXC(minus); /* unary minus */
 TXC(max_index);
 TXC(builtin_mark_raw);
 TXC(builtin_unmark_raw);
-TXC(builtin_uri);
+TXC(builtin_uri_escape);
 TXC(builtin_is_array_ref);
 TXC(builtin_is_hash_ref);
 TXC(builtin_html_escape);
@@ -119,7 +119,7 @@ enum tx_opcode_t {
     TXOP_max_index, /* 39 */
     TXOP_builtin_mark_raw, /* 40 */
     TXOP_builtin_unmark_raw, /* 41 */
-    TXOP_builtin_uri, /* 42 */
+    TXOP_builtin_uri_escape, /* 42 */
     TXOP_builtin_is_array_ref, /* 43 */
     TXOP_builtin_is_hash_ref, /* 44 */
     TXOP_builtin_html_escape, /* 45 */
@@ -195,7 +195,7 @@ static const U8 tx_oparg[] = {
     0U, /* max_index */
     0U, /* builtin_mark_raw */
     0U, /* builtin_unmark_raw */
-    0U, /* builtin_uri */
+    0U, /* builtin_uri_escape */
     0U, /* builtin_is_array_ref */
     0U, /* builtin_is_hash_ref */
     0U, /* builtin_html_escape */
@@ -271,7 +271,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(max_index), newSViv(TXOP_max_index));
     (void)hv_stores(ops, STRINGIFY(builtin_mark_raw), newSViv(TXOP_builtin_mark_raw));
     (void)hv_stores(ops, STRINGIFY(builtin_unmark_raw), newSViv(TXOP_builtin_unmark_raw));
-    (void)hv_stores(ops, STRINGIFY(builtin_uri), newSViv(TXOP_builtin_uri));
+    (void)hv_stores(ops, STRINGIFY(builtin_uri_escape), newSViv(TXOP_builtin_uri_escape));
     (void)hv_stores(ops, STRINGIFY(builtin_is_array_ref), newSViv(TXOP_builtin_is_array_ref));
     (void)hv_stores(ops, STRINGIFY(builtin_is_hash_ref), newSViv(TXOP_builtin_is_hash_ref));
     (void)hv_stores(ops, STRINGIFY(builtin_html_escape), newSViv(TXOP_builtin_html_escape));
@@ -348,7 +348,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_max_index,
     TXCODE_builtin_mark_raw,
     TXCODE_builtin_unmark_raw,
-    TXCODE_builtin_uri,
+    TXCODE_builtin_uri_escape,
     TXCODE_builtin_is_array_ref,
     TXCODE_builtin_is_hash_ref,
     TXCODE_builtin_html_escape,
@@ -431,7 +431,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(max_index),
         LABEL_PTR(builtin_mark_raw),
         LABEL_PTR(builtin_unmark_raw),
-        LABEL_PTR(builtin_uri),
+        LABEL_PTR(builtin_uri_escape),
         LABEL_PTR(builtin_is_array_ref),
         LABEL_PTR(builtin_is_hash_ref),
         LABEL_PTR(builtin_html_escape),
@@ -511,7 +511,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(max_index           ): TXCODE_max_index           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_mark_raw    ): TXCODE_builtin_mark_raw    (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_unmark_raw  ): TXCODE_builtin_unmark_raw  (aTHX_ st); goto *(st->pc->exec_code);
-    LABEL(builtin_uri         ): TXCODE_builtin_uri         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(builtin_uri_escape  ): TXCODE_builtin_uri_escape  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_is_array_ref): TXCODE_builtin_is_array_ref(aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_is_hash_ref ): TXCODE_builtin_is_hash_ref (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_html_escape ): TXCODE_builtin_html_escape (aTHX_ st); goto *(st->pc->exec_code);

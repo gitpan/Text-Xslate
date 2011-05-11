@@ -95,7 +95,7 @@ our %OPS = (
     max_index        => 39,
     builtin_mark_raw => 40,
     builtin_unmark_raw => 41,
-    builtin_uri      => 42,
+    builtin_uri_escape => 42,
     builtin_is_array_ref => 43,
     builtin_is_hash_ref => 44,
     builtin_html_escape => 45,
@@ -170,7 +170,7 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_max_index,           # 39
     \&Text::Xslate::PP::Opcode::op_builtin_mark_raw,    # 40
     \&Text::Xslate::PP::Opcode::op_builtin_unmark_raw,  # 41
-    \&Text::Xslate::PP::Opcode::op_builtin_uri,         # 42
+    \&Text::Xslate::PP::Opcode::op_builtin_uri_escape,  # 42
     \&Text::Xslate::PP::Opcode::op_builtin_is_array_ref, # 43
     \&Text::Xslate::PP::Opcode::op_builtin_is_hash_ref, # 44
     \&Text::Xslate::PP::Opcode::op_builtin_html_escape, # 45
@@ -245,7 +245,7 @@ our @OPARGS = (
     0,             # max_index
     0,             # builtin_mark_raw
     0,             # builtin_unmark_raw
-    0,             # builtin_uri
+    0,             # builtin_uri_escape
     0,             # builtin_is_array_ref
     0,             # builtin_is_hash_ref
     0,             # builtin_html_escape

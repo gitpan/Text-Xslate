@@ -2,13 +2,14 @@ package Text::Xslate::PP::Opcode;
 use Any::Moose;
 extends qw(Text::Xslate::PP::State);
 
-our $VERSION = '1.1005';
+our $VERSION = '1.1005_01';
 
 use Carp ();
 use Scalar::Util ();
 
 use Text::Xslate::PP;
 use Text::Xslate::PP::Const;
+use Text::Xslate::PP::Method;
 use Text::Xslate::Util qw(
     p neat
     mark_raw unmark_raw html_escape uri_escape
@@ -366,7 +367,7 @@ sub op_builtin_html_escape {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
-sub op_builtin_uri {
+sub op_builtin_uri_escape {
     $_[0]->{sa} = uri_escape($_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
@@ -514,7 +515,6 @@ sub op_funcall {
 
 sub op_methodcall_s {
     my($st) = @_;
-    require Text::Xslate::PP::Method;
     $st->{sa} = Text::Xslate::PP::Method::tx_methodcall(
         $st, undef, $st->op_arg, @{ pop @{ $st->{SP} } });
     goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };

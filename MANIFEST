@@ -145,6 +145,7 @@ t/020_interface/008_type.t
 t/020_interface/009_hash_with_default.t
 t/020_interface/010_err_encoding.t
 t/020_interface/011_hwd_w_include_vars.t
+t/020_interface/012_default_functions.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t
@@ -182,6 +183,7 @@ t/030_kolon/034_print.t
 t/030_kolon/035_include_w_vars.t
 t/030_kolon/036_foreach_else.t
 t/030_kolon/037_loop_ctl.t
+t/030_kolon/038_custom_esc.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -236,6 +238,7 @@ t/900_bugs/007_uuv.t
 t/900_bugs/008_include_var.t
 t/900_bugs/009_quote_in_comments.t
 t/900_bugs/010_widechar_for_md5.t
+t/900_bugs/011_reserved_words.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

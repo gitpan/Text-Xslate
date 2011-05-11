@@ -4,13 +4,14 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.1005';
+our $VERSION = '1.1005_01';
 
 use Carp              ();
 use Fcntl             ();
 use File::Spec        ();
 use Exporter          ();
 use Data::MessagePack ();
+use Scalar::Util      ();
 
 use Text::Xslate::Util qw(
     mark_raw unmark_raw
@@ -29,7 +30,7 @@ our @EXPORT_OK = qw(
     html_builder
 );
 
-my $BYTECODE_VERSION = '1.3';
+my $BYTECODE_VERSION = '1.4';
 
 # $bytecode_version + $fullpath + $compiler_and_parser_options
 my $XSLATE_MAGIC   = qq{xslate;$BYTECODE_VERSION;%s;%s;};
@@ -59,7 +60,6 @@ sub input_layer { ref($_[0]) ? $_[0]->{input_layer} : ':utf8' }
 package Text::Xslate::Engine;
 
 use Text::Xslate::Util qw(
-    import_from
     make_error
     dump
 );
@@ -101,15 +101,20 @@ my %compiler_option = (
 );
 
 my %builtin = (
-    raw          => \&Text::Xslate::Util::mark_raw,
-    html         => \&Text::Xslate::Util::html_escape,
+    html_escape  => \&Text::Xslate::Util::html_escape,
     mark_raw     => \&Text::Xslate::Util::mark_raw,
     unmark_raw   => \&Text::Xslate::Util::unmark_raw,
-    uri          => \&Text::Xslate::Util::uri_escape,
+    uri_escape   => \&Text::Xslate::Util::uri_escape,
+
     is_array_ref => \&Text::Xslate::Util::is_array_ref,
     is_hash_ref  => \&Text::Xslate::Util::is_hash_ref,
 
     dump         => \&Text::Xslate::Util::dump,
+
+    # aliases
+    raw          => 'mark_raw',
+    html         => 'html_escape',
+    uri          => 'uri_escape',
 );
 
 sub default_functions { +{} } # overridable
@@ -163,28 +168,29 @@ sub new {
     ];
 
     # function
-    my %funcs;
-    $class->_merge_hash(\%funcs, $class->default_functions());
+    my %added_funcs;
+    $class->_merge_hash(\%added_funcs, $class->default_functions());
 
     # 'module' overrides default functions
     if(defined $args{module}) {
-        $class->_merge_hash(\%funcs, import_from(@{$args{module}}));
+        $class->_merge_hash(\%added_funcs,
+            Text::Xslate::Util::import_from(@{$args{module}}));
     }
 
     # 'function' overrides imported functons
-    $class->_merge_hash(\%funcs, $args{function});
+    $class->_merge_hash(\%added_funcs, $args{function});
 
-    # the following functions are not overridable
-    foreach my $name(keys %builtin) {
-        if(exists $funcs{$name}) {
-            warnings::warnif(redefine =>
-                "$class: You cannot redefine builtin function '$name',"
-                . " because it is embeded in the engine");
-        }
-        $funcs{$name} = $builtin{$name};
-    }
+    my %funcs = %builtin;
+    $class->_register_builtin_methods(\%funcs);
+    # user defined functions (added functions) can override builtins
+    $class->_merge_hash(\%funcs, \%added_funcs);
+
+    $class->_resolve_function_aliases(\%funcs);
 
     $args{function} = \%funcs;
+
+    # used for the magic token
+    $args{added_function_names} = [sort keys %added_funcs];
 
     # internal data
     $args{template} = {};
@@ -197,6 +203,33 @@ sub _merge_hash {
     while(my($name, $body) = each %{$add}) {
         $base->{$name} = $body;
     }
+    return;
+}
+
+sub _resolve_function_aliases {
+    my($self, $funcs) = @_;
+
+    foreach my $f(values %{$funcs}) {
+        my %seen; # to avoid infinate loops
+        while(!( ref($f) or Scalar::Util::looks_like_number($f) )) {
+            my $v = $funcs->{$f} or $self->_error(
+               "Cannot resolve a function alias '$f',"
+               . " which refers nothing",
+            );
+
+            if( ref($v) or Scalar::Util::looks_like_number($v) ) {
+                $f = $v;
+                last;
+            }
+            else {
+                $seen{$v}++ and $self->_error(
+                    "Cannot resolve a function alias '$f',"
+                    . " which makes circular references",
+                );
+            }
+        }
+    }
+
     return;
 }
 
@@ -461,7 +494,7 @@ sub _magic_token {
         ref($self->{compiler}) || $self->{compiler},
         $self->_extract_options(\%parser_option),
         $self->_extract_options(\%compiler_option),
-        [sort keys %{ $self->{function} } ],
+        $self->{added_function_names},
     ]);
 
     if(ref $fullpath) { # ref to content string
@@ -537,7 +570,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.1005.
+This document describes Text::Xslate version 1.1005_01.
 
 =head1 SYNOPSIS
 
