@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.1005_01';
+our $VERSION = '1.2000';
 
 use Carp              ();
 use Fcntl             ();
@@ -570,7 +570,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.1005_01.
+This document describes Text::Xslate version 1.2000.
 
 =head1 SYNOPSIS
 
@@ -726,8 +726,7 @@ template names.
 Specifies a function map which contains name-coderef pairs.
 A function C<f> may be called as C<f($arg)> or C<$arg | f> in templates.
 
-There are built-in functions which are not overridable.
-See L<Text::Xslate::Manual::Builtin> for details.
+There are built-in functions described in L<Text::Xslate::Manual::Builtin>.
 
 =item C<< module => [$module => ?\@import_args, ...] >>
 
