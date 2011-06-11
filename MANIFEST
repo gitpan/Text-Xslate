@@ -241,6 +241,8 @@ t/900_bugs/009_quote_in_comments.t
 t/900_bugs/010_widechar_for_md5.t
 t/900_bugs/011_reserved_words.t
 t/900_bugs/012_ltgt_in_comments.t
+t/900_bugs/013_comments_lineno.t
+t/900_bugs/014_too_large_int.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
