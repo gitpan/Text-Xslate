@@ -118,13 +118,14 @@ our %OPS = (
     enter            => 62,
     leave            => 63,
     goto             => 64,
-    depend           => 65,
-    macro_begin      => 66,
-    macro_nargs      => 67,
-    macro_outer      => 68,
-    set_opinfo       => 69,
-    super            => 70,
-    end              => 71,
+    vars             => 65,
+    depend           => 66,
+    macro_begin      => 67,
+    macro_nargs      => 68,
+    macro_outer      => 69,
+    set_opinfo       => 70,
+    super            => 71,
+    end              => 72,
 ); # %OPS
 
 our @OPCODE = (
@@ -193,13 +194,14 @@ our @OPCODE = (
     \&Text::Xslate::PP::Opcode::op_enter,               # 62
     \&Text::Xslate::PP::Opcode::op_leave,               # 63
     \&Text::Xslate::PP::Opcode::op_goto,                # 64
-    \&Text::Xslate::PP::Opcode::op_depend,              # 65
-    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 66
-    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 67
-    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 68
-    \&Text::Xslate::PP::Opcode::op_set_opinfo,          # 69
-    \&Text::Xslate::PP::Opcode::op_super,               # 70
-    \&Text::Xslate::PP::Opcode::op_end,                 # 71
+    \&Text::Xslate::PP::Opcode::op_vars,                # 65
+    \&Text::Xslate::PP::Opcode::op_depend,              # 66
+    \&Text::Xslate::PP::Opcode::op_macro_begin,         # 67
+    \&Text::Xslate::PP::Opcode::op_macro_nargs,         # 68
+    \&Text::Xslate::PP::Opcode::op_macro_outer,         # 69
+    \&Text::Xslate::PP::Opcode::op_set_opinfo,          # 70
+    \&Text::Xslate::PP::Opcode::op_super,               # 71
+    \&Text::Xslate::PP::Opcode::op_end,                 # 72
 ); # @OPCODE
 
 our @OPARGS = (
@@ -268,6 +270,7 @@ our @OPARGS = (
     0,             # enter
     0,             # leave
     TXCODE_GOTO,   # goto
+    0,             # vars
     TXCODE_W_SV,   # depend
     TXCODE_W_KEY,  # macro_begin
     TXCODE_W_SVIV, # macro_nargs

@@ -2,7 +2,7 @@ package Text::Xslate::PP::Opcode;
 use Any::Moose;
 extends qw(Text::Xslate::PP::State);
 
-our $VERSION = '1.3001';
+our $VERSION = '1.3999_01';
 
 use Carp ();
 use Scalar::Util ();
@@ -107,6 +107,11 @@ sub op_nil {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
+sub op_vars {
+    $_[0]->{sa} = $_[0]->{vars};
+
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
 
 sub op_literal {
     $_[0]->{sa} = $_[0]->op_arg;

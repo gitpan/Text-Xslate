@@ -68,6 +68,7 @@ TXC(make_hash);
 TXC(enter);
 TXC(leave);
 TXC_goto(goto);
+TXC(vars);
 TXC_w_sv(depend); /* tell the vm to dependent template files */
 TXC_w_key(macro_begin);
 TXC_w_sviv(macro_nargs);
@@ -142,13 +143,14 @@ enum tx_opcode_t {
     TXOP_enter, /* 62 */
     TXOP_leave, /* 63 */
     TXOP_goto, /* 64 */
-    TXOP_depend, /* 65 */
-    TXOP_macro_begin, /* 66 */
-    TXOP_macro_nargs, /* 67 */
-    TXOP_macro_outer, /* 68 */
-    TXOP_set_opinfo, /* 69 */
-    TXOP_super, /* 70 */
-    TXOP_end, /* 71 */
+    TXOP_vars, /* 65 */
+    TXOP_depend, /* 66 */
+    TXOP_macro_begin, /* 67 */
+    TXOP_macro_nargs, /* 68 */
+    TXOP_macro_outer, /* 69 */
+    TXOP_set_opinfo, /* 70 */
+    TXOP_super, /* 71 */
+    TXOP_end, /* 72 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -218,6 +220,7 @@ static const U8 tx_oparg[] = {
     0U, /* enter */
     0U, /* leave */
     TXCODE_GOTO, /* goto */
+    0U, /* vars */
     TXCODE_W_SV, /* depend */
     TXCODE_W_KEY, /* macro_begin */
     TXCODE_W_SVIV, /* macro_nargs */
@@ -294,6 +297,7 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(enter), newSViv(TXOP_enter));
     (void)hv_stores(ops, STRINGIFY(leave), newSViv(TXOP_leave));
     (void)hv_stores(ops, STRINGIFY(goto), newSViv(TXOP_goto));
+    (void)hv_stores(ops, STRINGIFY(vars), newSViv(TXOP_vars));
     (void)hv_stores(ops, STRINGIFY(depend), newSViv(TXOP_depend));
     (void)hv_stores(ops, STRINGIFY(macro_begin), newSViv(TXOP_macro_begin));
     (void)hv_stores(ops, STRINGIFY(macro_nargs), newSViv(TXOP_macro_nargs));
@@ -371,6 +375,7 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_enter,
     TXCODE_leave,
     TXCODE_goto,
+    TXCODE_vars,
     TXCODE_depend,
     TXCODE_macro_begin,
     TXCODE_macro_nargs,
@@ -454,6 +459,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(enter),
         LABEL_PTR(leave),
         LABEL_PTR(goto),
+        LABEL_PTR(vars),
         LABEL_PTR(depend),
         LABEL_PTR(macro_begin),
         LABEL_PTR(macro_nargs),
@@ -534,6 +540,7 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(enter               ): TXCODE_enter               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(leave               ): TXCODE_leave               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(goto                ): TXCODE_goto                (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(vars                ): TXCODE_vars                (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(depend              ): TXCODE_depend              (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_begin         ): TXCODE_macro_begin         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(macro_nargs         ): TXCODE_macro_nargs         (aTHX_ st); goto *(st->pc->exec_code);

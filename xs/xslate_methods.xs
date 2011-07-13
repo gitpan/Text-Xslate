@@ -255,6 +255,53 @@ TXBM(array, reduce) {
     LEAVE;
 }
 
+TXBM(array, merge) {
+    AV* const av        = (AV*)SvRV(*MARK);
+    SV* const value     = *(++MARK);
+    I32 const len       = av_len(av) + 1;
+    AV* const result    = newAV();
+    SV* const resultref = newRV_noinc((SV*)result);
+    AV* m = NULL;
+    I32 mlen;
+    I32 i;
+
+    ENTER;
+    SAVETMPS;
+    sv_2mortal(resultref);
+
+    if(tx_sv_is_array_ref(aTHX_ value)) {
+        m    = (AV*)SvRV(value);
+        mlen = av_len(m) + 1;
+    }
+    else {
+        mlen = 1;
+    }
+    av_extend(result, len + mlen - 1);
+
+    /* copy */
+    for(i = 0; i < len; i++) {
+        SV** const svp = av_fetch(av, i, FALSE);
+        SV* const sv   = svp ? *svp : &PL_sv_undef;
+        (void)av_store(result, i, newSVsv(sv));
+    }
+    /* merge */
+    if(m) {
+        for(i = 0; i < mlen; i++) {
+            SV** const svp = av_fetch(m, i, FALSE);
+            SV* const sv   = svp ? *svp : &PL_sv_undef;
+            av_push(result, newSVsv(sv));
+        }
+    }
+    else {
+        av_push(result, newSVsv(value));
+    }
+
+    /* setting retval must be here because retval is actually st->targ */
+    sv_setsv(retval, resultref);
+    FREETMPS;
+    LEAVE;
+}
+
 /* HASH */
 
 TXBM(hash, size) {
@@ -284,9 +331,8 @@ TXBM(hash, values) {
         SV* const key = AvARRAY(av)[i];
         HE* const he  = hv_fetch_ent(hv, key, TRUE, 0U);
         SV* const val = hv_iterval(hv, he);
-        AvARRAY(av)[i] = val;
-        SvREFCNT_inc_simple_void_NN(val);
         SvREFCNT_dec(key);
+        AvARRAY(av)[i] = newSVsv(val);
     }
 
     sv_setsv(retval, avref);
@@ -326,6 +372,41 @@ TXBM(hash, kv) {
     LEAVE;
 }
 
+TXBM(hash, merge) {
+    dMY_CXT;
+    HV* const hv        = (HV*)SvRV(*MARK);
+    SV* const value     = *(++MARK);
+    HV* const result    = newHVhv(hv);
+    SV* const resultref = newRV_noinc((SV*)result);
+    HE* he;
+    HV* m;
+
+    if(!tx_sv_is_hash_ref(aTHX_ value)) {
+        tx_error(aTHX_ st, "Merging value is not a HASH reference");
+        sv_setsv(retval, &PL_sv_undef);
+        SvREFCNT_dec(resultref);
+        return;
+    }
+
+    m = (HV*)SvRV(value);
+
+    ENTER;
+    SAVETMPS;
+    sv_2mortal(resultref);
+
+    hv_iterinit(m);
+    while((he = hv_iternext(m))) {
+        (void)hv_store_ent(result,
+            hv_iterkeysv(he),
+            newSVsv(hv_iterval(hv, he)),
+            0U);
+    }
+
+    sv_setsv(retval, resultref);
+    FREETMPS;
+    LEAVE;
+}
+
 static const tx_builtin_method_t tx_builtin_method[] = {
     TXBM_SETUP(array,  size,    0, 0),
     TXBM_SETUP(array,  join,    1, 1),
@@ -333,11 +414,13 @@ static const tx_builtin_method_t tx_builtin_method[] = {
     TXBM_SETUP(array,  sort,    0, 1), /* can take a compare function */
     TXBM_SETUP(array,  map,     1, 1),
     TXBM_SETUP(array,  reduce,  1, 1),
+    TXBM_SETUP(array,  merge,   1, 1),
 
     TXBM_SETUP(hash,   size,    0, 0),
     TXBM_SETUP(hash,   keys,    0, 0), /* TODO: can take a compare function */
     TXBM_SETUP(hash,   values,  0, 0), /* TODO: can take a compare function */
     TXBM_SETUP(hash,   kv,      0, 0), /* TODO: can take a compare function */
+    TXBM_SETUP(hash,   merge,   1, 1),
 };
 
 static const size_t tx_num_builtin_method

@@ -41,6 +41,8 @@ example/base.tx
 example/cascade.gold
 example/cascade.pl
 example/cascade.tx
+example/chained-scope.gold
+example/chained-scope.pl
 example/data_section.gold
 example/data_section.pl
 example/err_handler.pl
@@ -185,6 +187,7 @@ t/030_kolon/035_include_w_vars.t
 t/030_kolon/036_foreach_else.t
 t/030_kolon/037_loop_ctl.t
 t/030_kolon/038_custom_esc.t
+t/030_kolon/039_root_vars.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -212,6 +215,7 @@ t/040_tterse/100_not_supported.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
 t/050_builtins/003_autobox_w_cb.t
+t/050_builtins/004_copied.t
 t/100_plugin/001_import_from.t
 t/100_plugin/002_import.t
 t/100_plugin/003_bridge.t
@@ -243,6 +247,7 @@ t/900_bugs/011_reserved_words.t
 t/900_bugs/012_ltgt_in_comments.t
 t/900_bugs/013_comments_lineno.t
 t/900_bugs/014_too_large_int.t
+t/900_bugs/015_my_scope.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
