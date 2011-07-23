@@ -57,6 +57,8 @@ example/list.gold
 example/list.pl
 example/list.tx
 example/mojo.psgi
+example/put_js.gold
+example/put_js.pl
 example/simple.gold
 example/simple.psgi
 HACKING

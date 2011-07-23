@@ -69,6 +69,9 @@ JavaScript
 fallbacks
 UTF
 preforking
+github
+Mojolicious
+HTMLTemplate
 
 # personal name
 lestrrat
