@@ -2,23 +2,27 @@
 # test example/*.psgi
 
 use strict;
-use Test::Requires { 'Plack' => 0.99 };
 use Test::More;
 
-use HTTP::Request;
+use HTTP::Request::Common;
 use Plack::Test;
+use Plack::Util;
 
 use File::Path qw(rmtree);
 
 rmtree '.eg_cache';
 END{ rmtree '.eg_cache' }
 
+# supress debug log
+local $ENV{MOJO_MODE} = 'production';
+local $ENV{PLACK_ENV} = 'production';
+
+
 EXAMPLE: while(defined(my $example = <example/*.psgi>)) {
     note $example;
 
     my $expect = do {
-        my $gold = $example;
-        $gold =~ s/\.psgi$/.gold/;
+        my $gold = $example . '.gold';
 
         -e $gold or note("skip $example because it has no $gold"), next;
 
@@ -27,16 +31,10 @@ EXAMPLE: while(defined(my $example = <example/*.psgi>)) {
         <$g>;
     };
 
-    my $app = do $example;
+    my $app = Plack::Util::load_psgi($example);
 
     if($@) {
-        if($@ =~ /Can't locate / # ' for poor editors
-                or $@ =~ /version \S+ required--this is only version /) {
-            note("skip $example because: $@");
-        }
-        else {
-            fail "Error in $example: $@";
-        }
+        fail "Error on loading $example: $@";
         next EXAMPLE;
     }
 
@@ -45,7 +43,8 @@ EXAMPLE: while(defined(my $example = <example/*.psgi>)) {
             app    => $app,
             client => sub {
                 my $cb = shift;
-                my $req = HTTP::Request->new(GET => "http://localhost/hello?name=foo&email=bar%40example.com");
+                my $req = GET "http://localhost/hello"
+                             ."?name=foo&email=bar%40example.com";
                 my $res = $cb->($req);
                 is $res->content, $expect;
             },
