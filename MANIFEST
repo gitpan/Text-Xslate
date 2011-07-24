@@ -313,3 +313,4 @@ xt/04_synopsis.t
 xt/05_vars.t
 xt/100_eg_pl.t
 xt/101_eg_psgi.t
+xt/200_depended.t
