@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.3999_03';
+our $VERSION = '1.3999_04';
 
 use Carp              ();
 use Fcntl             ();
@@ -64,6 +64,7 @@ use Text::Xslate::Util qw(
     dump
 );
 
+# constants
 BEGIN {
     our @ISA = qw(Exporter);
 
@@ -159,7 +160,8 @@ sub new {
 
     if($used != $nargs) {
         my @unknowns = grep { !exists $options->{$_} } keys %args;
-        warnings::warnif(misc => "$class: Unknown option(s): " . join ' ', @unknowns);
+        warnings::warnif(misc
+            => "$class: Unknown option(s): " . join ' ', @unknowns);
     }
 
     $args{path} = [
@@ -262,29 +264,33 @@ sub find_file {
     foreach my $p(@{$self->{path}}) {
         $self->note("  find_file: %s / %s ...\n", $p, $file) if _DUMP_LOAD;
 
-        my $path_id;
+        my $cache_prefix;
         if(ref $p eq 'HASH') { # virtual path
             defined(my $content = $p->{$file}) or next;
-            $fullpath   = \$content;
-            # TODO: we should provide a way to specify this mtime
-            #       (like as Template::Provider?)
-            $orig_mtime = $^T;
-            $path_id    = 'HASH';
+            $fullpath = \$content;
+
+            # NOTE:
+            # Because contents of virtual paths include their digest,
+            # time-dependent cache verifier makes no sense.
+            $orig_mtime   = 0;
+            $cache_mtime  = 0;
+            $cache_prefix = 'HASH';
         }
         else {
             $fullpath = File::Spec->catfile($p, $file);
             defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
                 or next;
-            $path_id    = Text::Xslate::uri_escape($p);
+            $cache_prefix = Text::Xslate::uri_escape($p);
         }
 
         # $file is found
         $cachepath = File::Spec->catfile(
             $self->{cache_dir},
-            $path_id,
+            $cache_prefix,
             $file . 'c',
         );
-        $cache_mtime = (stat($cachepath))[_ST_MTIME]; # may fail, but doesn't matter
+        # stat() will be failed if the cache doesn't exist
+        $cache_mtime = (stat($cachepath))[_ST_MTIME];
         last;
     }
 
@@ -498,14 +504,19 @@ sub _magic_token {
     ]);
 
     if(ref $fullpath) { # ref to content string
-        require 'Digest/MD5.pm';
-        my $md5 = Digest::MD5->new();
-        my $s = ${$fullpath};
-        utf8::encode($s);
-        $md5->add($s);
-        $fullpath = join ':', ref($fullpath), $md5->hexdigest();
+        $fullpath = join ':', ref($fullpath),
+            $self->_digest(${$fullpath});
     }
     return sprintf $XSLATE_MAGIC, $fullpath, $self->{serial_opt};
+}
+
+sub _digest {
+    my($self, $content) = @_;
+    require 'Digest/MD5.pm'; # we don't want to create its namespace
+    my $md5 = Digest::MD5->new();
+    utf8::encode($content);
+    $md5->add($content);
+    return $md5->hexdigest();
 }
 
 sub _extract_options {
@@ -548,7 +559,8 @@ sub _compiler {
 
 sub compile {
     my $self = shift;
-    return $self->_compiler->compile(@_, from_include => $self->{from_include});
+    return $self->_compiler->compile(@_,
+        from_include => $self->{from_include});
 }
 
 sub _error {
@@ -570,7 +582,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.3999_03.
+This document describes Text::Xslate version 1.3999_04.
 
 =head1 SYNOPSIS
 

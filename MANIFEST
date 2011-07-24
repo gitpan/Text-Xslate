@@ -145,6 +145,7 @@ t/010_internals/029_large_file.t
 t/010_internals/030_die_in_funcs.t
 t/010_internals/031_save_src.t
 t/010_internals/032_encoding_error.t
+t/010_internals/033_vpath_cache.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
