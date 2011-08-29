@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.4002';
+our $VERSION = '1.5000';
 
 use Carp              ();
 use Fcntl             ();
@@ -500,6 +500,7 @@ sub _magic_token {
         ref($self->{compiler}) || $self->{compiler},
         $self->_extract_options(\%parser_option),
         $self->_extract_options(\%compiler_option),
+        $self->input_layer,
         $self->{added_function_names},
     ]);
 
@@ -582,7 +583,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.4002.
+This document describes Text::Xslate version 1.5000.
 
 =head1 SYNOPSIS
 
