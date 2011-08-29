@@ -161,6 +161,7 @@ t/020_interface/009_hash_with_default.t
 t/020_interface/010_err_encoding.t
 t/020_interface/011_hwd_w_include_vars.t
 t/020_interface/012_default_functions.t
+t/020_interface/013_slurp_template.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t
@@ -223,6 +224,7 @@ t/040_tterse/020_chomp.t
 t/040_tterse/021_fake_use.t
 t/040_tterse/022_post_if.t
 t/040_tterse/023_loop_ctl.t
+t/040_tterse/024_for_else.t
 t/040_tterse/100_not_supported.t
 t/050_builtins/001_builtin_funcs.t
 t/050_builtins/002_autobox.t
@@ -259,6 +261,7 @@ t/900_bugs/013_comments_lineno.t
 t/900_bugs/014_too_large_int.t
 t/900_bugs/015_my_scope.t
 t/900_bugs/016_x_in_tterse.t
+t/900_bugs/017_unallocated.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

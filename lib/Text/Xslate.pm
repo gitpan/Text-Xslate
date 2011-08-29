@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.4001';
+our $VERSION = '1.4002';
 
 use Carp              ();
 use Fcntl             ();
@@ -339,10 +339,10 @@ sub load_file {
     return $asm;
 }
 
-sub slurp {
-    my($self, $fullpath) = @_;
+sub slurp_template {
+    my($self, $input_layer, $fullpath) = @_;
 
-    open my($source), '<' . $self->{input_layer}, $fullpath
+    open my($source), '<' . $input_layer, $fullpath
         or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
     flock($source, Fcntl::LOCK_SH());
     local $/;
@@ -363,7 +363,7 @@ sub _load_source {
             or Carp::carp("Xslate: cannot unlink $cachepath (ignored): $!");
     }
 
-    my $source = $self->slurp($fullpath);
+    my $source = $self->slurp_template($self->input_layer, $fullpath);
     $self->{source}{$fi->{name}} = $source if _SAVE_SRC;
 
     my $asm = $self->compile($source,
@@ -582,7 +582,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.4001.
+This document describes Text::Xslate version 1.4002.
 
 =head1 SYNOPSIS
 
