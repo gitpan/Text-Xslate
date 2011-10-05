@@ -201,6 +201,7 @@ t/030_kolon/036_foreach_else.t
 t/030_kolon/037_loop_ctl.t
 t/030_kolon/038_custom_esc.t
 t/030_kolon/039_root_vars.t
+t/030_kolon/040_external_macro.t
 t/040_tterse/001_parse.t
 t/040_tterse/002_interpolate.t
 t/040_tterse/003_field.t
@@ -263,6 +264,7 @@ t/900_bugs/015_my_scope.t
 t/900_bugs/016_x_in_tterse.t
 t/900_bugs/017_unallocated.t
 t/900_bugs/018_lvar_in_macro.pl
+t/900_bugs/019_nested_mm.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

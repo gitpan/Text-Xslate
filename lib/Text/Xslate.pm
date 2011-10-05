@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5002';
+our $VERSION = '1.5003';
 
 use Carp              ();
 use Fcntl             ();
@@ -583,7 +583,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5002.
+This document describes Text::Xslate version 1.5003.
 
 =head1 SYNOPSIS
 
@@ -832,13 +832,9 @@ This option is passed to the compiler.
 
 Specify the callback I<&cb> which is called on warnings.
 
-This option is experimental.
-
 =item C<< die_handler => \&cb >>
 
 Specify the callback I<&cb> which is called on fatal errors.
-
-This option is experimental.
 
 =back
 
@@ -1189,6 +1185,8 @@ Thanks to kane46taka for the bug reports.
 Thanks to cho45 for the bug reports.
 
 Thanks to shmorimo for the bug reports.
+
+Thanks to ueda for the suggestions.
 
 =head1 AUTHOR
 
