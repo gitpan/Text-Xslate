@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5003';
+our $VERSION = '1.5004';
 
 use Carp              ();
 use Fcntl             ();
@@ -57,7 +57,7 @@ $VERSION =~ s/_//;
 # for error messages (see T::X::Util)
 sub input_layer { ref($_[0]) ? $_[0]->{input_layer} : ':utf8' }
 
-package Text::Xslate::Engine;
+package Text::Xslate::Engine; # XS/PP common base class
 
 use Text::Xslate::Util qw(
     make_error
@@ -583,7 +583,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5003.
+This document describes Text::Xslate version 1.5004.
 
 =head1 SYNOPSIS
 
@@ -661,11 +661,11 @@ L<http://illusori.co.uk/projects/Template-Roundup/201010/performance_vs_variant_
 
 There are some benchmarks in F<benchmark/> directory in the Xslate distribution.
 
-=head3 Smart escaping for HTML meta characters
+=head3 Smart escaping for HTML metacharacters
 
-All the HTML meta characters in template expressions the engine interpolates
-into template texts are escaped automatically, so the output has no
-possibility to XSS by default.
+All HTML metacharacters in template expressions which are interpolated into
+template texts by the engine are escaped automatically. This means that, by default,
+the output is not prone to XSS.
 
 =head3 Template cascading
 

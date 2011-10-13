@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.5003';
+our $VERSION = '1.5004';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -115,6 +115,10 @@ sub render {
 
 sub current_engine {
     return defined($_current_st) ? $_current_st->engine : undef;
+}
+
+sub current_vars {
+    return defined($_current_st) ? $_current_st->vars : undef;
 }
 
 sub current_file {
@@ -639,7 +643,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.5003.
+This document describes Text::Xslate::PP version 1.5004.
 
 =head1 DESCRIPTION
 
