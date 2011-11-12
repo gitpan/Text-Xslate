@@ -58,9 +58,14 @@ example/hello.tmpl
 example/hello.tx
 example/htmltemplate.pl
 example/htparser.pl
+example/i18n-data-localize.pl
+example/i18n-data-localize.pl.gold
+example/i18n.pl
+example/i18n.pl.gold
 example/list.pl
 example/list.pl.gold
 example/list.tx
+example/locale/ja.po
 example/mojo.psgi
 example/mojo.psgi.gold
 example/put_js.pl
@@ -80,6 +85,7 @@ inc/Module/Install/WriteAll.pm
 inc/Module/Install/XSUtil.pm
 lib/Text/Xslate.pm
 lib/Text/Xslate/Bridge.pm
+lib/Text/Xslate/Bridge/Star.pm
 lib/Text/Xslate/Compiler.pm
 lib/Text/Xslate/HashWithDefault.pm
 lib/Text/Xslate/Manual.pod
@@ -234,6 +240,7 @@ t/050_builtins/004_copied.t
 t/100_plugin/001_import_from.t
 t/100_plugin/002_import.t
 t/100_plugin/003_bridge.t
+t/100_plugin/004_star.t
 t/100_plugin/100_error.t
 t/200_app/001_hello.t
 t/200_app/002_tree.t

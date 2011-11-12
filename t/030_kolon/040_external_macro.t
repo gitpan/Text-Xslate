@@ -1,6 +1,6 @@
 #!perl -w
 #
-# external macros
+# global macros
 #
 use strict;
 use Test::More skip_all => 'TODO';
@@ -8,15 +8,16 @@ use Test::More skip_all => 'TODO';
 use Text::Xslate;
 
 my %vpath = (
-    'foo.tx' => <<'T',
-: macro::bar::hello()
-T
     'macro/bar.tx' => <<'T',
-: macro bar -> {
+: our macro hello -> {
 Hello, world!
 : end
 T
 
+'foo.tx' => <<'T',
+: include macro::bar;
+: macro::bar::hello()
+T
 );
 
 my $tx = Text::Xslate->new( path => \%vpath );

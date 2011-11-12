@@ -35,7 +35,10 @@ requires:
   parent: 0.221
   perl: 5.8.1
 resources:
+  MailingList: http://groups.google.com/group/xslate
+  ProjectHome: https://github.com/xslate
+  bugtracker: https://github.com/xslate/p5-Text-Xslate/issues
   homepage: http://xslate.org/
   license: http://dev.perl.org/licenses/
-  repository: git://github.com/gfx/p5-Text-Xslate.git
-version: 1.5005
+  repository: https://github.com/xslate/p5-Text-Xslate
+version: 1.5006
