@@ -272,6 +272,7 @@ t/900_bugs/016_x_in_tterse.t
 t/900_bugs/017_unallocated.t
 t/900_bugs/018_lvar_in_macro.pl
 t/900_bugs/019_nested_mm.t
+t/900_bugs/020_switch_foo.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
