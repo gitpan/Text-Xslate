@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5007';
+our $VERSION = '1.5008';
 
 use Carp              ();
 use Fcntl             ();
@@ -35,12 +35,14 @@ my $BYTECODE_VERSION = '1.5';
 my $XSLATE_MAGIC   = qq{xslate;$BYTECODE_VERSION;%s;%s;};
 
 # load backend (XS or PP)
+my $use_xs = 0;
 if(!exists $INC{'Text/Xslate/PP.pm'}) {
     my $pp = ($Text::Xslate::Util::DEBUG =~ /\b pp \b/xms or $ENV{PERL_ONLY});
     if(!$pp) {
         eval {
             require XSLoader;
             XSLoader::load(__PACKAGE__, $VERSION);
+            $use_xs = 1;
         };
         die $@ if $@ && $Text::Xslate::Util::DEBUG =~ /\b xs \b/xms; # force XS
     }
@@ -48,6 +50,7 @@ if(!exists $INC{'Text/Xslate/PP.pm'}) {
         require 'Text/Xslate/PP.pm';
     }
 }
+sub USE_XS() { $use_xs }
 
 # workaround warnings about numeric when it is a developpers' version
 # it must be here because the bootstrap routine requires the under bar.
@@ -96,8 +99,8 @@ my %parser_option = (
 my %compiler_option = (
     syntax     => undef,
     type       => undef,
-    header     => undef,
-    footer     => undef,
+    header     => undef, # template augment
+    footer     => undef, # template agument
 );
 
 my %builtin = (
@@ -168,35 +171,35 @@ sub new {
             ref($args{path}) eq 'ARRAY' ? @{$args{path}} : $args{path}
     ];
 
-    # function
-    my %added_funcs;
-    $class->_merge_hash(\%added_funcs, $class->default_functions());
+    my $arg_function= $args{function};
 
-    # 'module' overrides default functions
+    my %funcs;
+    $args{function} = \%funcs;
+
+    $args{template} = {}; # template structures
+
+    my $self = bless \%args, $class;
+
+    # definition of functions and methods
+
+    # builtin functions
+    %funcs = %builtin;
+    $self->_register_builtin_methods(\%funcs);
+
+    # per-class functions
+    $self->_merge_hash(\%funcs, $class->default_functions());
+
+    # user-defined functions
     if(defined $args{module}) {
-        $class->_merge_hash(\%added_funcs,
+        $self->_merge_hash(\%funcs,
             Text::Xslate::Util::import_from(@{$args{module}}));
     }
 
-    # 'function' overrides imported functons
-    $class->_merge_hash(\%added_funcs, $args{function});
+    $self->_merge_hash(\%funcs, $arg_function);
 
-    my %funcs = %builtin;
-    $class->_register_builtin_methods(\%funcs);
-    # user defined functions (added functions) can override builtins
-    $class->_merge_hash(\%funcs, \%added_funcs);
+    $self->_resolve_function_aliases(\%funcs);
 
-    $class->_resolve_function_aliases(\%funcs);
-
-    $args{function} = \%funcs;
-
-    # used for the magic token
-    $args{added_function_names} = [sort keys %added_funcs];
-
-    # internal data
-    $args{template} = {};
-
-    return bless \%args, $class;
+    return $self;
 }
 
 sub _merge_hash {
@@ -312,9 +315,9 @@ sub find_file {
 
 
 sub load_file {
-    my($self, $file, $mtime, $from_include) = @_;
+    my($self, $file, $mtime, $omit_augment) = @_;
 
-    local $self->{from_include} = $from_include;
+    local $self->{omit_augment} = $omit_augment;
 
     $self->note("load_file(%s)\n", $file) if _DUMP_LOAD;
 
@@ -450,6 +453,11 @@ sub _load_compiled {
     $unpacker->utf8($is_utf8);
 
     my @asm;
+    if($is_utf8) { # TODO: move to XS?
+        my $seed = "";
+        utf8::upgrade($seed);
+        push @asm, ['print_raw_s', $seed, __LINE__, __FILE__];
+    }
     while($offset < length($data)) {
         $offset = $unpacker->execute($data, $offset);
         my $c = $unpacker->data();
@@ -483,11 +491,12 @@ sub _load_compiled {
 
 sub _save_compiled {
     my($self, $out, $asm, $fullpath, $is_utf8) = @_;
+    my $mp = Data::MessagePack->new();
     local $\;
     print $out $self->_magic_token($fullpath);
-    print $out Data::MessagePack->pack($is_utf8 ? 1 : 0);
+    print $out $mp->pack($is_utf8 ? 1 : 0);
     foreach my $c(@{$asm}) {
-        print $out Data::MessagePack->pack($c);
+        print $out $mp->pack($c);
     }
     return;
 }
@@ -500,7 +509,7 @@ sub _magic_token {
         $self->_extract_options(\%parser_option),
         $self->_extract_options(\%compiler_option),
         $self->input_layer,
-        $self->{added_function_names},
+        [sort keys %{ $self->{function} }],
     ]);
 
     if(ref $fullpath) { # ref to content string
@@ -560,7 +569,7 @@ sub _compiler {
 sub compile {
     my $self = shift;
     return $self->_compiler->compile(@_,
-        from_include => $self->{from_include});
+        omit_augment => $self->{omit_augment});
 }
 
 sub _error {
@@ -582,7 +591,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5007.
+This document describes Text::Xslate version 1.5008.
 
 =head1 SYNOPSIS
 
