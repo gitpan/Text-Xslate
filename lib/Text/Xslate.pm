@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5008';
+our $VERSION = '1.5009';
 
 use Carp              ();
 use Fcntl             ();
@@ -591,7 +591,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5008.
+This document describes Text::Xslate version 1.5009.
 
 =head1 SYNOPSIS
 
@@ -731,7 +731,31 @@ template names.
 Specifies a function map which contains name-coderef pairs.
 A function C<f> may be called as C<f($arg)> or C<$arg | f> in templates.
 
-There are built-in functions described in L<Text::Xslate::Manual::Builtin>.
+Note that those registered function have to return a B<text string>,
+not a binary string unless you want to handle bytes in whole templates.
+Make sure what you want to use returns whether text string or binary
+strings.
+
+For example, some methods of C<Time::Piece> might return a binary string
+which is encoded in UTF-8, so you'd like to decode their values.
+
+    # under LANG=ja_JP.UTF-8 on MacOSX (Darwin 11.2.0)
+    use Time::Piece;
+    use Encode qw(decode);
+
+    sub ctime {
+        my $ctime = Time::Piece->new->strftime; # UTF-8 encoded bytes
+        return decode "UTF-8", $ctime;
+    }
+
+    my $tx = Text::Xslate->new(
+        function => {
+            ctime => \&ctime,
+        },
+        ...,
+    );
+
+Built-in functions are described in L<Text::Xslate::Manual::Builtin>.
 
 =item C<< module => [$module => ?\@import_args, ...] >>
 
@@ -742,19 +766,19 @@ For example:
 
     # for function-based modules
     my $tx = Text::Xslate->new(
-        module => ['Time::Piece'],
+        module => ['Digest::SHA1' => [qw(sha1_hex)]],
     );
     print $tx->render_string(
-        '<: localtime($x).strftime() :>',
-        { x => time() },
-    ); # => Wed, 09 Jun 2010 10:22:06 JST
+        '<: sha1_hex($x).substr(0, 6) :>',
+        { x => foo() },
+    ); # => 0beec7
 
     # for bridge modules
     my $tx = Text::Xslate->new(
         module => ['Text::Xslate::Bridge::Star'],
     );
     print $tx->render_string(
-        '<: uc($x) :>',
+        '<: $x.uc() :>',
         { x => 'foo' },
     ); # => 'FOO'
 
