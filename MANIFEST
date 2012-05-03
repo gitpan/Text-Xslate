@@ -278,6 +278,7 @@ t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
 t/lib/Util.pm
+t/lib/UtilNoleak.pm
 t/template/common.tx
 t/template/config.tt
 t/template/eg/base.tx
