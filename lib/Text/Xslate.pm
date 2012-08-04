@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5015';
+our $VERSION = '1.5016';
 
 use Carp              ();
 use Fcntl             ();
@@ -176,7 +176,7 @@ sub new {
     }
 
     if($used != $nargs) {
-        my @unknowns = grep { !exists $options->{$_} } keys %args;
+        my @unknowns = sort grep { !exists $options->{$_} } keys %args;
         warnings::warnif(misc
             => "$class: Unknown option(s): " . join ' ', @unknowns);
     }
@@ -407,8 +407,11 @@ sub _load_source {
                  Carp::carp("Xslate: Cannot close $cachepath (ignored): $!");
                  unlink $cachepath;
             }
-            else {
-                $fi->{cache_mtime} = ( stat $cachepath )[_ST_MTIME];
+            elsif(! ref $fullpath) {
+                my $mtime = (stat $fullpath)[_ST_MTIME];
+                utime($mtime, $mtime, $cachepath)
+                    or Carp::carp("Xslate: Cannot utime $cachepath (ignored): $!");;
+                $fi->{cache_mtime} = $mtime;
             }
         }
         else {
@@ -619,7 +622,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5015.
+This document describes Text::Xslate version 1.5016.
 
 =head1 SYNOPSIS
 

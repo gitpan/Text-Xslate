@@ -277,6 +277,7 @@ t/900_bugs/019_nested_mm.t
 t/900_bugs/020_switch_foo.t
 t/900_bugs/021_cached_enc.t
 t/900_bugs/022_empty_if_block.t
+t/900_bugs/023_deploy_problem.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
