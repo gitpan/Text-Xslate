@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5016';
+our $VERSION = '1.5017';
 
 use Carp              ();
 use Fcntl             ();
@@ -298,6 +298,10 @@ sub find_file {
             defined($orig_mtime = (stat($fullpath))[_ST_MTIME])
                 or next;
             $cache_prefix = Text::Xslate::uri_escape($p);
+            if (length $cache_prefix > 127) {
+                # some filesystems refuse a path part with length > 127
+                $cache_prefix = $self->_digest($cache_prefix);
+            }
         }
 
         # $file is found
@@ -394,7 +398,7 @@ sub _load_source {
         if(not -e $cachedir) {
             require File::Path;
             eval { File::Path::mkpath($cachedir) }
-                or Carp::carp("Xslate: Cannot make directory $cachepath (ignored): $@");
+                or Carp::croak("Xslate: Cannot prepare the cache directory $cachepath (ignored): $@");
         }
 
         if(sysopen my($out), $cachepath, Fcntl::O_WRONLY() | Fcntl::O_CREAT()) {
@@ -622,7 +626,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5016.
+This document describes Text::Xslate version 1.5017.
 
 =head1 SYNOPSIS
 
