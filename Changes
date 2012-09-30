@@ -1,5 +1,10 @@
 Revision history for Perl extension Text::Xslate
 
+1.5018 2012-09-30 13:41:13
+    [FEATURES]
+    - "html_builder_module" option to import HTML builders;
+      functions imported with this option are wrapped by html_builder()
+
 1.5017 2012-08-04 19:31:59
     [BUG FIXES]
     - Fix a problem on Win32

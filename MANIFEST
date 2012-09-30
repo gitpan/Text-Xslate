@@ -243,6 +243,7 @@ t/100_plugin/001_import_from.t
 t/100_plugin/002_import.t
 t/100_plugin/003_bridge.t
 t/100_plugin/004_star.t
+t/100_plugin/005_html_builder_module.t
 t/100_plugin/100_error.t
 t/200_app/001_hello.t
 t/200_app/002_tree.t

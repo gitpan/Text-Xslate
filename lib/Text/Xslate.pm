@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5017';
+our $VERSION = '1.5018';
 
 use Carp              ();
 use Fcntl             ();
@@ -148,6 +148,7 @@ sub options { # overridable
         cache_dir    => _DEFAULT_CACHE_DIR,
         module       => undef,
         function     => undef,
+        html_builder_module => undef,
         compiler     => 'Text::Xslate::Compiler',
 
         verbose      => 1,
@@ -208,6 +209,17 @@ sub new {
     if(defined $args{module}) {
         $self->_merge_hash(\%funcs,
             Text::Xslate::Util::import_from(@{$args{module}}));
+    }
+
+    # user-defined html builder functions
+    if(defined $args{html_builder_module}) {
+        my $raw = Text::Xslate::Util::import_from(@{$args{html_builder_module}});
+        my $html_builders = +{
+            map {
+                ($_ => &Text::Xslate::Util::html_builder($raw->{$_}))
+            } keys %$raw
+        };
+        $self->_merge_hash(\%funcs, $html_builders);
     }
 
     $self->_merge_hash(\%funcs, $arg_function);
@@ -626,7 +638,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5017.
+This document describes Text::Xslate version 1.5018.
 
 =head1 SYNOPSIS
 
@@ -820,6 +832,10 @@ For example:
 Because you can use function-based modules with the C<module> option, and
 also can invoke any object methods in templates, Xslate doesn't require
 specific namespaces for plugins.
+
+=item C<< html_builder_module => [$module => ?\@import_args, ...] >>
+
+Imports functions from I<$module>, wrapping each function with C<html_builder()>.
 
 =item C<< input_layer => $perliolayers // ':utf8' >>
 
