@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.5018';
+our $VERSION = '1.5019';
 
 use Carp              ();
 use Fcntl             ();
@@ -423,11 +423,8 @@ sub _load_source {
                  Carp::carp("Xslate: Cannot close $cachepath (ignored): $!");
                  unlink $cachepath;
             }
-            elsif(! ref $fullpath) {
-                my $mtime = (stat $fullpath)[_ST_MTIME];
-                utime($mtime, $mtime, $cachepath)
-                    or Carp::carp("Xslate: Cannot utime $cachepath (ignored): $!");;
-                $fi->{cache_mtime} = $mtime;
+            else {
+                $fi->{cache_mtime} = ( stat $cachepath )[_ST_MTIME];
             }
         }
         else {
@@ -638,7 +635,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.5018.
+This document describes Text::Xslate version 1.5019.
 
 =head1 SYNOPSIS
 
