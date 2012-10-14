@@ -169,6 +169,7 @@ t/020_interface/011_hwd_w_include_vars.t
 t/020_interface/012_default_functions.t
 t/020_interface/013_slurp_template.t
 t/020_interface/014_customize_option.t
+t/020_interface/015_render_recursion.t
 t/030_kolon/001_interpolate.t
 t/030_kolon/002_field.t
 t/030_kolon/003_for.t
@@ -281,6 +282,8 @@ t/900_bugs/022_empty_if_block.t
 t/900_bugs/023_deploy_problem.t
 t/900_bugs/024_use_cache.t
 t/900_bugs/025_clobber-macro-args.t
+t/900_bugs/026_issue61.t
+t/900_bugs/027_issue65.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
