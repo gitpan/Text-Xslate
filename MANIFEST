@@ -284,6 +284,7 @@ t/900_bugs/024_use_cache.t
 t/900_bugs/025_clobber-macro-args.t
 t/900_bugs/026_issue61.t
 t/900_bugs/027_issue65.t
+t/900_bugs/028_issue68.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
