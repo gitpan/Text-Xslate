@@ -152,6 +152,10 @@ t/010_internals/030_die_in_funcs.t
 t/010_internals/031_save_src.t
 t/010_internals/032_encoding_error.t
 t/010_internals/033_vpath_cache.t
+t/010_internals/034_is_code_ref.t
+t/010_internals/036_merge_hash.t
+t/010_internals/037_find_file.t
+t/010_internals/038_suffix.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -285,6 +289,7 @@ t/900_bugs/025_clobber-macro-args.t
 t/900_bugs/026_issue61.t
 t/900_bugs/027_issue65.t
 t/900_bugs/028_issue68.t
+t/900_bugs/029_fork_and_cache.t
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm

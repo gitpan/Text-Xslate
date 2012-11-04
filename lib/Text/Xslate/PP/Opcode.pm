@@ -2,7 +2,7 @@ package Text::Xslate::PP::Opcode;
 use Any::Moose;
 extends qw(Text::Xslate::PP::State);
 
-our $VERSION = '1.5025';
+our $VERSION = '1.6000_01';
 
 use Carp ();
 use Scalar::Util ();
@@ -181,6 +181,16 @@ sub op_include {
     $st->pop_frame(0);
     $st->{output} .= $output;
     goto $st->{ code }->[ ++$st->{ pc } ]->{ exec_code };
+}
+
+sub op_find_file {
+    $_[0]->{sa} = eval { $_[0]->engine->find_file($_[0]->{sa}); 1 };
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
+
+sub op_suffix {
+    $_[0]->{sa} = $_[0]->engine->{suffix};
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
 sub op_for_start {
@@ -387,6 +397,11 @@ sub op_builtin_is_hash_ref {
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 
+sub op_is_code_ref {
+    $_[0]->{sa} = Text::Xslate::Util::is_code_ref($_[0]->{sa});
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
+
 sub op_match {
     $_[0]->{sa} = Text::Xslate::PP::tx_match($_[0]->{sb}, $_[0]->{sa});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
@@ -534,6 +549,11 @@ sub op_make_array {
 sub op_make_hash {
     my $args = pop @{ $_[0]->{SP} };
     $_[0]->{sa} = { @{$args} };
+    goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
+}
+
+sub op_merge_hash {
+    $_[0]->{sa} = Text::Xslate::Util::merge_hash($_[0]->{sa}, $_[0]->{sb});
     goto $_[0]->{ code }->[ ++$_[0]->{ pc } ]->{ exec_code };
 }
 

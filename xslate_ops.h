@@ -23,6 +23,8 @@ TXC(print);
 TXC(print_raw);
 TXC_w_sv(print_raw_s);
 TXC(include);
+TXC(find_file);
+TXC(suffix);
 TXC_w_var(for_start);
 TXC_goto(for_iter);
 TXC(add);
@@ -49,6 +51,8 @@ TXC(builtin_uri_escape);
 TXC(builtin_is_array_ref);
 TXC(builtin_is_hash_ref);
 TXC(builtin_html_escape);
+TXC(is_code_ref);
+TXC(merge_hash);
 TXC(match);
 TXC(eq);
 TXC(ne);
@@ -98,59 +102,63 @@ enum tx_opcode_t {
     TXOP_print_raw, /* 17 */
     TXOP_print_raw_s, /* 18 */
     TXOP_include, /* 19 */
-    TXOP_for_start, /* 20 */
-    TXOP_for_iter, /* 21 */
-    TXOP_add, /* 22 */
-    TXOP_sub, /* 23 */
-    TXOP_mul, /* 24 */
-    TXOP_div, /* 25 */
-    TXOP_mod, /* 26 */
-    TXOP_concat, /* 27 */
-    TXOP_repeat, /* 28 */
-    TXOP_bitor, /* 29 */
-    TXOP_bitand, /* 30 */
-    TXOP_bitxor, /* 31 */
-    TXOP_bitneg, /* 32 */
-    TXOP_and, /* 33 */
-    TXOP_dand, /* 34 */
-    TXOP_or, /* 35 */
-    TXOP_dor, /* 36 */
-    TXOP_not, /* 37 */
-    TXOP_minus, /* 38 */
-    TXOP_max_index, /* 39 */
-    TXOP_builtin_mark_raw, /* 40 */
-    TXOP_builtin_unmark_raw, /* 41 */
-    TXOP_builtin_uri_escape, /* 42 */
-    TXOP_builtin_is_array_ref, /* 43 */
-    TXOP_builtin_is_hash_ref, /* 44 */
-    TXOP_builtin_html_escape, /* 45 */
-    TXOP_match, /* 46 */
-    TXOP_eq, /* 47 */
-    TXOP_ne, /* 48 */
-    TXOP_lt, /* 49 */
-    TXOP_le, /* 50 */
-    TXOP_gt, /* 51 */
-    TXOP_ge, /* 52 */
-    TXOP_ncmp, /* 53 */
-    TXOP_scmp, /* 54 */
-    TXOP_range, /* 55 */
-    TXOP_fetch_symbol, /* 56 */
-    TXOP_funcall, /* 57 */
-    TXOP_macro_end, /* 58 */
-    TXOP_methodcall_s, /* 59 */
-    TXOP_make_array, /* 60 */
-    TXOP_make_hash, /* 61 */
-    TXOP_enter, /* 62 */
-    TXOP_leave, /* 63 */
-    TXOP_goto, /* 64 */
-    TXOP_vars, /* 65 */
-    TXOP_depend, /* 66 */
-    TXOP_macro_begin, /* 67 */
-    TXOP_macro_nargs, /* 68 */
-    TXOP_macro_outer, /* 69 */
-    TXOP_set_opinfo, /* 70 */
-    TXOP_super, /* 71 */
-    TXOP_end, /* 72 */
+    TXOP_find_file, /* 20 */
+    TXOP_suffix, /* 21 */
+    TXOP_for_start, /* 22 */
+    TXOP_for_iter, /* 23 */
+    TXOP_add, /* 24 */
+    TXOP_sub, /* 25 */
+    TXOP_mul, /* 26 */
+    TXOP_div, /* 27 */
+    TXOP_mod, /* 28 */
+    TXOP_concat, /* 29 */
+    TXOP_repeat, /* 30 */
+    TXOP_bitor, /* 31 */
+    TXOP_bitand, /* 32 */
+    TXOP_bitxor, /* 33 */
+    TXOP_bitneg, /* 34 */
+    TXOP_and, /* 35 */
+    TXOP_dand, /* 36 */
+    TXOP_or, /* 37 */
+    TXOP_dor, /* 38 */
+    TXOP_not, /* 39 */
+    TXOP_minus, /* 40 */
+    TXOP_max_index, /* 41 */
+    TXOP_builtin_mark_raw, /* 42 */
+    TXOP_builtin_unmark_raw, /* 43 */
+    TXOP_builtin_uri_escape, /* 44 */
+    TXOP_builtin_is_array_ref, /* 45 */
+    TXOP_builtin_is_hash_ref, /* 46 */
+    TXOP_builtin_html_escape, /* 47 */
+    TXOP_is_code_ref, /* 48 */
+    TXOP_merge_hash, /* 49 */
+    TXOP_match, /* 50 */
+    TXOP_eq, /* 51 */
+    TXOP_ne, /* 52 */
+    TXOP_lt, /* 53 */
+    TXOP_le, /* 54 */
+    TXOP_gt, /* 55 */
+    TXOP_ge, /* 56 */
+    TXOP_ncmp, /* 57 */
+    TXOP_scmp, /* 58 */
+    TXOP_range, /* 59 */
+    TXOP_fetch_symbol, /* 60 */
+    TXOP_funcall, /* 61 */
+    TXOP_macro_end, /* 62 */
+    TXOP_methodcall_s, /* 63 */
+    TXOP_make_array, /* 64 */
+    TXOP_make_hash, /* 65 */
+    TXOP_enter, /* 66 */
+    TXOP_leave, /* 67 */
+    TXOP_goto, /* 68 */
+    TXOP_vars, /* 69 */
+    TXOP_depend, /* 70 */
+    TXOP_macro_begin, /* 71 */
+    TXOP_macro_nargs, /* 72 */
+    TXOP_macro_outer, /* 73 */
+    TXOP_set_opinfo, /* 74 */
+    TXOP_super, /* 75 */
+    TXOP_end, /* 76 */
     TXOP_last
 }; /* enum tx_opcode_t */
 
@@ -175,6 +183,8 @@ static const U8 tx_oparg[] = {
     0U, /* print_raw */
     TXCODE_W_SV, /* print_raw_s */
     0U, /* include */
+    0U, /* find_file */
+    0U, /* suffix */
     TXCODE_W_VAR, /* for_start */
     TXCODE_GOTO, /* for_iter */
     0U, /* add */
@@ -201,6 +211,8 @@ static const U8 tx_oparg[] = {
     0U, /* builtin_is_array_ref */
     0U, /* builtin_is_hash_ref */
     0U, /* builtin_html_escape */
+    0U, /* is_code_ref */
+    0U, /* merge_hash */
     0U, /* match */
     0U, /* eq */
     0U, /* ne */
@@ -252,6 +264,8 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(print_raw), newSViv(TXOP_print_raw));
     (void)hv_stores(ops, STRINGIFY(print_raw_s), newSViv(TXOP_print_raw_s));
     (void)hv_stores(ops, STRINGIFY(include), newSViv(TXOP_include));
+    (void)hv_stores(ops, STRINGIFY(find_file), newSViv(TXOP_find_file));
+    (void)hv_stores(ops, STRINGIFY(suffix), newSViv(TXOP_suffix));
     (void)hv_stores(ops, STRINGIFY(for_start), newSViv(TXOP_for_start));
     (void)hv_stores(ops, STRINGIFY(for_iter), newSViv(TXOP_for_iter));
     (void)hv_stores(ops, STRINGIFY(add), newSViv(TXOP_add));
@@ -278,6 +292,8 @@ tx_init_ops(pTHX_ HV* const ops) {
     (void)hv_stores(ops, STRINGIFY(builtin_is_array_ref), newSViv(TXOP_builtin_is_array_ref));
     (void)hv_stores(ops, STRINGIFY(builtin_is_hash_ref), newSViv(TXOP_builtin_is_hash_ref));
     (void)hv_stores(ops, STRINGIFY(builtin_html_escape), newSViv(TXOP_builtin_html_escape));
+    (void)hv_stores(ops, STRINGIFY(is_code_ref), newSViv(TXOP_is_code_ref));
+    (void)hv_stores(ops, STRINGIFY(merge_hash), newSViv(TXOP_merge_hash));
     (void)hv_stores(ops, STRINGIFY(match), newSViv(TXOP_match));
     (void)hv_stores(ops, STRINGIFY(eq), newSViv(TXOP_eq));
     (void)hv_stores(ops, STRINGIFY(ne), newSViv(TXOP_ne));
@@ -330,6 +346,8 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_print_raw,
     TXCODE_print_raw_s,
     TXCODE_include,
+    TXCODE_find_file,
+    TXCODE_suffix,
     TXCODE_for_start,
     TXCODE_for_iter,
     TXCODE_add,
@@ -356,6 +374,8 @@ static const tx_exec_t tx_optable[] = {
     TXCODE_builtin_is_array_ref,
     TXCODE_builtin_is_hash_ref,
     TXCODE_builtin_html_escape,
+    TXCODE_is_code_ref,
+    TXCODE_merge_hash,
     TXCODE_match,
     TXCODE_eq,
     TXCODE_ne,
@@ -414,6 +434,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(print_raw),
         LABEL_PTR(print_raw_s),
         LABEL_PTR(include),
+        LABEL_PTR(find_file),
+        LABEL_PTR(suffix),
         LABEL_PTR(for_start),
         LABEL_PTR(for_iter),
         LABEL_PTR(add),
@@ -440,6 +462,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
         LABEL_PTR(builtin_is_array_ref),
         LABEL_PTR(builtin_is_hash_ref),
         LABEL_PTR(builtin_html_escape),
+        LABEL_PTR(is_code_ref),
+        LABEL_PTR(merge_hash),
         LABEL_PTR(match),
         LABEL_PTR(eq),
         LABEL_PTR(ne),
@@ -495,6 +519,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(print_raw           ): TXCODE_print_raw           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(print_raw_s         ): TXCODE_print_raw_s         (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(include             ): TXCODE_include             (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(find_file           ): TXCODE_find_file           (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(suffix              ): TXCODE_suffix              (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(for_start           ): TXCODE_for_start           (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(for_iter            ): TXCODE_for_iter            (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(add                 ): TXCODE_add                 (aTHX_ st); goto *(st->pc->exec_code);
@@ -521,6 +547,8 @@ tx_runops(pTHX_ tx_state_t* const st) {
     LABEL(builtin_is_array_ref): TXCODE_builtin_is_array_ref(aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_is_hash_ref ): TXCODE_builtin_is_hash_ref (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(builtin_html_escape ): TXCODE_builtin_html_escape (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(is_code_ref         ): TXCODE_is_code_ref         (aTHX_ st); goto *(st->pc->exec_code);
+    LABEL(merge_hash          ): TXCODE_merge_hash          (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(match               ): TXCODE_match               (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(eq                  ): TXCODE_eq                  (aTHX_ st); goto *(st->pc->exec_code);
     LABEL(ne                  ): TXCODE_ne                  (aTHX_ st); goto *(st->pc->exec_code);
