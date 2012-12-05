@@ -6,6 +6,7 @@ use warnings;
 use Fatal qw(open close);
 use Test::More;
 use File::Temp qw(tempdir);
+use File::Spec ();
 use Text::Xslate;
 
 # problems on depend cache
@@ -47,13 +48,14 @@ T
         path      => [$service],
     );
     write_file("$service/main.tx", $content_main);
-    sleep 1; # time goes
+    sleep 2; # time goes
     write_file("$service/base.tx", $content_base);
 
     is $tx->render("main.tx"), $content_base;
     is $tx->render("main.tx"), $content_base;
 
-    is $tx->{_load_source_count}{"$service/main.tx"} => 1;
+    my $path = File::Spec->catfile($service, "main.tx");
+    is $tx->{_load_source_count}{$path} => 1;
 
 }
 

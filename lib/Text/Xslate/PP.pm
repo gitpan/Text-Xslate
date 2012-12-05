@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '1.6000_01';
+our $VERSION = '1.6001';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -572,6 +572,7 @@ sub tx_execute {
     local $st->{sb};
     local $st->{output} = '';
     $st->{code}->[0]->{ exec_code }->( $st );
+    @{$st->{frame}->[-1]} = Text::Xslate::PP::TXframe_START_LVAR - 1;
     return $st->{output};
 }
 
@@ -646,7 +647,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 1.6000_01.
+This document describes Text::Xslate::PP version 1.6001.
 
 =head1 DESCRIPTION
 
