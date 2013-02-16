@@ -28,7 +28,6 @@ no_index:
     - t
     - xt
 requires:
-  Any::Moose: 0.13
   Data::MessagePack: 0.38
   Mouse: 0.61
   Scalar::Util: 1.14
@@ -42,4 +41,4 @@ resources:
   homepage: http://xslate.org/
   license: http://dev.perl.org/licenses/
   repository: https://github.com/xslate/p5-Text-Xslate
-version: 1.6002
+version: 1.9999_01

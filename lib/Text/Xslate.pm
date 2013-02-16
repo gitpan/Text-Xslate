@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '1.6002';
+our $VERSION = '1.9999_01';
 
 use Carp              ();
 use File::Spec        ();
@@ -608,8 +608,8 @@ sub _compiler {
     my $compiler = $self->{compiler};
 
     if(!ref $compiler){
-        require Any::Moose;
-        Any::Moose::load_class($compiler);
+        require Mouse;
+        Mouse::load_class($compiler);
 
         my $input_layer = $self->input_layer;
         $compiler = $compiler->new(
@@ -655,7 +655,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 1.6002.
+This document describes Text::Xslate version 1.9999_01.
 
 =head1 SYNOPSIS
 
