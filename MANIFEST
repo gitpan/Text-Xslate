@@ -292,6 +292,12 @@ t/900_bugs/028_issue68.t
 t/900_bugs/029_fork_and_cache.t
 t/900_bugs/030_issue71.t
 t/900_bugs/031_yappo.t
+t/900_bugs/032_issue79.t
+t/900_bugs/issue79/tmpl/contentA.tt
+t/900_bugs/issue79/tmpl/contentB.tt
+t/900_bugs/issue79/tmpl/wrapperA.tt
+t/900_bugs/issue79/tmpl/wrapperB.tt
+t/900_bugs/issue79/xslate.pl
 t/lib/MyBridge2.pm
 t/lib/Text/Xslate/Syntax/Foo.pm
 t/lib/TTSimple.pm
