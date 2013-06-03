@@ -925,8 +925,10 @@ tx_execute(pTHX_ pMY_CXT_ tx_state_t* const base, SV* const output, HV* const hv
         while(st.current_frame > start) {
             tx_pop_frame(aTHX_ &st, TRUE);
         }
+        tx_pop_frame(aTHX_ base, FALSE); // pushed before tx_execute()
         XCPT_RETHROW;
     }
+    tx_pop_frame(aTHX_ base, FALSE); // pushed before tx_execute()
 
     /* clear temporary buffers */
     sv_setsv(st.targ, NULL);
@@ -1593,7 +1595,6 @@ CODE:
         av_store(mainframe, TXframe_NAME,    SvREFCNT_inc_simple_NN(source));
         av_store(mainframe, TXframe_RETADDR, newSVuv(st->code_len));
         tx_execute(aTHX_ aMY_CXT_ st, result, (HV*)SvRV(vars));
-        tx_pop_frame(aTHX_ st, FALSE);
         ST(0) = result;
     }
 }

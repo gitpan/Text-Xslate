@@ -4,8 +4,6 @@
 
  *********************/
 
-/* vim: set filetype=xs: */
-
 TXC(noop) {
     TX_RETURN_NEXT();
 }
@@ -165,7 +163,6 @@ TXC(include) {
     SAVETMPS;
     tx_push_frame(aTHX_ st);
     tx_execute(aTHX_ aMY_CXT_ st, TX_st->output, TX_st->vars);
-    tx_pop_frame(aTHX_ st, FALSE);
     FREETMPS;
     LEAVE;
 
@@ -753,3 +750,4 @@ TXC(end) {
     //assert(TX_st->current_frame == 0);
 }
 
+/* vim: set filetype=xs: */
