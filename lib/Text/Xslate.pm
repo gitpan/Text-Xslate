@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '2.0007';
+our $VERSION = '2.0008';
 
 use Carp              ();
 use File::Spec        ();
@@ -522,6 +522,10 @@ sub _load_compiled {
                 return undef; # purge the cache
             }
         }
+        elsif($c->[0] eq 'literal') {
+            # force upgrade to avoid UTF-8 key issues
+            utf8::upgrade($c->[1]);
+        }
         push @asm, $c;
     }
 
@@ -657,7 +661,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 2.0007.
+This document describes Text::Xslate version 2.0008.
 
 =head1 SYNOPSIS
 
