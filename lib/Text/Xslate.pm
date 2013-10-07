@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '2.0009';
+our $VERSION = '2.0010';
 
 use Carp              ();
 use File::Spec        ();
@@ -375,10 +375,14 @@ sub load_file {
 sub slurp_template {
     my($self, $input_layer, $fullpath) = @_;
 
-    open my($source), '<' . $input_layer, $fullpath
-        or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
-    local $/;
-    return scalar <$source>;
+    if (ref $fullpath eq 'SCALAR') {
+        return $$fullpath;
+    } else {
+        open my($source), '<' . $input_layer, $fullpath
+            or $self->_error("LoadError: Cannot open $fullpath for reading: $!");
+        local $/;
+        return scalar <$source>;
+    }
 }
 
 sub _load_source {
@@ -661,7 +665,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 2.0009.
+This document describes Text::Xslate version 2.0010.
 
 =head1 SYNOPSIS
 
@@ -778,6 +782,10 @@ Possible options are:
 
 Specifies the include paths, which may be directory names or virtual paths,
 i.e. HASH references which contain C<< $file_name => $content >> pairs.
+
+Note that if you use taint mode (C<-T>), you have to give absolute paths
+to C<path> and C<cache_dir>. Otherwise you'll get errors because they
+depend on the current working directory which might not be secure.
 
 =item C<< cache => $level // 1 >>
 

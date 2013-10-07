@@ -113,7 +113,7 @@ Makefile.PL
 MANIFEST			This list of files
 MANIFEST.SKIP
 META.yml
-README
+README.md
 script/xslate
 src/Text-Xslate.xs
 src/xslate_methods.xs
@@ -156,6 +156,7 @@ t/010_internals/034_is_code_ref.t
 t/010_internals/036_merge_hash.t
 t/010_internals/037_find_file.t
 t/010_internals/038_suffix.t
+t/010_internals/039_taint_issue84.t
 t/010_internals/100_threads.t
 t/010_internals/200_leaktrace.t
 t/010_internals/300_explicit_pp.t
@@ -296,6 +297,7 @@ t/900_bugs/031_yappo.t
 t/900_bugs/032_issue79.t
 t/900_bugs/034_hash_key_utf8.t
 t/900_bugs/035_issue81_tiedhash.t
+t/900_bugs/036_vpath_utf8.t
 t/900_bugs/33_ex_safe_render.t
 t/900_bugs/issue79/tmpl/contentA.tt
 t/900_bugs/issue79/tmpl/contentB.tt
