@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '3.0.0';
+our $VERSION = '3.0.1';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -33,7 +33,7 @@ require Text::Xslate;
 
 my $state_class = 'Text::Xslate::PP::Opcode';
 
-$VERSION =~ s/_//; # for developpers versions
+$VERSION =~ s/_//; # for developers versions
 
 if(_PP_ERROR_VERBOSE) {
     Carp->import('verbose');
@@ -658,7 +658,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 3.0.0.
+This document describes Text::Xslate::PP version 3.0.1.
 
 =head1 DESCRIPTION
 

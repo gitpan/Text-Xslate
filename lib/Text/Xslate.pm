@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '3.0.0';
+our $VERSION = '3.0.1';
 
 use Carp              ();
 use File::Spec        ();
@@ -83,7 +83,7 @@ BEGIN {
     *_DEFAULT_CACHE_DIR = sub() { $cache_dir };
 }
 
-# the real defaults are dfined in the parser
+# the real defaults are defined in the parser
 my %parser_option = (
     line_start => undef,
     tag_start  => undef,
@@ -95,7 +95,7 @@ my %compiler_option = (
     syntax     => undef,
     type       => undef,
     header     => undef, # template augment
-    footer     => undef, # template agument
+    footer     => undef, # template augment
     macro      => undef, # template augment
 );
 
@@ -237,7 +237,7 @@ sub _resolve_function_aliases {
     my($self, $funcs) = @_;
 
     foreach my $f(values %{$funcs}) {
-        my %seen; # to avoid infinate loops
+        my %seen; # to avoid infinite loops
         while(!( ref($f) or Scalar::Util::looks_like_number($f) )) {
             my $v = $funcs->{$f} or $self->_error(
                "Cannot resolve a function alias '$f',"
@@ -661,7 +661,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 3.0.0.
+This document describes Text::Xslate version 3.0.1.
 
 =head1 SYNOPSIS
 
@@ -744,7 +744,7 @@ There are also benchmarks in F<benchmark/> directory in the Xslate distribution.
 =head3 Smart escaping for HTML metacharacters
 
 Xslate employs the B<smart escaping strategy>, where a template engine
-escapes all the HTML metacharacters in template expressionsi unless users
+escapes all the HTML metacharacters in template expressions unless users
 mark values as B<raw>.
 That is, the output is unlikely to prone to XSS.
 
@@ -787,13 +787,13 @@ depend on the current working directory which might not be secure.
 
 Sets the cache level.
 
-If I<$level> == 1 (default), Xslate caches compiled templates on the disk, and
+If C<< $level == 1 >> (default), Xslate caches compiled templates on the disk, and
 checks the freshness of the original templates every time.
 
-If I<$level> E<gt>= 2, caches will be created but the freshness
+If C<< $level >= 2 >>, caches will be created but the freshness
 will not be checked.
 
-I<$level> == 0 uses no caches, which is provided for testing.
+C<< $level == 0 >> uses no caches, which is provided for testing.
 
 =item C<< cache_dir => $dir // "$ENV{HOME}/.xslate_cache" >>
 
@@ -877,7 +877,7 @@ Specifies the verbose level.
 
 If C<< $level == 0 >>, all the possible errors will be ignored.
 
-If C<< $level> >= 1 >> (default), trivial errors (e.g. to print nil) will be ignored,
+If C<< $level >= 1 >> (default), trivial errors (e.g. to print nil) will be ignored,
 but severe errors (e.g. for a method to throw the error) will be warned.
 
 If C<< $level >= 2 >>, all the possible errors will be warned.
@@ -966,6 +966,8 @@ For example:
     );
 
 The first argument is the template text string, which can be both B<text strings> and C<byte strings>.
+
+This filter is applied only to files, not a string template for C<render_string>.
 
 =back
 

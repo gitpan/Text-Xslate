@@ -41,4 +41,4 @@ resources:
   homepage: http://xslate.org/
   license: http://dev.perl.org/licenses/
   repository: https://github.com/xslate/p5-Text-Xslate
-version: 3.0.0
+version: 3.0.1
