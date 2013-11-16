@@ -3,7 +3,7 @@ package Text::Xslate::PP;
 use 5.008_001;
 use strict;
 
-our $VERSION = '3.0.2';
+our $VERSION = '3.1.0';
 
 BEGIN{
     $ENV{XSLATE} = ($ENV{XSLATE} || '') . '[pp]';
@@ -111,6 +111,24 @@ sub render {
     local $SIG{__WARN__}      = \&_warn;
 
     return tx_execute( $st, $vars );
+}
+
+sub validate {
+    my ( $self, $name ) = @_;
+
+    Carp::croak("Usage: Text::Xslate::render(self, name)")
+        if !( @_ == 2 );
+    unless ( ref $self ) {
+        Carp::croak( "Invalid xslate instance" );
+    }
+
+    if ( !defined $name ) {
+        Carp::croak("Xslate: Template name is not given");
+    }
+
+    local $self->{cache} = 0; # do not touch the cache
+    $self->tx_load_template( $name, 0 );
+    return;
 }
 
 sub current_engine {
@@ -658,7 +676,7 @@ Text::Xslate::PP - Yet another Text::Xslate runtime in pure Perl
 
 =head1 VERSION
 
-This document describes Text::Xslate::PP version 3.0.2.
+This document describes Text::Xslate::PP version 3.1.0.
 
 =head1 DESCRIPTION
 
