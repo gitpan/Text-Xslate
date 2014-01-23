@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '3.1.0';
+our $VERSION = '3.1.1';
 
 use Carp              ();
 use File::Spec        ();
@@ -409,8 +409,10 @@ sub _load_source {
         my $cachedir      = File::Spec->catpath($volume, $dir, '');
         if(not -e $cachedir) {
             require File::Path;
-            eval { File::Path::mkpath($cachedir) }
-                or Carp::croak("Xslate: Cannot prepare cache directory $cachepath (ignored): $@");
+            my $created = eval { File::Path::mkpath($cachedir) };
+            if (!$created && ! -e $cachedir) {
+                Carp::croak("Xslate: Cannot prepare cache directory $cachepath (ignored): $@");
+            }
         }
 
         my $tmpfile = sprintf('%s.%d.d', $cachepath, $$, $self);
@@ -661,7 +663,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 3.1.0.
+This document describes Text::Xslate version 3.1.1.
 
 =head1 SYNOPSIS
 
@@ -1024,6 +1026,11 @@ This method is significant when it is called by template functions and methods.
 =head3 B<< Text::Xslate->print(...) :Void >>
 
 Adds the argument into the output buffer. This method is available on executing.
+
+=head3 B<< $tx->validate($file) :Void >>
+
+Checks whether the syntax of I<$file> is valid or invalid as Xslate.
+If it detects the invalid factor, this method throws the exception.
 
 =head2 Exportable functions
 
