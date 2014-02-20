@@ -4,7 +4,7 @@ use 5.008_001;
 use strict;
 use warnings;
 
-our $VERSION = '3.1.1';
+our $VERSION = '3.1.2';
 
 use Carp              ();
 use File::Spec        ();
@@ -409,8 +409,8 @@ sub _load_source {
         my $cachedir      = File::Spec->catpath($volume, $dir, '');
         if(not -e $cachedir) {
             require File::Path;
-            my $created = eval { File::Path::mkpath($cachedir) };
-            if (!$created && ! -e $cachedir) {
+            File::Path::mkpath($cachedir);
+            if (! -e $cachedir) {
                 Carp::croak("Xslate: Cannot prepare cache directory $cachepath (ignored): $@");
             }
         }
@@ -663,7 +663,7 @@ Text::Xslate - Scalable template engine for Perl5
 
 =head1 VERSION
 
-This document describes Text::Xslate version 3.1.1.
+This document describes Text::Xslate version 3.1.2.
 
 =head1 SYNOPSIS
 
